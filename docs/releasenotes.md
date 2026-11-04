@@ -4,6 +4,7 @@
 
 | Tag | MARKETING_VERSION | Build | 日期 | 对齐后端 |
 | --- | --- | --- | --- | --- |
+| `v0.3.5` | 0.3.5 | 9 | 2026-11-05 | 0.3.2 |
 | `v0.3.4` | 0.3.4 | 8 | 2026-11-05 | 0.3.2 |
 | `v0.3.3` | 0.3.3 | 7 | 2026-11-05 | 0.3.2 |
 | `v0.3.2` | 0.3.2 | 6 | 2026-11-05 | 0.3.1 |
@@ -11,6 +12,26 @@
 | `v0.3.0` | 0.3.0 | 4 | 2026-11-05 | 0.3.0 |
 | `v0.2.0` | 0.2.0 | 3 | 2026-11-05 | 0.2.0 |
 | `v0.1.0` | — | 1 | 2026-11-05 | — |
+
+---
+
+## v0.3.5（build 9）
+
+**主题：CI 与 Android 对齐（e2e 入 CI + action 升级）**
+
+### 新增
+- `.github/workflows/ios.yml` 新增并行 job `e2e-contract`：checkout 本仓库 + `platojobs/PJGoIoT`（`path: PJGoIoT`）→ `actions/setup-go@v7`（`go-version-file: PJGoIoT/go.mod`）→ `PJGOIOT_DIR=${{ github.workspace }}/PJGoIoT bash scripts/e2e-contract.sh`；失败时上传 `.build/e2e/` 日志。
+
+### 变更
+- `actions/checkout@v4 → v7`、`actions/upload-artifact@v4 → v7`、`actions/setup-go@v5 → v7`，Node 20 弃用告警消除。
+- `concurrency` 由按 ref 改为按 `github.sha` 分组：同一提交既推 main 又打 tag 时只跑一次，后到运行取消先到运行。
+- `MARKETING_VERSION 0.3.5` / build 9。
+
+### 验证
+- CI run [41906015761](https://github.com/platojobs/codemagic/actions/runs/41906015761)：**success**
+  - `build-test` 4m44s：`** BUILD SUCCEEDED **`、`Executed 74 tests, with 0 failures`、`** TEST SUCCEEDED **`，xcresult artifact 已上传；
+  - `e2e-contract` 约 1m16s：`通过：71 项，失败：0 项`、`结论：PASS`。
+- 本地 `PJGOIOT_DIR=... bash scripts/e2e-contract.sh`：71 项全部 PASS。
 
 ---
 
