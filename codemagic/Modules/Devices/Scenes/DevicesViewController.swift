@@ -223,7 +223,10 @@ extension DevicesViewController: UITableViewDelegate {
         tableView.deselectRow(at: indexPath, animated: true)
         guard indexPath.section == Section.devices.rawValue,
               !viewModel.devices.isEmpty else { return }
-        openDetail(for: viewModel.devices[indexPath.row])
+        let device = viewModel.devices[indexPath.row]
+        // 跨平台拉回的设备没有本机 CoreBluetooth 标识，禁用连接入口。
+        guard device.isConnectable else { return }
+        openDetail(for: device)
     }
 
     func tableView(

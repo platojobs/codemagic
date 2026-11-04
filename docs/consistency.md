@@ -4,7 +4,7 @@
 
 - Android 侧口径以 `PKotlinApp/README.md` 与 `PJGoIoT/api/openapi.yaml` 为准。
 - iOS 侧以本仓库 `README.md`、`docs/architecture.md` 为准。
-- 后端 `openapi.yaml` 已存在（`PJGoIoT/api/openapi.yaml`，版本 **0.2.0**）。iOS v0.2.0 已按该契约实现匿名登录、增量同步、批量推送与型号元数据；仅产品 / 市场仍沿用客户端历史端点（见 3.4）。
+- 后端 `openapi.yaml` 当前标注版本 **0.2.0**（本地 `PJGoIoT` HEAD `87391d8`，仓库仅有 `v0.1.0` / `v0.2.0` tag）。iOS v0.3.0 属于**版本号对齐**（`MARKETING_VERSION 0.3.0`，build 4），同步契约未变；本轮端到端联调以运行中的 fixture 服务实际行为为准（见 3.5）。
 
 ---
 
@@ -38,6 +38,8 @@ iOS 设备详情页独立于底部导航：`Modules/Devices/Scenes/DeviceDetailV
 
 规则/日志/最近设备均为本地数据，**不依赖网络**；断网时首页、设备、我的仍可用，同步进入降级状态并保留待上传记录。
 
+跨平台设备（从服务端拉回、`platform = android`）只在本机占位展示：列表会标注「来自 Android，本机不可连接」并禁用连接入口，不进入设备详情。只有本机扫描得到的 `platform = ios` 设备可通过 CoreBluetooth 连接。
+
 ---
 
 ## 3. 网络端点与字段命名规则
@@ -53,6 +55,8 @@ iOS 设备详情页独立于底部导航：`Modules/Devices/Scenes/DeviceDetailV
 | 型号元数据 | `GET /api/v1/device-types/{type}` | `GET /api/v1/device-types/{type}` | iOS 不依赖 MAC |
 | 增量拉取 | `GET /api/v1/sync/changes?cursor=&limit=` | 同左 | 返回 `{changes[], nextCursor, hasMore}` |
 | 批量推送 | `POST /api/v1/sync/push` | 同左 | 批量 + `Idempotency-Key` |
+| 用户设备列表 | `GET /api/v1/my/devices` | — | iOS App 未使用（拉取走 `sync/changes`）；仅 E2E 校验鉴权 |
+| 用户设备详情 | `GET /api/v1/my/devices/{mac}` | — | 需要 MAC；iOS 本机设备拿不到 MAC，仅 E2E 用同步设备校验越权 404 |
 
 Base URL 均由构建配置注入，**不写死在源码**：
 
@@ -92,28 +96,45 @@ compatibility
 
 - 服务端设备唯一键为 **`(user_id, platform, external_id)`**，与 MAC 无关。
 - iOS `platform = "ios"`，`externalId = CBPeripheral.identifier.uuidString`（**统一大写**）；`mac` 允许为空。
-- Android `platform = "android"`、`externalId` 使用 MAC（大写）。
+- Android `platform = "android"`、`externalId` 必须为 MAC（规范化为**大写**、冒号分隔）；未传时由 `mac` 派生，`mac` 与 `externalId` 不一致返回 400。
+- 服务端只做大小写规范化，不改写格式：iOS 的 `externalId` 必须是 UUID，Android 的必须是 6 字节 MAC，否则 400 `INVALID_MAC` / `BAD_REQUEST`。
 - 设备表同时保留本机 `peripheral_id`（CoreBluetooth 标识）与服务端键 `platform + external_id`；迁移 v2 由 `peripheral_id` 回填 `external_id`。
 - iOS 的型号元数据查询使用 `GET /api/v1/device-types/{type}`，不依赖 MAC。
+- `PushDevice` / `UserDevice` **没有 `model` / `type` 字段**：同一型号或同一台实体设备只能用 `alias`、`group` 与可选 `mac` 元数据表达。iOS 与 Android 即使 `mac` 相同，也按 `platform` 分为两条独立记录（键为 `(platform, externalId)`）。
+- 拉回的 Android 设备保留 `mac` 但没有可用的 `CBPeripheral.identifier`，因此 iOS 列表标注「来自 Android，本机不可连接」并禁用连接。
 
 ### 3.4 与 `openapi.yaml` 的对齐状态
 
-`PJGoIoT/api/openapi.yaml`（v0.2.0）提供 `POST /auth/anonymous`、`GET /sync/changes`、`POST /sync/push`、`GET /device-types/{type}` 等。对齐结果：
+`PJGoIoT/api/openapi.yaml`（当前标注 v0.2.0）提供 `POST /auth/anonymous`、`GET /sync/changes`、`POST /sync/push`、`GET /device-types/{type}` 等。逐项核对结果：
 
 | 项 | 状态 |
 | --- | --- |
-| `platform` / `externalId` 设备唯一键 | **已对齐**：iOS 迁移 v2 已补齐字段并参与推送 |
+| `platform` / `externalId` 设备唯一键 | **已对齐**：iOS 迁移 v2 已补齐字段并参与推送；E2E 校验双平台形状与大写规范化 |
 | `POST /api/v1/auth/anonymous` + Bearer token | **已对齐**：token 存 Keychain，`Authorization: Bearer <token>` |
 | `GET /api/v1/sync/changes` 游标分页 | **已对齐**：`cursor` 持久化，`hasMore` 循环拉取（最多 10 页） |
-| `POST /api/v1/sync/push` + `Idempotency-Key` | **已对齐**：幂等键由批次内容哈希得到，重试复用 |
-| 冲突 `conflicts[].reason`（`server_newer` / `clock_clamped` / `key_taken`） | **已对齐**：服务端获胜并提示「另一台设备改过这条」 |
+| `POST /api/v1/sync/push` + `Idempotency-Key` | **已对齐**：幂等键由批次内容哈希得到，重试复用；E2E 校验重放返回 `Idempotent-Replayed: true` 且不产生重复变更 |
+| 冲突 `conflicts[].reason`（`server_newer` / `clock_clamped` / `key_taken`） | **已对齐**：服务端获胜并提示「另一台设备改过这条」；E2E 校验旧版本 push 返回 `server_newer` 且服务端数据未被覆盖 |
 | `deleted` / `deletedAt` tombstone | **已对齐**：软删除上传 `deleted: true`，拉取删除写本地 tombstone |
-| 错误体 `{"error":{"code","message"}}` | **已对齐**：客户端解析为 `AppError.api`，保留服务端 code |
-| `GET /api/v1/device-types/{type}` | **已对齐**：`SyncAPIClient.fetchDeviceType` |
-| 产品 / 市场列表 | **仍为历史端点** `api/products` / `api/market`；openapi 按设备类型拆分 `firmwares` / `accessories`，客户端未切换 |
-| 设备详情 | **仍为历史端点** `api/device/{peripheralUUID}`（iOS 无 MAC）；openapi 公共元数据为 `/api/v1/devices/{mac}` |
+| 错误体 `{"error":{"code","message"}}` | **已对齐**：客户端解析为 `AppError.api`，保留服务端 code；错误码枚举见第 4 节 |
+| `GET /api/v1/device-types/{type}` | **已对齐**：`SyncAPIClient.fetchDeviceType`；但设备详情尚未切换到该端点 |
+| `GET /api/v1/my/devices` / `GET /api/v1/my/devices/{mac}` | **未使用**：App 拉取走 `sync/changes`；`{mac}` 需要 MAC，iOS 本机设备拿不到，仅 E2E 用同步设备验证 401/404 |
+| 产品 / 市场列表 | **仍为历史端点** `api/products` / `api/market`；openapi 只有按设备类型拆分的 `device-types/{type}/firmwares` / `accessories`，没有与现有聚合列表一一对应的端点，客户端未切换 |
+| 设备详情 | **仍为历史端点** `api/device/{peripheralUUID}`；openapi 公共元数据为 `/api/v1/devices/{mac}`，需要 MAC，而 iOS 本机设备只有 `CBPeripheral.identifier`。该端点本轮无法在不改变产品语义的前提下对齐 |
 
-未对齐的两项不影响五模块功能与同步主链路，后续切换时只需改 `ProductAPIClient` 的路径与 DTO，不影响本地表结构。
+仍为历史端点的三项（产品 / 市场 / 设备详情）不影响五模块功能与同步主链路，后续切换时只需改 `ProductAPIClient` 的路径与 DTO，不影响本地表结构。
+
+### 3.5 端到端契约联调（本地 fixture，默认不进 CI）
+
+`scripts/e2e-contract.sh` 从 `../PJGoIoT` 构建并以 `STORE=fixture` 启动服务（优先 8080，被占用则 18080），健康检查 200 后运行 `scripts/e2e-contract.swift`（独立 Swift 可执行程序，真实 URLSession 直连 localhost，不走模拟器）。断言覆盖：
+
+- 匿名登录取得 `token`；
+- 同一台实体设备分别以 `platform=ios`（`externalId` 大写 UUID）与 `platform=android`（`externalId` 大写 MAC）推送，两条记录共享 `mac` / `alias` / `group`；
+- `changes` 拉回 `platform` / `externalId` / `mac` 形状；
+- 相同 `Idempotency-Key` 重放返回 `Idempotent-Replayed: true`，不新增变更；
+- 旧 `updatedAt` 推送触发 `server_newer` 冲突，服务端保留较新版本；
+- 无 token 返回 401 `UNAUTHORIZED`；第二用户访问他人设备返回 404 `NOT_FOUND`。
+
+运行记录见 `README.md` 第 4.2 节；该脚本依赖本地 Go 服务，**不纳入 Codemagic CI**。
 
 ---
 
@@ -131,11 +152,16 @@ compatibility
 | `BT-004` | 蓝牙前置条件不满足（不支持/未授权/已关闭/连接失败） | BLE 调用异常 | `CBManager` 状态异常 |
 | `SYNC-001` | 同步流程前置条件不满足（如并发触发） | — | 上一次同步尚未结束 |
 
-后端 `openapi.yaml` 的错误体为 `{"error":{"code":"...","message":"..."}}`，错误码（`BAD_REQUEST`、`UNAUTHORIZED`、`NOT_FOUND`、`CONFLICT`、`RATE_LIMITED`、`IDEMPOTENCY_KEY_REUSED` 等）由客户端 `SyncAPIClient` 解析：
+后端 `openapi.yaml` 的错误体为 `{"error":{"code":"...","message":"..."}}`，完整枚举（与 `PJGoIoT/internal/httpapi/errors.go` 一致）：
+
+`BAD_REQUEST`、`INVALID_MAC`、`INVALID_JSON`、`UNAUTHORIZED`、`NOT_FOUND`、`METHOD_NOT_ALLOWED`、`CONFLICT`、`IDEMPOTENCY_CONFLICT`、`RATE_LIMITED`、`PAYLOAD_TOO_LARGE`、`NOT_IMPLEMENTED`、`UNAVAILABLE`、`INTERNAL`。
+
+客户端 `SyncAPIClient` 统一解析为 `AppError.api`：
 
 - 客户端错误码仍为 `NET-002`，便于两端统一统计；
-- 展示与日志中同时保留服务端 `code` 与 `message`（如 `NET-002 RATE_LIMITED too many requests`）；
-- 401 表示匿名 token 失效，重新匿名登录后重试。
+- 展示与日志中同时保留服务端 `code` 与 `message`（如 `NET-002 RATE_LIMITED 请求过于频繁`）；
+- 同一 `Idempotency-Key` 用于不同请求体时返回 409 `IDEMPOTENCY_CONFLICT`（不是 `IDEMPOTENCY_KEY_REUSED`）；
+- 401 表示匿名 token 失效。**当前实现不会自动重新匿名登录**，避免匿名账号漂移导致设备归属变化；同步失败并保留待上传记录，需人工清理 Keychain token 后才会创建新账号。此为已知行为差异，见 `KNOWN_ISSUES.md`。
 
 ---
 
@@ -217,7 +243,7 @@ iOS 表结构（`codemagic.sqlite`）：
 - **RSSI 低于阈值**：低于或等于阈值触发一次，恢复后重新武装。
 - 规则触发写本地日志；不做系统级通知（两端均未实现推送）。
 
-### 7.1 同步行为（v0.2.0，与 openapi 对齐）
+### 7.1 同步行为（v0.2.0 起，与 openapi 对齐）
 
 **身份与鉴权**
 

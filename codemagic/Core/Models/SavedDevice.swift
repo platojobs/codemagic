@@ -65,6 +65,24 @@ struct SavedDevice: Identifiable, Equatable {
     /// 服务端唯一键的本地拼写，仅用于日志与断言。
     var syncKey: String { "\(platform):\(externalID)" }
 
+    /// 只有本机扫描得到的 iOS 设备有可用的 `CBPeripheral.identifier`，可直接连接。
+    /// 从服务端拉回的 Android 设备只在本机占位展示，无法通过 CoreBluetooth 连接。
+    var isConnectable: Bool { platform == SavedDevice.iosPlatform }
+
+    /// 跨平台设备的展示文案；本机可连接时为 nil。
+    var connectUnavailableText: String? {
+        guard !isConnectable else { return nil }
+        return "来自 \(platformDisplayName)，本机不可连接"
+    }
+
+    var platformDisplayName: String {
+        switch platform {
+        case SavedDevice.iosPlatform: return "iOS"
+        case "android": return "Android"
+        default: return platform
+        }
+    }
+
     /// 同步别名：优先备注名，其次广播名，长度受后端限制（100）。
     var syncAlias: String {
         String(displayName.prefix(100))

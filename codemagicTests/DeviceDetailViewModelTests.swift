@@ -107,6 +107,21 @@ final class DeviceDetailViewModelTests: XCTestCase {
         XCTAssertNil(bluetooth.connectionHandler)
     }
 
+    func testAndroidDeviceSkipsBluetoothAndShowsUnavailableNotice() throws {
+        var device = makeSavedDevice(name: "安卓同步设备")
+        device.platform = "android"
+        device.externalID = "AA:BB:CC:DD:EE:01"
+        let viewModel = try makeViewModel(device: device)
+
+        viewModel.start()
+
+        XCTAssertTrue(bluetooth.connectedPeripheralIDs.isEmpty)
+        XCTAssertEqual(viewModel.state, .idle)
+        XCTAssertEqual(viewModel.notice, "来自 Android，本机不可连接")
+        XCTAssertEqual(device.isConnectable, false)
+        XCTAssertNil(makeSavedDevice().connectUnavailableText)
+    }
+
     func testBluetoothUnavailableStillReadsNetwork() throws {
         let device = makeSavedDevice()
         productService.deviceInfoResult = .success(makeProduct(vendor: "云端厂商"))

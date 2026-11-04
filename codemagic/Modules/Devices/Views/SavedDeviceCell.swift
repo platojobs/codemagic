@@ -7,6 +7,7 @@ final class SavedDeviceCell: UITableViewCell {
     private let nameLabel = AppTheme.makeLabel(style: .headline, color: AppTheme.Palette.primaryText)
     private let metaLabel = AppTheme.makeLabel(style: .caption1, color: AppTheme.Palette.secondaryText)
     private let detailLabel = AppTheme.makeLabel(style: .caption2, color: AppTheme.Palette.tertiaryText)
+    private let platformNoteLabel = AppTheme.makeLabel(style: .caption2, color: AppTheme.Palette.highlight)
     private let textStack = UIStackView()
 
     override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
@@ -40,6 +41,18 @@ final class SavedDeviceCell: UITableViewCell {
             detailParts.append("尚未读取厂商信息")
         }
         detailLabel.text = detailParts.joined(separator: " · ")
+
+        if let note = device.connectUnavailableText {
+            platformNoteLabel.text = note
+            platformNoteLabel.isHidden = false
+            accessoryType = .none
+            selectionStyle = .none
+        } else {
+            platformNoteLabel.text = nil
+            platformNoteLabel.isHidden = true
+            accessoryType = .disclosureIndicator
+            selectionStyle = .default
+        }
     }
 
     private func configureHierarchy() {
@@ -49,6 +62,7 @@ final class SavedDeviceCell: UITableViewCell {
         textStack.addArrangedSubview(nameLabel)
         textStack.addArrangedSubview(metaLabel)
         textStack.addArrangedSubview(detailLabel)
+        textStack.addArrangedSubview(platformNoteLabel)
         contentView.addSubview(textStack)
 
         NSLayoutConstraint.activate([

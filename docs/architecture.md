@@ -42,7 +42,8 @@ codemagic/
 Config/
 ├── Debug.xcconfig              # BASE_URL → 本地 Go 服务
 └── Release.xcconfig            # BASE_URL → 线上（当前为与 Android 共用的 mock）
-codemagicTests/                 # XCTest 单元测试（62 个用例）
+codemagicTests/                 # XCTest 单元测试（63 个用例）
+scripts/                        # e2e-contract.sh + 独立 Swift 联调 runner（不进 CI）
 docs/
 ├── architecture.md             # 本文件
 └── consistency.md              # Android/iOS 共用行为说明
@@ -105,7 +106,7 @@ CoreBluetoothService.discoveryHandler
 - `ProductAPIClient`：`GET api/products`、`GET api/market`、`GET api/device/{peripheralUUID}`；Codable 宽松解码，兼容响应包裹与裸数组。
 - `AppError` 统一错误码：`NET-001` / `NET-002` / `NET-003` / `NET-004` / `DB-001` / `BT-004` / `SYNC-001`。
 
-### 6.1 同步（v0.2.0）
+### 6.1 同步（v0.2.0 起）
 
 ```
 场景回到前台 → SyncCoordinator.syncOnForeground（120s 节流）
@@ -126,6 +127,8 @@ SyncEngine
 - token 仅存 Keychain；游标 / userId / clientId 存 UserDefaults（非凭据）。
 - 同步状态通过 `SyncEngine.onChange` 推给「我的」页，失败时保留 pending 并展示错误码与降级说明。
 - 后台任务标识 `com.platojobs.codemagic.sync` 已在 `Info.plist` 的 `BGTaskSchedulerPermittedIdentifiers` 声明。
+- 契约联调：`scripts/e2e-contract.sh` 启动本地 `PJGoIoT`（`STORE=fixture`）并运行独立 Swift runner，真实网络覆盖匿名登录、双平台推送、幂等重放、LWW 冲突与 401/404；默认不进 CI。
+- 跨平台设备：`SavedDevice.isConnectable` 仅在 `platform == "ios"` 时为真；Android 设备在列表标注不可连接并禁用入口。
 
 ## 7. 持久化（SQLite）
 

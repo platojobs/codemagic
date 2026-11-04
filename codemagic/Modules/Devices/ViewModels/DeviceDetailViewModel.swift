@@ -47,6 +47,11 @@ final class DeviceDetailViewModel {
         guard !hasStarted else { return }
         hasStarted = true
 
+        guard device.isConnectable else {
+            notice = device.connectUnavailableText
+            return
+        }
+
         bluetooth.connectionHandler = { [weak self] event in
             self?.handle(event)
         }
@@ -70,6 +75,10 @@ final class DeviceDetailViewModel {
 
     func retry() {
         notice = nil
+        guard device.isConnectable else {
+            notice = device.connectUnavailableText
+            return
+        }
         guard bluetooth.state == .poweredOn else {
             notice = "蓝牙不可用（\(bluetooth.state.title)），已直接读取设备信息"
             fetchInfo()
