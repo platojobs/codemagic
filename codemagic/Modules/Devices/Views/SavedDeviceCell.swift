@@ -1,0 +1,70 @@
+import UIKit
+
+/// 已保存设备行：展示名、分组、最后出现时间与厂商/固件信息。
+final class SavedDeviceCell: UITableViewCell {
+    static let reuseIdentifier = "SavedDeviceCell"
+
+    private let nameLabel = AppTheme.makeLabel(style: .headline, color: AppTheme.Palette.primaryText)
+    private let metaLabel = AppTheme.makeLabel(style: .caption1, color: AppTheme.Palette.secondaryText)
+    private let detailLabel = AppTheme.makeLabel(style: .caption2, color: AppTheme.Palette.tertiaryText)
+    private let textStack = UIStackView()
+
+    override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
+        super.init(style: style, reuseIdentifier: reuseIdentifier)
+        accessoryType = .disclosureIndicator
+        configureHierarchy()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    func configure(device: SavedDevice) {
+        nameLabel.text = device.displayName
+
+        var metaParts = [device.groupName]
+        metaParts.append(
+            device.lastSeenAt.map { "最近出现 \(AppDateFormat.relative($0))" } ?? "尚无扫描记录"
+        )
+        metaLabel.text = metaParts.joined(separator: " · ")
+
+        var detailParts: [String] = []
+        if let vendor = device.vendor, !vendor.isEmpty {
+            detailParts.append(vendor)
+        }
+        if let firmware = device.firmwareVersion, !firmware.isEmpty {
+            detailParts.append("固件 \(firmware)")
+        }
+        if detailParts.isEmpty {
+            detailParts.append("尚未读取厂商信息")
+        }
+        detailLabel.text = detailParts.joined(separator: " · ")
+    }
+
+    private func configureHierarchy() {
+        textStack.axis = .vertical
+        textStack.spacing = 2
+        textStack.translatesAutoresizingMaskIntoConstraints = false
+        textStack.addArrangedSubview(nameLabel)
+        textStack.addArrangedSubview(metaLabel)
+        textStack.addArrangedSubview(detailLabel)
+        contentView.addSubview(textStack)
+
+        NSLayoutConstraint.activate([
+            textStack.leadingAnchor.constraint(
+                equalTo: contentView.leadingAnchor,
+                constant: AppTheme.Metrics.contentMargins
+            ),
+            textStack.trailingAnchor.constraint(
+                equalTo: contentView.trailingAnchor,
+                constant: -AppTheme.Spacing.small
+            ),
+            textStack.topAnchor.constraint(equalTo: contentView.topAnchor, constant: AppTheme.Spacing.medium),
+            textStack.bottomAnchor.constraint(
+                equalTo: contentView.bottomAnchor,
+                constant: -AppTheme.Spacing.medium
+            ),
+        ])
+    }
+}

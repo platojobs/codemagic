@@ -1,0 +1,62 @@
+# Codemagic CI：iOS 构建 + 单元测试
+# 运行环境：macOS（Codemagic mac_mini_m2 实例）+ Xcode 16.4
+# 不依赖签名证书（CODE_SIGNING_ALLOWED=NO），产物为模拟器 .app 与 .xcresult。
+
+workflows:
+  ios-verify:
+    name: iOS Build & Test
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+
+    environment:
+      xcode: 16.4
+      vars:
+        SCHEME: codemagic
+        PROJECT: codemagic.xcodeproj
+        DERIVED_DATA: build/ios
+
+    scripts:
+      - name: Show Xcode version
+        script: |
+          xcodebuild -version
+          sw_vers
+
+      - name: List schemes
+        script: |
+          xcodebuild -project "$PROJECT" -list
+
+      - name: Build for iOS Simulator
+        script: |
+          xcodebuild \
+            -project "$PROJECT" \
+            -scheme "$SCHEME" \
+            -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$DERIVED_DATA" \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Run unit tests
+        script: |
+          xcodebuild \
+            -project "$PROJECT" \
+            -scheme "$SCHEME" \
+            -destination 'platform=iOS Simulator,name=iPhone 16' \
+            -derivedDataPath "$DERIVED_DATA" \
+            CODE_SIGNING_ALLOWED=NO \
+            test
+
+      - name: Package simulator app
+        script: |
+          mkdir -p artifacts
+          APP_PATH="$DERIVED_DATA/Build/Products/Debug-iphonesimulator/codemagic.app"
+          if [ -d "$APP_PATH" ]; then
+            ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" artifacts/codemagic-simulator-app.zip
+          else
+            echo "App bundle not found at $APP_PATH"
+            exit 1
+          fi
+
+    artifacts:
+      - artifacts/codemagic-simulator-app.zip
+      - build/ios/Logs/Test/*.xcresult

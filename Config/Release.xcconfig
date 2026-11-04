@@ -1,0 +1,4 @@
+// Release 环境：线上服务地址（当前复用 Android 端同一份联调 mock）。
+// 该 mock 由 Quickmock.dev 提供，任意路径返回同一份组合 JSON，预计 2026-12-04 到期；
+// 正式域名确定后只改这一行，不需要修改任何 Swift 源码。
+BASE_URL = https:/$()/quickmock.dev/m/ecHT7ex3yQPA/

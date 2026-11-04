@@ -117,3 +117,16 @@ app.*.symbols
 !**/ios/**/default.perspectivev3
 !/packages/flutter_tools/test/data/dart_dependencies_test/**/.packages
 !/dev/ci/**/Gemfile.lock
+
+# iOS / Xcode（本仓库为原生 UIKit 工程）
+.build/
+DerivedData/
+*.xcresult
+*.xcuserstate
+.xcuserdata/
+xcuserdata/
+.DS_Store
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM.zip
