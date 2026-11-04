@@ -277,6 +277,49 @@ private func run() -> Int32 {
     let upsertOps = changes.filter { text($0, "op") == "upsert" }
     report.check(upsertOps.count >= 2, "变更操作为 upsert", "ops=\(changes.map { text($0, "op") })")
 
+    // MARK: 3.5 型号 catalog 与复合键详情
+
+    report.section("3.5 device-types/catalog 与 my/devices/{platform}/{externalId}")
+    let typesResponse = client.request("GET", "device-types")
+    let typesObject = jsonObject(typesResponse.body) ?? [:]
+    let deviceTypes = list(typesObject["items"])
+    report.check(typesResponse.status == 200, "device-types 返回 200", "status=\(typesResponse.status)")
+    report.check(!deviceTypes.isEmpty, "device-types 列表非空", "count=\(deviceTypes.count)")
+
+    var catalogOK = 0
+    var totalFirmwares = 0
+    var totalAccessories = 0
+    var firstTypeKey = ""
+    for deviceType in deviceTypes.prefix(10) {
+        let typeKey = text(deviceType, "type")
+        if firstTypeKey.isEmpty { firstTypeKey = typeKey }
+        let catalogResponse = client.request("GET", "device-types/\(typeKey)/catalog")
+        let catalogObject = jsonObject(catalogResponse.body) ?? [:]
+        let catalogType = catalogObject["deviceType"] as? [String: Any] ?? [:]
+        let catalogFirmwares = list(catalogObject["firmwares"])
+        let catalogAccessories = list(catalogObject["accessories"])
+        if catalogResponse.status == 200, text(catalogType, "type") == typeKey {
+            catalogOK += 1
+            totalFirmwares += catalogFirmwares.count
+            totalAccessories += catalogAccessories.count
+        }
+    }
+    report.check(catalogOK == deviceTypes.prefix(10).count, "所有 catalog 返回 200 且 type 一致", "ok=\(catalogOK)/\(deviceTypes.prefix(10).count)")
+    report.check(totalFirmwares > 0, "catalog 聚合含固件", "firmwares=\(totalFirmwares)")
+    report.check(totalAccessories > 0, "catalog 聚合含配件", "accessories=\(totalAccessories)")
+    report.check(
+        catalogOK > 0,
+        "catalog 示例型号可解析",
+        "firstType=\(firstTypeKey)"
+    )
+
+    let compositeDevice = client.request("GET", "my/devices/ios/\(iosExternalID)", token: tokenA)
+    let compositeObject = jsonObject(compositeDevice.body) ?? [:]
+    report.check(compositeDevice.status == 200, "iOS 复合键详情返回 200", "status=\(compositeDevice.status)")
+    report.check(text(compositeObject, "platform") == "ios", "复合键详情 platform=ios")
+    report.check(text(compositeObject, "externalId") == iosExternalID, "复合键详情 externalId 为大写 UUID")
+    report.check(text(compositeObject, "id") == iosID, "复合键详情 id 与推送一致")
+
     // MARK: 4. 幂等重放
 
     report.section("4. 同 Idempotency-Key 重放")
@@ -357,8 +400,12 @@ private func run() -> Int32 {
         report.check(otherList.status == 200 && otherItems.isEmpty, "新用户设备列表为空", "status=\(otherList.status) items=\(otherItems.count)")
 
         let crossUser = client.request("GET", "my/devices/\(macPath)", token: tokenB)
-        report.check(crossUser.status == 404, "跨用户查询返回 404", "status=\(crossUser.status)")
+        report.check(crossUser.status == 404, "跨用户按 MAC 查询返回 404", "status=\(crossUser.status)")
         report.check(errorCode(crossUser.body) == "NOT_FOUND", "错误码为 NOT_FOUND", "code=\(errorCode(crossUser.body))")
+
+        let crossUserComposite = client.request("GET", "my/devices/ios/\(iosExternalID)", token: tokenB)
+        report.check(crossUserComposite.status == 404, "跨用户按复合键查询返回 404", "status=\(crossUserComposite.status)")
+        report.check(errorCode(crossUserComposite.body) == "NOT_FOUND", "复合键错误码为 NOT_FOUND")
     }
 
     // MARK: 汇总

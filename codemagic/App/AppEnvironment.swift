@@ -48,9 +48,9 @@ final class AppEnvironment {
 
         if let configuration = try? APIConfiguration.fromBundle() {
             apiConfiguration = configuration
-            productService = ProductAPIClient(configuration: configuration)
-            syncMetadataStore = SyncMetadataStore()
             tokenStore = KeychainTokenStore()
+            productService = ProductAPIClient(configuration: configuration, tokenStore: tokenStore)
+            syncMetadataStore = SyncMetadataStore()
             syncEngine = SyncEngine(
                 api: SyncAPIClient(configuration: configuration),
                 tokenStore: tokenStore,
