@@ -320,8 +320,8 @@ final class NetworkingTests: XCTestCase {
             platform: "ios",
             externalID: "UUID-1",
             mac: nil,
-            alias: "设备",
-            group: "未分组",
+            alias: .set("设备"),
+            group: .set("未分组"),
             updatedAt: Date(timeIntervalSince1970: 1_700_000_000),
             deleted: false,
             deviceType: "tracker"
@@ -337,8 +337,8 @@ final class NetworkingTests: XCTestCase {
             platform: "ios",
             externalID: "UUID-2",
             mac: nil,
-            alias: "设备",
-            group: "未分组",
+            alias: .set("设备"),
+            group: .set("未分组"),
             updatedAt: Date(timeIntervalSince1970: 1_700_000_000),
             deleted: false,
             deviceType: "   "

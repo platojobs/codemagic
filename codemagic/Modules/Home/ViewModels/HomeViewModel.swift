@@ -154,11 +154,12 @@ final class HomeViewModel {
         let now = Date()
         let device = SavedDevice(
             peripheralID: row.peripheralID,
-            name: row.name,
+            advertisedName: row.name,
             groupName: SavedDevice.defaultGroupName,
             lastSeenAt: row.lastSeenAt,
             createdAt: now,
-            updatedAt: now
+            updatedAt: now,
+            advertisedNamePatch: .set(row.name)
         )
         do {
             try savedDeviceStore.upsert(device)
@@ -167,7 +168,7 @@ final class HomeViewModel {
                 live.isSaved = true
                 liveDevices[row.peripheralID] = live
             }
-            recordLog(category: .device, message: "保存设备「\(device.name)」")
+            recordLog(category: .device, message: "保存设备「\(device.displayName)」")
             rebuildRows()
         } catch {
             lastError = .database("保存设备失败：\(error)")
@@ -264,6 +265,12 @@ final class HomeViewModel {
         }
         var device = savedDevices[index]
         device.lastSeenAt = scanned.lastSeenAt
+        // 扫描只更新广播名，绝不触碰用户别名 / 分组；三态保持已有的待上报状态。
+        let name = scanned.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !name.isEmpty && name != device.advertisedName {
+            device.advertisedName = name
+            device.advertisedNamePatch = .set(name)
+        }
         device.updatedAt = scanned.lastSeenAt
         device.syncState = .pending
         savedDevices[index] = device

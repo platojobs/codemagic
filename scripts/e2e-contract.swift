@@ -138,8 +138,9 @@ private func madeDevice(
     platform: String,
     externalID: String,
     mac: String?,
-    alias: String,
-    group: String,
+    alias: String? = nil,
+    group: String? = nil,
+    advertisedName: String? = nil,
     updatedAt: Date,
     deleted: Bool = false,
     deviceType: String? = nil
@@ -148,13 +149,15 @@ private func madeDevice(
         "id": id,
         "platform": platform,
         "externalId": externalID,
-        "alias": alias,
-        "group": group,
         "rules": [:],
         "scanRecords": [],
         "updatedAt": rfc3339(updatedAt),
         "deleted": deleted,
     ]
+    // nil 表示未上报（字段省略），"" 表示显式清除；两者语义不同。
+    if let alias { device["alias"] = alias }
+    if let group { device["group"] = group }
+    if let advertisedName { device["advertisedName"] = advertisedName }
     if let mac {
         device["mac"] = mac
     }
@@ -451,6 +454,185 @@ private func run() -> Int32 {
         text(unknownObject, "group") == "e2e-metadata",
         "未注册型号仍返回 group",
         "group=\(text(unknownObject, "group"))"
+    )
+
+    // MARK: 3.7 别名 / 广播名分离与分组三态 (openapi 0.3.3)
+
+    report.section("3.7 advertisedName / alias 隔离与 group 三态")
+    let separationID = "55555555-5555-4555-8555-555555555555"
+    let separationExternalID = separationID.uppercased()
+    let separationMAC = "AA:BB:CC:DD:EE:03"
+    let separationStart = Date(timeIntervalSinceNow: -40)
+    func separationDetail() -> [String: Any] {
+        let response = client.request(
+            "GET",
+            "my/devices/ios/\(separationExternalID)",
+            token: tokenA
+        )
+        return jsonObject(response.body) ?? [:]
+    }
+    func pushSeparation(_ device: [String: Any], key: String) -> HTTPResult {
+        client.request(
+            "POST",
+            "sync/push",
+            token: tokenA,
+            idempotencyKey: "\(idempotencyKey)-\(key)",
+            json: ["clientId": clientID, "devices": [device]]
+        )
+    }
+
+    // 1) 扫描只上报 advertisedName，不带 alias / group。
+    let scanPush = pushSeparation(
+        madeDevice(
+            id: separationID,
+            platform: "ios",
+            externalID: separationExternalID,
+            mac: separationMAC,
+            advertisedName: "PJ-Sensor",
+            updatedAt: separationStart
+        ),
+        key: "scan"
+    )
+    report.check(scanPush.status == 200, "扫描上报返回 200", "status=\(scanPush.status)")
+    report.check(
+        list((jsonObject(scanPush.body) ?? [:])["conflicts"]).isEmpty,
+        "扫描上报无冲突"
+    )
+    let afterScan = separationDetail()
+    report.check(
+        text(afterScan, "advertisedName") == "PJ-Sensor",
+        "服务端保存广播名",
+        "advertisedName=\(text(afterScan, "advertisedName"))"
+    )
+    report.check(
+        text(afterScan, "alias") == "",
+        "扫描未上报时 alias 保持空串（不编造别名）",
+        "alias=\(text(afterScan, "alias"))"
+    )
+
+    // 2) 用户编辑只上报 alias，广播名必须保留。
+    let aliasPush = pushSeparation(
+        madeDevice(
+            id: separationID,
+            platform: "ios",
+            externalID: separationExternalID,
+            mac: separationMAC,
+            alias: "客厅传感器",
+            updatedAt: separationStart.addingTimeInterval(10)
+        ),
+        key: "alias"
+    )
+    report.check(aliasPush.status == 200, "别名上报返回 200", "status=\(aliasPush.status)")
+    let afterAlias = separationDetail()
+    report.check(
+        text(afterAlias, "alias") == "客厅传感器",
+        "服务端保存别名",
+        "alias=\(text(afterAlias, "alias"))"
+    )
+    report.check(
+        text(afterAlias, "advertisedName") == "PJ-Sensor",
+        "编辑别名不覆盖广播名",
+        "advertisedName=\(text(afterAlias, "advertisedName"))"
+    )
+
+    // 3) 设置分组。
+    let groupSetPush = pushSeparation(
+        madeDevice(
+            id: separationID,
+            platform: "ios",
+            externalID: separationExternalID,
+            mac: separationMAC,
+            group: "e2e-separation",
+            updatedAt: separationStart.addingTimeInterval(20)
+        ),
+        key: "group-set"
+    )
+    report.check(groupSetPush.status == 200, "设置分组返回 200", "status=\(groupSetPush.status)")
+    report.check(
+        text(separationDetail(), "group") == "e2e-separation",
+        "服务端保存分组",
+        "group=\(text(separationDetail(), "group"))"
+    )
+
+    // 4) 未上报分组（字段省略）必须保持原值。
+    let omitGroupPush = pushSeparation(
+        madeDevice(
+            id: separationID,
+            platform: "ios",
+            externalID: separationExternalID,
+            mac: separationMAC,
+            updatedAt: separationStart.addingTimeInterval(25)
+        ),
+        key: "group-absent"
+    )
+    report.check(omitGroupPush.status == 200, "缺省分组上报返回 200", "status=\(omitGroupPush.status)")
+    report.check(
+        text(separationDetail(), "group") == "e2e-separation",
+        "缺省 group 字段不参与 LWW，不覆盖已有分组",
+        "group=\(text(separationDetail(), "group"))"
+    )
+
+    // 5) 显式清除分组：必须上报 "group": ""。
+    let clearPush = pushSeparation(
+        madeDevice(
+            id: separationID,
+            platform: "ios",
+            externalID: separationExternalID,
+            mac: separationMAC,
+            group: "",
+            updatedAt: separationStart.addingTimeInterval(30)
+        ),
+        key: "group-clear"
+    )
+    report.check(clearPush.status == 200, "清空分组返回 200", "status=\(clearPush.status)")
+    let afterClear = separationDetail()
+    report.check(
+        text(afterClear, "group") == "",
+        "显式空串清除云端分组",
+        "group=\(text(afterClear, "group"))"
+    )
+    report.check(
+        text(afterClear, "advertisedName") == "PJ-Sensor" && text(afterClear, "alias") == "客厅传感器",
+        "清除分组不影响别名与广播名"
+    )
+
+    // 6) 同内容重试（含缺省字段）必须幂等：同键重放返回 applied，换键也不能 409。
+    let replayClear = client.request(
+        "POST",
+        "sync/push",
+        token: tokenA,
+        idempotencyKey: "\(idempotencyKey)-group-clear",
+        json: ["clientId": clientID, "devices": [
+            madeDevice(
+                id: separationID,
+                platform: "ios",
+                externalID: separationExternalID,
+                mac: separationMAC,
+                group: "",
+                updatedAt: separationStart.addingTimeInterval(30)
+            ),
+        ]]
+    )
+    report.check(replayClear.status == 200, "同内容同键重放返回 200", "status=\(replayClear.status)")
+    report.check(
+        client.request(
+            "POST",
+            "sync/push",
+            token: tokenA,
+            idempotencyKey: "\(idempotencyKey)-group-clear-alt",
+            json: ["clientId": clientID, "devices": [
+                madeDevice(
+                    id: separationID,
+                    platform: "ios",
+                    externalID: separationExternalID,
+                    mac: separationMAC,
+                    group: "",
+                    updatedAt: separationStart.addingTimeInterval(30)
+                ),
+            ]]
+        ).status == 200,
+        "同内容换幂等键不触发 409",
+        "group 空串同样参与内容比较"
     )
 
     // MARK: 4. 幂等重放

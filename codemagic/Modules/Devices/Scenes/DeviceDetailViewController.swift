@@ -125,8 +125,10 @@ final class DeviceDetailViewController: UIViewController {
         var sections: [SectionModel] = []
 
         var localRows: [Row] = [
-            Row(title: "设备名称", value: device.name),
-            Row(title: "备注名", value: device.remark.isEmpty ? "—" : device.remark),
+            // 展示顺序：用户别名 → 广播名 → 型号名/型号键，见 SavedDevice.displayName。
+            Row(title: "显示名称", value: device.displayName),
+            Row(title: "用户别名", value: device.remark.isEmpty ? "—" : device.remark),
+            Row(title: "广播名", value: device.advertisedName.isEmpty ? "—" : device.advertisedName),
             Row(title: "分组", value: device.groupName),
             Row(title: "标识符", value: device.peripheralID.uuidString),
             Row(

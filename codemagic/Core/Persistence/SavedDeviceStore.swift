@@ -70,16 +70,19 @@ final class SavedDeviceStore {
         try database.execute(
             """
             INSERT OR REPLACE INTO saved_devices
-            (id, peripheral_id, platform, external_id, name, remark, group_name, mac, vendor,
-             device_type, firmware_version, last_seen_at, created_at, updated_at, deleted_at, sync_state)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+            (id, peripheral_id, platform, external_id, name, advertised_name, remark, group_name, mac,
+             vendor, device_type, firmware_version, last_seen_at, created_at, updated_at, deleted_at,
+             sync_state, alias_patch, advertised_name_patch, group_patch)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """,
             [
                 .text(device.id.uuidString),
                 .text(device.peripheralID.uuidString),
                 .text(device.platform),
                 .text(device.externalID),
-                .text(device.name),
+                // `name` 为 v4 之前用于展示的遗留列，与 advertised_name 同值写入。
+                .text(device.advertisedName),
+                .text(device.advertisedName),
                 .text(device.remark),
                 .text(device.groupName),
                 device.mac.map(SQLValue.text) ?? .null,
@@ -91,6 +94,9 @@ final class SavedDeviceStore {
                 .double(device.updatedAt.timeIntervalSince1970),
                 device.deletedAt.map { .double($0.timeIntervalSince1970) } ?? .null,
                 .text(device.syncState.rawValue),
+                .text(device.aliasPatch.persistedState),
+                .text(device.advertisedNamePatch.persistedState),
+                .text(device.groupPatch.persistedState),
             ]
         )
     }
@@ -129,26 +135,48 @@ final class SavedDeviceStore {
     }
 
     /// 标记一批记录已同步（新增/修改/删除均适用）。
+    /// 已上报成功的字段三态归零，下一次同步不会重复上报未修改的字段。
     func markSynced(ids: [UUID], at date: Date) throws {
         guard !ids.isEmpty else { return }
         for id in ids {
             try database.execute(
-                "UPDATE saved_devices SET sync_state = ? WHERE id = ?;",
-                [.text(SyncState.synced.rawValue), .text(id.uuidString)]
+                """
+                UPDATE saved_devices
+                SET sync_state = ?, alias_patch = ?, advertised_name_patch = ?, group_patch = ?
+                WHERE id = ?;
+                """,
+                [
+                    .text(SyncState.synced.rawValue),
+                    .text(Patch<String>.absent.persistedState),
+                    .text(Patch<String>.absent.persistedState),
+                    .text(Patch<String>.absent.persistedState),
+                    .text(id.uuidString),
+                ]
             )
         }
     }
 
     /// 换匿名账号后把本机全部活动设备重新标记为待上传，让新账号重新拿到这些记录。
     /// tombstone 不重传（新账号没有对应记录可删）。返回受影响行数。
+    ///
+    /// 新账号云端没有这些设备，因此别名/广播名/分组都需作为完整状态上报。
     @discardableResult
     func markAllPendingForRelogin() throws -> Int {
         let active = try database.query(
             "SELECT COUNT(*) AS total FROM saved_devices WHERE deleted_at IS NULL;"
         )
         try database.execute(
-            "UPDATE saved_devices SET sync_state = ? WHERE deleted_at IS NULL;",
-            [.text(SyncState.pending.rawValue)]
+            """
+            UPDATE saved_devices
+            SET sync_state = ?, alias_patch = ?, advertised_name_patch = ?, group_patch = ?
+            WHERE deleted_at IS NULL;
+            """,
+            [
+                .text(SyncState.pending.rawValue),
+                .text(Patch<String>.set("").persistedState),
+                .text(Patch<String>.set("").persistedState),
+                .text(Patch<String>.set("").persistedState),
+            ]
         )
         return Int(active.first?.integer("total") ?? 0)
     }
@@ -167,15 +195,18 @@ final class SavedDeviceStore {
         let lastSeenAt = row.double("last_seen_at").map(Date.init(timeIntervalSince1970:))
         let deletedAt = row.double("deleted_at").map(Date.init(timeIntervalSince1970:))
         let syncState = SyncState(rawValue: row.text("sync_state") ?? "") ?? .pending
+        let advertisedName = row.text("advertised_name") ?? row.text("name") ?? ""
+        let remark = row.text("remark") ?? ""
+        let groupName = row.text("group_name") ?? SavedDevice.defaultGroupName
 
         return SavedDevice(
             id: id,
             peripheralID: peripheralID,
             platform: row.text("platform") ?? SavedDevice.iosPlatform,
             externalID: row.text("external_id"),
-            name: row.text("name") ?? "",
-            remark: row.text("remark") ?? "",
-            groupName: row.text("group_name") ?? SavedDevice.defaultGroupName,
+            advertisedName: advertisedName,
+            remark: remark,
+            groupName: groupName,
             mac: row.text("mac"),
             vendor: row.text("vendor"),
             deviceType: row.text("device_type"),
@@ -184,7 +215,10 @@ final class SavedDeviceStore {
             createdAt: createdAt,
             updatedAt: updatedAt,
             deletedAt: deletedAt,
-            syncState: syncState
+            syncState: syncState,
+            aliasPatch: Patch.restored(row.text("alias_patch"), value: remark),
+            advertisedNamePatch: Patch.restored(row.text("advertised_name_patch"), value: advertisedName),
+            groupPatch: Patch.restored(row.text("group_patch"), value: groupName)
         )
     }
 }

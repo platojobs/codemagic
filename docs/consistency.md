@@ -4,7 +4,7 @@
 
 - Android 侧口径以 `PKotlinApp/README.md` 与 `PJGoIoT/api/openapi.yaml` 为准。
 - iOS 侧以本仓库 `README.md`、`docs/architecture.md` 为准。
-- 后端 `openapi.yaml` 当前标注版本 **0.3.2**（本地 `PJGoIoT` tag `v0.3.2`，提交 `10fb27b`、`cf1d8a2`）。iOS v0.3.3（`MARKETING_VERSION 0.3.3`，build 7）契约对齐 0.3.2，本轮接入 `UserDevice` 的 `deviceType` / `vendor` / `firmwareVersion` / `compatibility`，catalog 固件与配件的 `vendor` / `compatibility`，以及 `PushDevice.deviceType` 可选字段；端到端联调以运行中的 fixture 服务实际行为为准（见 3.5）。
+- 后端 `openapi.yaml` 当前标注版本 **0.3.3**（本地 `PJGoIoT` tag `v0.3.3`）。iOS v0.3.6（`MARKETING_VERSION 0.3.6`，build 10）契约对齐 0.3.3：`UserDevice` 新增 `advertisedName`，本地区分「用户别名 alias」与「广播名 advertisedName」；`alias` / `advertisedName` / `group` 支持**缺省 / 显式清除 / 设置**三态，缺省字段不参与 LWW 与幂等哈希；冲突响应中缺省字段按 absent 解析。0.3.2 的 `deviceType` / `vendor` / `firmwareVersion` / `compatibility` 与 catalog `vendor` / `compatibility` 保持不变。
 
 ---
 
@@ -67,7 +67,7 @@ Base URL 均由构建配置注入，**不写死在源码**：
 - iOS：`Info.plist` 的 `BASE_URL` ← `Config/Debug.xcconfig` / `Config/Release.xcconfig`。
 - `/api/v1/*` 路径由客户端在 `BASE_URL` 后拼接，因此 Debug 下 `http://127.0.0.1:8080` 可直接访问本地 `PJGoIoT`。
 
-### 3.2 字段命名（canonical，openapi 0.3.2）
+### 3.2 字段命名（canonical，openapi 0.3.3）
 
 设备信息 / 型号条目统一使用：
 
@@ -78,15 +78,31 @@ gattServices: [{ uuid, name, characteristics? }]
 
 `GET /api/v1/my/devices/{platform}/{externalId}`（`UserDevice`）与 `POST /api/v1/sync/push`（`PushDevice`）字段：
 
-| 字段 | 类型 | 0.3.2 语义 | iOS 处理 |
+| 字段 | 类型 | 0.3.3 语义 | iOS 处理 |
 | --- | --- | --- | --- |
 | `platform` | string | `ios` / `android`，与 `externalId` 组成唯一键 | 必填，`ios` |
 | `externalId` | string | iOS 为大写 UUID，Android 为大写 MAC | 必填 |
+| `alias` | string | **用户别名**（用户编辑产生的名字） | 用户编辑只写 `alias`；未修改时省略 |
+| `advertisedName` | string | **设备广播名**（BLE Local Name） | 扫描只写 `advertisedName`；未修改时省略 |
+| `group` | string | 分组名；`""` 表示未分组 | 用户清空分组必须上报 `"group": ""`；未修改时省略 |
 | `deviceType` | string \| null | 型号 id（如 `nordic_uart`） | **可 null**；null/空串 → 不展示、不落库、推送不带 |
 | `vendor` | string \| null | 厂商名，服务端按 `deviceType` / MAC 补全 | **可 null**；null/空串 → `nil` |
 | `firmwareVersion` | string \| null | 固件版本字符串 | **可 null**；null/空串 → `nil` |
 | `compatibility` | object \| null | 结构见下 | **可 null**；`displayItems` 供展示、`filterTags` 供筛选 |
-| `alias` / `group` / `mac` / `note` | string | 与 0.3.1 一致 | 与固件/厂商缺失无关，始终展示 |
+| `mac` / `note` | string | 与 0.3.1 一致 | 与固件/厂商缺失无关，始终展示 |
+
+**缺省字段三态（0.3.3 核心语义）**
+
+| 状态 | JSON 表现 | 语义 | iOS 实现 |
+| --- | --- | --- | --- |
+| absent | 键完全省略 | 未上报，服务端保持原值 | `Patch.absent`（默认；未修改字段） |
+| clear | `""` | 显式清除（仅 `alias` / `advertisedName` / `group`） | `Patch.clear` |
+| set | 具体值 | 上报新值 | `Patch.set(value)` |
+
+- 构造 `PushDevice` 与幂等键时，**只有被上报的字段参与**；absent 字段不写入 JSON，因此不会因空值进入哈希。
+- `nil`（absent）与 `""`（clear）绝不可混淆：解码时缺省 → `nil` → 保留本地值；显式空串 → 清空。
+
+**展示顺序（列表 / 详情一致）**：用户别名 `alias` → 广播名 `advertisedName` → 型号名/型号键 `deviceType` → 「未命名设备」。
 
 `catalog` 的 `firmwares[]` / `accessories[]`：
 
@@ -139,23 +155,25 @@ gattServices: [{ uuid, name, characteristics? }]
 - Android `platform = "android"`、`externalId` 必须为 MAC（规范化为**大写**、冒号分隔）；未传时由 `mac` 派生，`mac` 与 `externalId` 不一致返回 400。
 - 服务端只做大小写规范化，不改写格式：iOS 的 `externalId` 必须是 UUID，Android 的必须是 6 字节 MAC，否则 400 `INVALID_MAC` / `BAD_REQUEST`。
 - 设备表同时保留本机 `peripheral_id`（CoreBluetooth 标识）与服务端键 `platform + external_id`；迁移 v2 由 `peripheral_id` 回填 `external_id`。
+- 迁移 **v4** 新增 `advertised_name`，并从历史 `name` 列回填广播名；`name` 列为 v4 前的遗留列，与 `advertised_name` 同值写入以兼容降级版本。同版本新增 `alias_patch` / `advertised_name_patch` / `group_patch` 记录待上报三态，`markSynced` 成功后归零。
 - iOS 的型号元数据与固件 / 配件使用 `GET /api/v1/device-types/{type}/catalog`；单台设备详情使用 `GET /api/v1/my/devices/ios/{externalId}`，均不依赖 MAC。
 - `PushDevice` / `UserDevice` **不再缺型号字段**（openapi 0.3.2）：`UserDevice` 已含 `deviceType` / `vendor` / `firmwareVersion` / `compatibility`；`PushDevice.deviceType` 为**可选**字段。
+- openapi 0.3.3 起 `UserDevice` 新增 `advertisedName`：扫描只写广播名，用户编辑只写别名，二者互不覆盖；本地展示名回落顺序为 alias → advertisedName → deviceType。
 - iOS 推送 `deviceType` 的真实来源：设备详情从 `GET /my/devices/ios/{externalId}` 或 catalog 匹配拿到型号后写回 `saved_devices.device_type`，下次推送带上；无法推导时**保持 NULL 不传**，不填假值。`vendor` / `firmwareVersion` 仍为展示用元数据，不参与同类设备归类。
 - iOS 与 Android 即使 `mac` 相同，也按 `platform` 分为两条独立记录（键为 `(platform, externalId)`）。
 - 拉回的 Android 设备保留 `mac` 但没有可用的 `CBPeripheral.identifier`，因此 iOS 列表标注「来自 Android，本机不可连接」并禁用连接。
 
 ### 3.4 与 `openapi.yaml` 的对齐状态
 
-`PJGoIoT/api/openapi.yaml`（当前标注 v0.3.2）提供 `POST /auth/anonymous`、`GET /sync/changes`、`POST /sync/push`、`GET /device-types/{type}/catalog`、`GET /my/devices/{platform}/{externalId}` 等。逐项核对结果：
+`PJGoIoT/api/openapi.yaml`（当前标注 v0.3.3）提供 `POST /auth/anonymous`、`GET /sync/changes`、`POST /sync/push`、`GET /device-types/{type}/catalog`、`GET /my/devices/{platform}/{externalId}` 等。逐项核对结果：
 
 | 项 | 状态 |
 | --- | --- |
 | `platform` / `externalId` 设备唯一键 | **已对齐**：iOS 迁移 v2 已补齐字段并参与推送；E2E 校验双平台形状与大写规范化 |
 | `POST /api/v1/auth/anonymous` + Bearer token | **已对齐**：token 存 Keychain，`Authorization: Bearer <token>` |
 | `GET /api/v1/sync/changes` 游标分页 | **已对齐**：`cursor` 持久化，`hasMore` 循环拉取（最多 10 页） |
-| `POST /api/v1/sync/push` + `Idempotency-Key` | **已对齐**：幂等键由批次内容哈希得到，重试复用；E2E 校验重放返回 `Idempotent-Replayed: true` 且不产生重复变更 |
-| 冲突 `conflicts[].reason`（`server_newer` / `clock_clamped` / `key_taken`） | **已对齐**：服务端获胜并提示「另一台设备改过这条」；E2E 校验旧版本 push 返回 `server_newer` 且服务端数据未被覆盖 |
+| `POST /api/v1/sync/push` + `Idempotency-Key` | **已对齐**：幂等键由批次**上报字段**的规范化 JSON 哈希得到，`absent` 字段不进入哈希，重试复用；E2E 校验重放返回 `Idempotent-Replayed: true` 且不产生重复变更 |
+| 冲突 `conflicts[].reason`（`server_newer` / `clock_clamped` / `key_taken`） | **已对齐**：服务端获胜并提示「另一台设备改过这条」；冲突响应中缺省的可选字段按 `absent` 解析（保留本地值）；E2E 校验旧版本 push 返回 `server_newer` 且服务端数据未被覆盖 |
 | `deleted` / `deletedAt` tombstone | **已对齐**：软删除上传 `deleted: true`，拉取删除写本地 tombstone |
 | 错误体 `{"error":{"code","message"}}` | **已对齐**：客户端解析为 `AppError.api`，保留服务端 code；错误码枚举见第 4 节 |
 | `GET /api/v1/device-types` | **已对齐**：产品列表数据源；兼容 `{items}` 与裸数组 |
@@ -164,6 +182,8 @@ gattServices: [{ uuid, name, characteristics? }]
 | `UserDevice.deviceType` / `vendor` / `firmwareVersion` / `compatibility`（0.3.2） | **已对齐**：四个字段均可 null；`ProductModel` 解析后参与详情页展示，`deviceType` 同时写回本地供推送；E2E 校验已注册型号（`nordic_uart` → `vendor=Nordic Semiconductor`、`compatibility.platforms` 含 `ios`）与未注册型号（三字段均为 `null`，`alias` / `group` 仍返回） |
 | catalog `firmwares[]` / `accessories[]` 的 `vendor` / `compatibility`（0.3.2） | **已对齐**：固件与配件均解析 `vendor` 与兼容性对象；市场条目展示真实厂商与兼容性，筛选维度直接取自这些字段；E2E 校验固件全部带 `vendor` 与 `compatibility.platforms`、配件全部带 `compatibility` |
 | `PushDevice.deviceType`（0.3.2，可选） | **已对齐**：本地新增 `saved_devices.device_type`（迁移 v3）；已知型号才编码该字段，未知时省略；E2E 覆盖带 `deviceType` 的推送与拉回比对 |
+| `UserDevice.advertisedName` + `PushDevice` 别名/广播名分离（0.3.3） | **已对齐**：本地迁移 v4 新增 `advertised_name`；扫描只上报 `advertisedName`，用户编辑只上报 `alias`；E2E 校验扫描上报后 `advertisedName` 落库、别名仍为空，随后编辑别名不覆盖广播名 |
+| 缺省字段 / 显式清除三态（0.3.3） | **已对齐**：`Patch<String>` 三态 + 自定义 `encode`，absent 省略键、clear 编码 `""`；清空分组上报 `"group": ""` 且再次同步不复活；未修改字段不参与 LWW 与幂等哈希；E2E 覆盖缺省 group 不覆盖原值、显式空串清除、同内容换键不 409 |
 | `GET /api/v1/my/devices` / `GET /api/v1/my/devices/{mac}` | **App 未使用**：列表走 `sync/changes`，iOS 详情走复合键；仅 E2E 校验鉴权与越权 |
 | 产品 / 市场 / 设备详情（iOS） | **已切到新端点**，不再请求 `api/products` / `api/market` / `api/device/{peripheralUUID}` |
 | `GET /api/v1/devices/{mac}` | **仍可用，但仅 Android 使用**；iOS 本机设备没有 MAC，不再调用该端点 |
@@ -181,13 +201,15 @@ iOS 端不再存在“历史端点”调用；唯一保留的旧路径 `/api/v1/
 - catalog 的固件全部带 `vendor` 与 `compatibility.platforms`，配件全部带 `compatibility` 对象，且至少 1 个配件带 `vendor`；
 - `GET /my/devices/ios/{externalId}` 返回 `platform=ios` 与大写 UUID；
 - 推送已注册型号（`deviceType = nordic_uart`）后拉回：`deviceType`、`vendor`、`compatibility` 均补全；推送未注册型号后拉回：三者均为 `null`，且 `alias` / `group` 仍在；
+- 扫描只上报 `advertisedName` 时服务端 `alias` 保持空串；随后只上报 `alias` 不覆盖广播名；
+- 推送省略 `group` 时服务端保留原分组；推送 `"group": ""` 显式清除；随后同内容重放与换幂等键均返回 200（不 409）；
 - 相同 `Idempotency-Key` 重放返回 `Idempotent-Replayed: true`，不新增变更；
 - 旧 `updatedAt` 推送触发 `server_newer` 冲突，服务端保留较新版本；
 - 无 token 返回 401 `UNAUTHORIZED`；第二用户访问他人设备（按 MAC 与复合键）均返回 404 `NOT_FOUND`。
 
-当前共 **71 项断言全部通过**（v0.3.3 联调记录）。
+当前共 **87 项断言全部通过**（v0.3.6 联调记录）。
 
-运行记录见 `README.md` 第 4.2 节；该脚本依赖本地 Go 服务，**不纳入 Codemagic CI**。
+运行记录见 `README.md` 第 4.2 节；该脚本已接入 GitHub Actions `ios.yml` 的 `e2e-contract` job（macOS runner，与 build 并行）。
 
 ### 3.6 市场筛选维度（真实字段，不造假分类）
 

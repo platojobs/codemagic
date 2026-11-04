@@ -48,17 +48,16 @@ enum SyncHashing {
 
     /// 幂等键：同一批（排序后）设备内容总是得到同一个 UUID；内容变化则键随之变化。
     /// 这样重试网络失败时服务端可命中幂等缓存，而不会因请求体不同触发 409。
+    ///
+    /// 签名直接取各设备规范化编码后的 JSON（键排序）：
+    /// - 未上报（`Patch.absent`）的字段根本不会出现在 JSON 里，因此不参与哈希；
+    /// - 显式清除编码为 `""`，与「从未设置」区分开。
     static func idempotencyKey(for devices: [PushDevice]) -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
         let signature = devices
-            .map {
-                [
-                    $0.id,
-                    $0.platform,
-                    $0.externalID,
-                    String(Int64($0.updatedAt.timeIntervalSince1970 * 1000)),
-                    $0.deleted ? "1" : "0",
-                ].joined(separator: "|")
-            }
+            .compactMap { try? encoder.encode($0) }
+            .map { String(data: $0, encoding: .utf8) ?? "" }
             .sorted()
             .joined(separator: ";")
         return stableUUID(seed: "push:\(signature)").uuidString
@@ -68,14 +67,19 @@ enum SyncHashing {
 // MARK: - 服务端模型（对未知字段与缺失字段容错）
 
 /// `GET /sync/changes` 中的 `payload` 与 `POST /sync/push` 冲突里的 `server`。
+///
+/// openapi 0.3.3 起 `alias` / `advertisedName` / `group` 在部分响应（如冲突）中可以缺省，
+/// 因此三个字段均为可选：`nil` 表示 absent（未上报），合并时必须保留本地原值；
+/// 空串表示服务端已显式清除。
 struct RemoteDevice: Decodable, Equatable {
     let id: String
     let clientID: String
     let platform: String
     let externalID: String
     let mac: String?
-    let alias: String
-    let group: String
+    let alias: String?
+    let advertisedName: String?
+    let group: String?
     let updatedAt: Date
     let deletedAt: Date?
     let serverSeq: Int64?
@@ -87,6 +91,7 @@ struct RemoteDevice: Decodable, Equatable {
         case externalId
         case mac
         case alias
+        case advertisedName
         case group
         case updatedAt
         case deletedAt
@@ -100,8 +105,9 @@ struct RemoteDevice: Decodable, Equatable {
         platform = (try? container.decodeIfPresent(String.self, forKey: .platform)) ?? SavedDevice.iosPlatform
         externalID = ((try? container.decodeIfPresent(String.self, forKey: .externalId)) ?? "").uppercased()
         mac = try? container.decodeIfPresent(String.self, forKey: .mac)
-        alias = (try? container.decodeIfPresent(String.self, forKey: .alias)) ?? ""
-        group = (try? container.decodeIfPresent(String.self, forKey: .group)) ?? ""
+        alias = try? container.decodeIfPresent(String.self, forKey: .alias)
+        advertisedName = try? container.decodeIfPresent(String.self, forKey: .advertisedName)
+        group = try? container.decodeIfPresent(String.self, forKey: .group)
         updatedAt = SyncDateCodec.parse(
             (try? container.decodeIfPresent(String.self, forKey: .updatedAt)) ?? ""
         ) ?? Date(timeIntervalSince1970: 0)
@@ -118,8 +124,9 @@ struct RemoteDevice: Decodable, Equatable {
         platform: String = SavedDevice.iosPlatform,
         externalID: String,
         mac: String? = nil,
-        alias: String = "",
-        group: String = "",
+        alias: String? = nil,
+        advertisedName: String? = nil,
+        group: String? = nil,
         updatedAt: Date,
         deletedAt: Date? = nil,
         serverSeq: Int64? = nil
@@ -130,13 +137,21 @@ struct RemoteDevice: Decodable, Equatable {
         self.externalID = externalID.uppercased()
         self.mac = mac
         self.alias = alias
+        self.advertisedName = advertisedName
         self.group = group
         self.updatedAt = updatedAt
         self.deletedAt = deletedAt
         self.serverSeq = serverSeq
     }
 
-    /// 远端记录映射为本地行；远端没有广播名，`alias` 即展示名。
+    /// 展示名：别名 → 广播名；都缺省时为空串，由调用方决定兜底文案。
+    var displayName: String {
+        let aliasText = (alias ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !aliasText.isEmpty { return aliasText }
+        return (advertisedName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// 远端记录映射为本地行；缺省字段按 absent 处理（本地保持默认值）。
     func makeLocalDevice() -> SavedDevice {
         let remoteID = UUID(uuidString: id) ?? SyncHashing.stableUUID(seed: "device:\(platform):\(externalID)")
         let peripheralID: UUID
@@ -145,15 +160,17 @@ struct RemoteDevice: Decodable, Equatable {
         } else {
             peripheralID = remoteID
         }
-        let displayName = alias.isEmpty ? "未命名设备" : alias
+        let aliasText = alias ?? ""
+        let advertisedText = advertisedName ?? ""
+        let groupText = group ?? ""
         return SavedDevice(
             id: remoteID,
             peripheralID: peripheralID,
             platform: platform,
             externalID: externalID,
-            name: displayName,
-            remark: "",
-            groupName: group.isEmpty ? SavedDevice.defaultGroupName : group,
+            advertisedName: advertisedText,
+            remark: aliasText,
+            groupName: groupText.isEmpty ? SavedDevice.defaultGroupName : groupText,
             mac: (mac?.isEmpty ?? true) ? nil : mac,
             vendor: nil,
             firmwareVersion: nil,
@@ -224,14 +241,19 @@ struct SyncChangesPage: Decodable, Equatable {
     }
 }
 
-/// 推送条目，字段与 `PushDevice` 对齐；`rules` / `scanRecords` 本期不同步。
+/// 推送条目，字段与 openapi 0.3.3 的 `PushDevice` 对齐；`rules` / `scanRecords` 本期不同步。
+///
+/// `alias` / `advertisedName` / `group` 使用 `Patch<String>` 表达三态：
+/// `absent` 时完全省略字段（服务端保持原值），`clear` 编码为 `""`（显式清除），
+/// `set` 编码具体值。`nil` 与空串因此不会混淆。
 struct PushDevice: Encodable, Equatable {
     let id: String
     let platform: String
     let externalID: String
     let mac: String?
-    let alias: String
-    let group: String
+    let alias: Patch<String>
+    let advertisedName: Patch<String>
+    let group: Patch<String>
     let updatedAt: Date
     let deleted: Bool
     /// openapi 0.3.2 可选字段；未知型号时为 nil，不填假值。
@@ -243,6 +265,7 @@ struct PushDevice: Encodable, Equatable {
         case externalId
         case mac
         case alias
+        case advertisedName
         case group
         case updatedAt
         case deleted
@@ -254,8 +277,9 @@ struct PushDevice: Encodable, Equatable {
         platform: String,
         externalID: String,
         mac: String?,
-        alias: String,
-        group: String,
+        alias: Patch<String> = .absent,
+        advertisedName: Patch<String> = .absent,
+        group: Patch<String> = .absent,
         updatedAt: Date,
         deleted: Bool,
         deviceType: String? = nil
@@ -265,6 +289,7 @@ struct PushDevice: Encodable, Equatable {
         self.externalID = externalID
         self.mac = mac
         self.alias = alias
+        self.advertisedName = advertisedName
         self.group = group
         self.updatedAt = updatedAt
         self.deleted = deleted
@@ -278,8 +303,9 @@ struct PushDevice: Encodable, Equatable {
             platform: device.platform,
             externalID: device.externalID,
             mac: device.mac,
-            alias: device.syncAlias,
-            group: device.groupName,
+            alias: device.resolvedAliasPatch,
+            advertisedName: device.resolvedAdvertisedNamePatch,
+            group: device.resolvedGroupPatch,
             updatedAt: device.updatedAt,
             deleted: device.deletedAt != nil,
             deviceType: device.deviceType
@@ -292,11 +318,28 @@ struct PushDevice: Encodable, Equatable {
         try container.encode(platform, forKey: .platform)
         try container.encode(externalID, forKey: .externalId)
         try container.encodeIfPresent(mac, forKey: .mac)
-        try container.encode(alias, forKey: .alias)
-        try container.encode(group, forKey: .group)
+        try encode(alias, forKey: .alias, into: &container)
+        try encode(advertisedName, forKey: .advertisedName, into: &container)
+        try encode(group, forKey: .group, into: &container)
         try container.encode(SyncDateCodec.string(from: updatedAt), forKey: .updatedAt)
         try container.encode(deleted, forKey: .deleted)
         try container.encodeIfPresent(deviceType, forKey: .deviceType)
+    }
+
+    /// absent 不写键；clear 写空串；set 写具体值。
+    private func encode(
+        _ patch: Patch<String>,
+        forKey key: CodingKeys,
+        into container: inout KeyedEncodingContainer<CodingKeys>
+    ) throws {
+        switch patch {
+        case .absent:
+            break
+        case .clear:
+            try container.encode("", forKey: key)
+        case .set(let value):
+            try container.encode(value, forKey: key)
+        }
     }
 }
 

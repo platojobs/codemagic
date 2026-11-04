@@ -1,6 +1,6 @@
 # KNOWN_ISSUES
 
-记录当前版本（v0.3.5）已知、且本机无法闭环验证的问题。已修复项不在此列。
+记录当前版本（v0.3.6）已知、且本机无法闭环验证的问题。已修复项不在此列。
 
 ## 需用户在真实环境验证
 
@@ -11,14 +11,14 @@
    - 本机无 Apple 开发者账号与证书，未执行 `archive` / `exportArchive`，未上架 App Store / TestFlight。
    - CI 与本地构建统一使用 `CODE_SIGNING_ALLOWED=NO`，只验证编译与测试。
 3. **CI**
-   - GitHub Actions `ios.yml` 已实际运行成功（run [41906015761](https://github.com/platojobs/codemagic/actions/runs/41906015761)，macos-15 + Xcode 16.4；并行 `build-test` 74 单测与 `e2e-contract` 71 项断言均 PASS）；仅 push 到 `main` / tag 触发，PR 不跑（macOS runner 计费高），按 `github.sha` 去重。
+   - GitHub Actions `ios.yml` 已实际运行成功（run [41906015761](https://github.com/platojobs/codemagic/actions/runs/41906015761)，macos-15 + Xcode 16.4；并行 `build-test` 81 单测与 `e2e-contract` 87 项断言均 PASS）；仅 push 到 `main` / tag 触发，PR 不跑（macOS runner 计费高），按 `github.sha` 去重。
    - CI 的 `e2e-contract` 使用 `platojobs/PJGoIoT` 默认分支与 `go.mod` 中的 Go 版本；后端后续若改变 fixture 数据或契约，CI 会先红，需要同步更新断言。
    - 根目录 `codemagic.yaml`（Codemagic）保留为可选替代方案，**仍未在 Codemagic 上运行**，不能作为当前 CI 证据。
    - 仓库 OAuth token 缺少 `workflow` scope，推送 `.github/workflows/*` 使用 SSH over 443（`ssh://git@ssh.github.com:443/platojobs/codemagic.git`），未改全局 git config。
 4. **后台同步调度未在真机验证**
    - `BGAppRefreshTask`（`com.platojobs.codemagic.sync`）已注册并在前后台切换时提交，但模拟器不执行后台刷新，实际触发频率与时长需真机 / Xcode Devices 观察。
 5. **App 内同步仍未在真机 + 真实后端闭环**
-   - 服务端契约已通过 `scripts/e2e-contract.sh` 对本地 `PJGoIoT` 0.3.2（`STORE=fixture`）完成 71 项断言（匿名登录、双平台推送、changes 形状、device-types/catalog 的 vendor/compatibility、复合键详情、UserDevice 新字段与 null 降级、幂等重放、LWW 冲突、401/404），结果 PASS（2026-11-05）。
+   - 服务端契约已通过 `scripts/e2e-contract.sh` 对本地 `PJGoIoT` 0.3.3（`STORE=fixture`）完成 87 项断言（匿名登录、双平台推送、changes 形状、device-types/catalog 的 vendor/compatibility、复合键详情、UserDevice 新字段与 null 降级、别名/广播名分离、group 三态、幂等重放、LWW 冲突、401/404），结果 PASS（2026-11-05）。
    - 该联调使用独立 Swift 可执行程序直连 localhost，**不覆盖** App 内的 Keychain token 读写、`BGAppRefreshTask` 调度、前后台触发与「我的」同步状态 UI；这些仍需真机 + 真实后端验证。
    - fixture 为内存存储，重启后数据清空；不等价于生产 PostgreSQL / 对象存储环境。
 
@@ -28,11 +28,11 @@
    - `Config/Release.xcconfig` 指向 `https://quickmock.dev/m/ecHT7ex3yQPA/`（与 Android 共用），预计 **2026-12-04 到期**。
    - 到期后产品 / 市场会显示错误空状态与重试；同步在 Release 下也会失败并保留待上传记录。需替换为正式域名。
 7. **catalog 字段已补齐，但存在 null / 空串差异**
-   - openapi 0.3.2 后 catalog 的 `firmwares` / `accessories` 已带 `vendor` 与 `compatibility`，`UserDevice` 已带 `deviceType` / `vendor` / `firmwareVersion` / `compatibility`；v0.3.3 已全部接入。
+   - openapi 0.3.3 起 `UserDevice` 增加 `advertisedName`，且 `alias` / `advertisedName` / `group` 支持缺省（absent）与显式清空（`""`）；v0.3.6 已全量接入并把三态落库（各自的 `*_patch` 列）。
    - 仍需注意：固件 / 配件的 `vendor` 在未核实时是**空串**而非 `null`（iOS 模型保留 `""`，UI 显示「—」，且不进入市场厂商筛选项）；`UserDevice` 的四个新字段可能是 `null`（iOS 归一为 `nil`，显示「型号未知 / — / 暂无兼容性说明」）。这些差异由 E2E 断言覆盖，但真实数据下仍可能有服务端未补全的条目。
-8. **Release mock 未必支持 0.3.2 新端点 / 新字段**
-   - Debug `BASE_URL = http://127.0.0.1:8080`，需先 `git pull` 并运行 0.3.2 的 `PJGoIoT`。
-   - Release 仍指向 `https://quickmock.dev/m/ecHT7ex3yQPA/`（与 Android 共用，预计 2026-12-04 到期）；该 mock 若未更新 `/device-types/{type}/catalog`、`/my/devices/{platform}/{externalId}` 与新增的 `deviceType` / `vendor` / `firmwareVersion` / `compatibility` 字段，产品 / 市场 / 详情会显示错误空状态、缓存降级，或字段一律为空。
+8. **Release mock 未必支持 0.3.3 新端点 / 新字段**
+   - Debug `BASE_URL = http://127.0.0.1:8080`，需先 `git pull` 并运行 0.3.3 的 `PJGoIoT`。
+   - Release 仍指向 `https://quickmock.dev/m/ecHT7ex3yQPA/`（与 Android 共用，预计 2026-12-04 到期）；该 mock 若未更新 `/device-types/{type}/catalog`、`/my/devices/{platform}/{externalId}` 与新增的 `advertisedName` / `deviceType` / `vendor` / `firmwareVersion` / `compatibility` 字段，产品 / 市场 / 详情会显示错误空状态、缓存降级，或字段一律为空。
 9. **iOS 无法读取蓝牙 MAC（已规避）**
    - iOS `platform=ios`、`externalId=CBPeripheral.identifier`（大写），`mac` 为空；详情改用复合键 `/my/devices/ios/{externalId}`，不再依赖 MAC。
 10. **跨平台拉取的设备无法在本机连接（已做 UI 防误触，未真机验证）**

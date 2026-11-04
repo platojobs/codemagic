@@ -208,6 +208,9 @@ final class ProductAPIClient: ProductServicing {
     private func recordNote(_ record: UserDeviceInfo) -> String {
         var parts = ["云同步记录（\(record.platform)）"]
         if !record.alias.isEmpty { parts.append("别名：\(record.alias)") }
+        if let advertised = record.advertisedName, !advertised.isEmpty {
+            parts.append("广播名：\(advertised)")
+        }
         if !record.group.isEmpty { parts.append("分组：\(record.group)") }
         parts.append("externalId：\(record.externalID)")
         if record.updatedAt.timeIntervalSince1970 > 0 {

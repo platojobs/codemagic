@@ -42,8 +42,8 @@ codemagic/
 Config/
 ├── Debug.xcconfig              # BASE_URL → 本地 Go 服务
 └── Release.xcconfig            # BASE_URL → 线上（当前为与 Android 共用的 mock）
-codemagicTests/                 # XCTest 单元测试（74 个用例）
-scripts/                        # e2e-contract.sh + 独立 Swift 联调 runner（不进 CI）
+codemagicTests/                 # XCTest 单元测试（81 个用例）
+scripts/                        # e2e-contract.sh + 独立 Swift 联调 runner（CI 的 e2e-contract job 复用）
 docs/
 ├── architecture.md             # 本文件
 └── consistency.md              # Android/iOS 共用行为说明
@@ -103,7 +103,7 @@ CoreBluetoothService.discoveryHandler
 
 - `APIConfiguration` 从 `Info.plist` 读取 `BASE_URL`（由 xcconfig 注入），校验 scheme 与 host，源码不含地址。
 - `URLSessionHTTPClient`：15s 超时、`ephemeral` 配置、`reloadIgnoringLocalCacheData`；非 2xx → `AppError.server`。
-- `ProductAPIClient`：`GET /api/v1/device-types` + `GET /api/v1/device-types/{type}/catalog`（产品 / 市场）、`GET /api/v1/my/devices/ios/{externalId}`（设备详情，Bearer token）；Codable 宽松解码，兼容 `{items}` 包裹与裸数组。0.3.2 起解析 `UserDevice` 的 `deviceType` / `vendor` / `firmwareVersion` / `compatibility` 与 catalog 固件 / 配件的 `vendor` / `compatibility`，`null` / 缺失 / 空串统一归一为 `nil`。
+- `ProductAPIClient`：`GET /api/v1/device-types` + `GET /api/v1/device-types/{type}/catalog`（产品 / 市场）、`GET /api/v1/my/devices/ios/{externalId}`（设备详情，Bearer token）；Codable 宽松解码，兼容 `{items}` 包裹与裸数组。0.3.2 起解析 `UserDevice` 的 `deviceType` / `vendor` / `firmwareVersion` / `compatibility` 与 catalog 固件 / 配件的 `vendor` / `compatibility`，`null` / 缺失 / 空串统一归一为 `nil`；0.3.3 起解析 `advertisedName`，可选字段缺省时按 absent 处理。
 - `CompatibilityInfo`（`Core/Models/DeviceCatalog.swift`）：动态 key 解码，`displayItems` 供展示、`filterTags` 供市场筛选（`deviceTypes` 显示为「型号」）。
 - `AppError` 统一错误码：`NET-001` / `NET-002` / `NET-003` / `NET-004` / `DB-001` / `BT-004` / `SYNC-001`。
 
@@ -131,7 +131,7 @@ SyncEngine
 - 同步状态通过 `SyncEngine.onChange` 推给「我的」页，失败时保留 pending 并展示错误码与降级说明。
 - 401：`AppError.isUnauthorized` → `metadata.reloginRequired = true`，「我的」页展示「登录已失效」与「重新登录」；用户确认后才换号（旧账号数据不合并），否则前后台自动同步直接失败，不会静默建号。
 - 后台任务标识 `com.platojobs.codemagic.sync` 已在 `Info.plist` 的 `BGTaskSchedulerPermittedIdentifiers` 声明。
-- 契约联调：`scripts/e2e-contract.sh` 启动本地 `PJGoIoT`（`STORE=fixture`）并运行独立 Swift runner，真实网络覆盖匿名登录、双平台推送、device-types/catalog（含 `vendor` / `compatibility`）、复合键详情、`UserDevice` 新字段与 null 降级、幂等重放、LWW 冲突与 401/404；默认不进 CI。
+- 契约联调：`scripts/e2e-contract.sh` 启动本地 `PJGoIoT`（`STORE=fixture`）并运行独立 Swift runner，真实网络覆盖匿名登录、双平台推送、device-types/catalog（含 `vendor` / `compatibility`）、复合键详情、`UserDevice` 新字段与 null 降级、别名/广播名分离、group 三态、幂等重放、LWW 冲突与 401/404；已接入 GitHub Actions `e2e-contract` job。
 - 产品 / 市场 / 详情：`ProductAPIClient` 使用 `device-types` + `{type}/catalog`（一次拿固件与配件），设备详情使用 `my/devices/ios/{externalId}` 复合键，不依赖 MAC。
 - 市场筛选：`MarketViewModel` 维护 `allItems` + `selectedVendor` / `selectedCompatibility`，选项由 `item.vendor` 与 `item.compatibilityTags` 去重排序得到；`dropInvalidFilters` 在刷新后清除已失效的筛选值。
 - 跨平台设备：`SavedDevice.isConnectable` 仅在 `platform == "ios"` 时为真；Android 设备在列表标注不可连接并禁用入口。
@@ -143,7 +143,8 @@ SyncEngine
 - 数据库文件：`Application Support/com.platojobs.codemagic/codemagic.sqlite`。
 - 打开参数：`READWRITE | CREATE | FULLMUTEX`；迁移使用 `PRAGMA user_version`，多语句脚本用 `sqlite3_exec`。
 - 所有读写串行在一个专用队列；软删除保留行以便后续同步。
-- 迁移版本：v1 建五张表；v2（v0.2.0）给 `saved_devices` 增加 `platform` / `external_id`，并由 `peripheral_id` 大写回填；v3（v0.3.3）增加 `device_type TEXT`（可空，供 `PushDevice` 使用）。
+- 迁移版本：v1 建五张表；v2（v0.2.0）给 `saved_devices` 增加 `platform` / `external_id`，并由 `peripheral_id` 大写回填；v3（v0.3.3）增加 `device_type TEXT`（可空，供 `PushDevice` 使用）；**v4（v0.3.6）** 增加 `advertised_name TEXT`（由历史 `name` 回填广播名）与 `alias_patch` / `advertised_name_patch` / `group_patch`（`absent` / `clear` / `set`），后者在 `markSynced` 成功后归零。
+- 名称语义：`advertised_name` 由扫描写入，`remark`（用户别名）由编辑写入，互不覆盖；展示名回落顺序 alias → advertisedName → deviceType。`PushDevice` 用 `Patch<String>` 三态编码，absent 省略键、clear 编 `""`；幂等键取规范化 JSON，absent 字段不参与哈希。
 - 5 张表：`saved_devices`、`rules`、`scan_logs`、`recent_devices`、`device_info_cache`。
 - 磁盘库打开失败时回退 `:memory:`，应用仍可启动，「我的」页显示 `DB-001` 启动提示。
 

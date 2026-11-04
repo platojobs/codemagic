@@ -21,7 +21,7 @@ final class PersistenceTests: XCTestCase {
         let device = SavedDevice(
             id: id,
             peripheralID: peripheralID,
-            name: "Panel-A",
+            advertisedName: "Panel-A",
             remark: "客厅面板",
             groupName: "客厅",
             mac: "AA:BB",
@@ -75,7 +75,7 @@ final class PersistenceTests: XCTestCase {
         let second = makeSavedDevice(peripheralID: peripheralID, name: "新记录")
         try store.upsert(second)
 
-        XCTAssertEqual(try store.fetch(peripheralID: peripheralID)?.name, "新记录")
+        XCTAssertEqual(try store.fetch(peripheralID: peripheralID)?.advertisedName, "新记录")
         XCTAssertEqual(try store.fetchAll().count, 1)
     }
 
@@ -160,7 +160,7 @@ final class PersistenceTests: XCTestCase {
             peripheralID: SyncHashing.stableUUID(seed: externalID),
             platform: "android",
             externalID: externalID,
-            name: "安卓设备",
+            advertisedName: "安卓设备",
             syncState: .synced
         )
         try store.upsert(device)
@@ -171,7 +171,7 @@ final class PersistenceTests: XCTestCase {
         XCTAssertEqual(loaded.syncKey, "android:\(externalID)")
 
         let version = try testDatabase.database.query("PRAGMA user_version;").first?.integer("user_version")
-        XCTAssertEqual(version, 3)
+        XCTAssertEqual(version, 4)
     }
 
     func testDeviceTypeColumnRoundTrip() throws {
@@ -181,7 +181,7 @@ final class PersistenceTests: XCTestCase {
             peripheralID: UUID(uuidString: externalID)!,
             platform: "ios",
             externalID: externalID,
-            name: "iOS 设备",
+            advertisedName: "iOS 设备",
             deviceType: "tracker",
             syncState: .pending
         )
@@ -236,8 +236,52 @@ final class PersistenceTests: XCTestCase {
         XCTAssertEqual(device.externalID, peripheralID.uuidString.uppercased(), "externalId 由 peripheral_id 回填")
         XCTAssertNil(device.deviceType, "旧记录不知道型号，保持 NULL")
         XCTAssertEqual(device.syncState, .synced)
+        XCTAssertEqual(device.advertisedName, "旧版本设备", "v4 从 name 列回填广播名")
+        XCTAssertEqual(device.aliasPatch, .absent)
+        XCTAssertEqual(device.groupPatch, .absent)
 
         let version = try migrated.query("PRAGMA user_version;").first?.integer("user_version")
-        XCTAssertEqual(version, 3)
+        XCTAssertEqual(version, 4)
+    }
+
+    func testAdvertisedNameAndPatchStatesRoundTrip() throws {
+        let store = SavedDeviceStore(database: testDatabase.database)
+        let peripheralID = UUID()
+        let device = SavedDevice(
+            peripheralID: peripheralID,
+            advertisedName: "PJ-Sensor",
+            remark: "客厅面板",
+            groupName: "厨房",
+            aliasPatch: .clear,
+            advertisedNamePatch: .set("PJ-Sensor"),
+            groupPatch: .clear
+        )
+        try store.upsert(device)
+
+        let loaded = try XCTUnwrap(store.fetch(peripheralID: peripheralID))
+        XCTAssertEqual(loaded.advertisedName, "PJ-Sensor", "广播名与别名独立存储")
+        XCTAssertEqual(loaded.remark, "客厅面板")
+        XCTAssertEqual(loaded.displayName, "客厅面板", "展示顺序：别名优先")
+        XCTAssertEqual(loaded.aliasPatch, .clear)
+        XCTAssertEqual(loaded.advertisedNamePatch, .set("PJ-Sensor"))
+        XCTAssertEqual(loaded.groupPatch, .clear)
+    }
+
+    func testMarkSyncedResetsPatchStates() throws {
+        let store = SavedDeviceStore(database: testDatabase.database)
+        var device = makeSavedDevice(name: "PJ-Sensor", remark: "别名")
+        device.aliasPatch = .set("别名")
+        device.advertisedNamePatch = .set("PJ-Sensor")
+        device.groupPatch = .clear
+        try store.upsert(device)
+
+        try store.markSynced(ids: [device.id], at: Date())
+
+        let loaded = try XCTUnwrap(store.fetch(id: device.id))
+        XCTAssertEqual(loaded.syncState, .synced)
+        XCTAssertEqual(loaded.aliasPatch, .absent, "已上报字段不得重复上报")
+        XCTAssertEqual(loaded.advertisedNamePatch, .absent)
+        XCTAssertEqual(loaded.groupPatch, .absent)
+        XCTAssertEqual(loaded.remark, "别名", "三态归零不影响本地值")
     }
 }

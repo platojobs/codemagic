@@ -35,10 +35,24 @@ final class DevicesViewModel {
     ) {
         guard let index = devices.firstIndex(where: { $0.id == id }) else { return }
         var device = devices[index]
-        device.remark = remark.trimmingCharacters(in: .whitespacesAndNewlines)
-        device.groupName = groupName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            ? SavedDevice.defaultGroupName
-            : groupName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let newRemark = remark.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedGroup = groupName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let newGroup = trimmedGroup.isEmpty ? SavedDevice.defaultGroupName : trimmedGroup
+        var changed = false
+
+        // 用户编辑只写别名 / 分组；未改动的字段保持 absent，推送时省略以免覆盖其他端。
+        if newRemark != device.remark {
+            device.remark = newRemark
+            device.aliasPatch = newRemark.isEmpty ? .clear : .set(newRemark)
+            changed = true
+        }
+        if newGroup != device.groupName {
+            device.groupName = newGroup
+            device.groupPatch = newGroup == SavedDevice.defaultGroupName ? .clear : .set(newGroup)
+            changed = true
+        }
+        guard changed else { return }
+
         device.updatedAt = Date()
         device.syncState = .pending
         devices[index] = device

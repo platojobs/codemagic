@@ -142,9 +142,20 @@ func makeSavedDevice(
     peripheralID: UUID = UUID(),
     name: String = "测试设备",
     remark: String = "",
-    groupName: String = SavedDevice.defaultGroupName
+    groupName: String = SavedDevice.defaultGroupName,
+    aliasPatch: Patch<String> = .absent,
+    advertisedNamePatch: Patch<String> = .absent,
+    groupPatch: Patch<String> = .absent
 ) -> SavedDevice {
-    SavedDevice(peripheralID: peripheralID, name: name, remark: remark, groupName: groupName)
+    SavedDevice(
+        peripheralID: peripheralID,
+        advertisedName: name,
+        remark: remark,
+        groupName: groupName,
+        aliasPatch: aliasPatch,
+        advertisedNamePatch: advertisedNamePatch,
+        groupPatch: groupPatch
+    )
 }
 
 func makeProduct(

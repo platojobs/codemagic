@@ -305,9 +305,15 @@ final class SyncEngine {
             }
 
             if existing.syncState == .synced {
-                if remote.updatedAt > existing.updatedAt
-                    || remote.alias != existing.name
-                    || (remote.group.isEmpty ? existing.groupName : remote.group) != existing.groupName {
+                // 缺省字段（nil）表示服务端未上报，不参与比较也不得覆盖本地。
+                let aliasChanged = remote.alias.map { $0 != existing.remark } ?? false
+                let groupChanged = remote.group.map {
+                    ($0.isEmpty ? SavedDevice.defaultGroupName : $0) != existing.groupName
+                } ?? false
+                let advertisedChanged = remote.advertisedName.map {
+                    !$0.isEmpty && $0 != existing.advertisedName
+                } ?? false
+                if remote.updatedAt > existing.updatedAt || aliasChanged || groupChanged || advertisedChanged {
                     try deviceStore.upsert(merge(remote, into: existing))
                     pulled += 1
                 }
@@ -415,10 +421,8 @@ final class SyncEngine {
     /// 服务端拒绝本地版本时：写回云端版本并返回提示文案，绝不静默丢弃本地修改。
     private func applyPushConflict(_ conflict: SyncConflict) -> String {
         let server = conflict.server
-        let message = conflictMessage(
-            name: server.alias.isEmpty ? "设备 \(conflict.externalID)" : server.alias,
-            reason: conflict.reasonText
-        )
+        let serverName = server.displayName.isEmpty ? "设备 \(conflict.externalID)" : server.displayName
+        let message = conflictMessage(name: serverName, reason: conflict.reasonText)
         do {
             let remoteID = UUID(uuidString: server.id) ?? UUID(uuidString: conflict.id)
             let existing = try remoteID.flatMap { try deviceStore.fetch(id: $0) }
@@ -443,18 +447,27 @@ final class SyncEngine {
     // MARK: - Merge
 
     /// 把云端字段合并到本地行，保留本地主键 / CoreBluetooth 标识符。
+    ///
+    /// 缺省字段（nil）表示服务端未上报，保留本地原值；空串表示服务端已显式清除。
     private func merge(_ remote: RemoteDevice, into local: SavedDevice) -> SavedDevice {
         var merged = local
-        if !remote.alias.isEmpty {
-            merged.name = remote.alias
-            merged.remark = ""
+        if let alias = remote.alias, !alias.isEmpty {
+            merged.remark = alias
         }
-        if !remote.group.isEmpty {
-            merged.groupName = remote.group
+        if let group = remote.group {
+            merged.groupName = group.isEmpty ? SavedDevice.defaultGroupName : group
+        }
+        // 广播名只在服务端有值时回填，避免从未上报过的空串清掉本机扫描结果。
+        if let advertised = remote.advertisedName, !advertised.isEmpty {
+            merged.advertisedName = advertised
         }
         merged.mac = remote.mac?.isEmpty == false ? remote.mac : local.mac
         merged.updatedAt = max(local.updatedAt, remote.updatedAt)
         merged.deletedAt = remote.deletedAt
+        // 服务端版本已落库，本地待上报的三态全部归零。
+        merged.aliasPatch = .absent
+        merged.advertisedNamePatch = .absent
+        merged.groupPatch = .absent
         merged.syncState = .synced
         return merged
     }

@@ -110,6 +110,9 @@ final class SQLiteDatabase {
         if version < 3 {
             try migrateToVersion3()
         }
+        if version < 4 {
+            try migrateToVersion4()
+        }
     }
 
     /// v1：五张业务表，均含 `id / updated_at / deleted_at / sync_state`。
@@ -201,6 +204,21 @@ final class SQLiteDatabase {
         try executeScript("""
         ALTER TABLE saved_devices ADD COLUMN device_type TEXT;
         PRAGMA user_version = 3;
+        """)
+    }
+
+    /// v4：区分「用户别名」与「设备广播名」，并记录待上报字段的三态。
+    /// - `advertised_name`：扫描得到的广播名，由 v4 之前用于展示的 `name` 列回填；
+    ///   `name` 列保留并与 `advertised_name` 同值写入，避免降级版本读到空名称；
+    /// - `*_patch`：`absent` / `clear` / `set`，与 openapi 0.3.3 的缺省字段语义一一对应。
+    private func migrateToVersion4() throws {
+        try executeScript("""
+        ALTER TABLE saved_devices ADD COLUMN advertised_name TEXT NOT NULL DEFAULT '';
+        UPDATE saved_devices SET advertised_name = name WHERE advertised_name = '';
+        ALTER TABLE saved_devices ADD COLUMN alias_patch TEXT NOT NULL DEFAULT 'absent';
+        ALTER TABLE saved_devices ADD COLUMN advertised_name_patch TEXT NOT NULL DEFAULT 'absent';
+        ALTER TABLE saved_devices ADD COLUMN group_patch TEXT NOT NULL DEFAULT 'absent';
+        PRAGMA user_version = 4;
         """)
     }
 

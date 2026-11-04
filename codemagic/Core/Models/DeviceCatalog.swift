@@ -189,6 +189,7 @@ struct DeviceCatalog: Decodable, Equatable {
 /// `GET /my/devices/{platform}/{externalId}`：iOS 用 UUID 定位自己的设备记录。
 /// openapi 0.3.2 新增 `deviceType` / `vendor` / `firmwareVersion` / `compatibility`，
 /// 四者均可为 null（未注册型号、未核实元数据），解码时归一为 nil。
+/// openapi 0.3.3 新增 `advertisedName`（广播名，与用户别名 `alias` 分离），缺省按 absent 归一为 nil。
 struct UserDeviceInfo: Decodable, Equatable {
     let id: String
     let clientID: String
@@ -196,6 +197,7 @@ struct UserDeviceInfo: Decodable, Equatable {
     let externalID: String
     let mac: String
     let alias: String
+    let advertisedName: String?
     let group: String
     let updatedAt: Date
     let deletedAt: Date?
@@ -212,6 +214,7 @@ struct UserDeviceInfo: Decodable, Equatable {
         case externalId
         case mac
         case alias
+        case advertisedName
         case group
         case updatedAt
         case deletedAt
@@ -230,6 +233,7 @@ struct UserDeviceInfo: Decodable, Equatable {
         externalID = ((try? container.decodeIfPresent(String.self, forKey: .externalId)) ?? "").uppercased()
         mac = (try? container.decodeIfPresent(String.self, forKey: .mac)) ?? ""
         alias = (try? container.decodeIfPresent(String.self, forKey: .alias)) ?? ""
+        advertisedName = Self.nonEmpty(try? container.decodeIfPresent(String.self, forKey: .advertisedName))
         group = (try? container.decodeIfPresent(String.self, forKey: .group)) ?? ""
         updatedAt = SyncDateCodec.parse(
             (try? container.decodeIfPresent(String.self, forKey: .updatedAt)) ?? ""

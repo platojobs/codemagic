@@ -154,7 +154,7 @@ final class HomeViewModelTests: XCTestCase {
 
         let start = Date(timeIntervalSince1970: 1000)
         bluetooth.emitDiscovery(
-            makeScannedDevice(peripheralID: saved.peripheralID, name: saved.name, rssi: -50, lastSeenAt: start)
+            makeScannedDevice(peripheralID: saved.peripheralID, name: saved.advertisedName, rssi: -50, lastSeenAt: start)
         )
         XCTAssertNil(viewModel.lastRuleEvent)
 
@@ -188,7 +188,7 @@ final class HomeViewModelTests: XCTestCase {
             bluetooth.emitDiscovery(
                 makeScannedDevice(
                     peripheralID: saved.peripheralID,
-                    name: saved.name,
+                    name: saved.advertisedName,
                     rssi: rssi,
                     lastSeenAt: now.addingTimeInterval(offset)
                 )

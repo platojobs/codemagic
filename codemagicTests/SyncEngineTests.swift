@@ -127,7 +127,9 @@ final class SyncEngineTests: XCTestCase {
     private func makeRemote(
         id: String,
         externalID: String,
-        alias: String,
+        alias: String?,
+        advertisedName: String? = "PJ-Sensor",
+        group: String? = "默认分组",
         updatedAt: Date,
         platform: String = SavedDevice.iosPlatform,
         deletedAt: Date? = nil
@@ -137,7 +139,8 @@ final class SyncEngineTests: XCTestCase {
             platform: platform,
             externalID: externalID,
             alias: alias,
-            group: "默认分组",
+            advertisedName: advertisedName,
+            group: group,
             updatedAt: updatedAt,
             deletedAt: deletedAt
         )
@@ -216,7 +219,7 @@ final class SyncEngineTests: XCTestCase {
         let peripheralID = UUID()
         let local = SavedDevice(
             peripheralID: peripheralID,
-            name: "本地改名",
+            advertisedName: "本地改名",
             updatedAt: Date(timeIntervalSince1970: 1_700_000_000),
             syncState: .pending
         )
@@ -243,7 +246,7 @@ final class SyncEngineTests: XCTestCase {
         }
 
         let stored = try XCTUnwrap(savedDeviceStore.fetch(id: local.id))
-        XCTAssertEqual(stored.name, "另一台设备的新名字", "服务端 LWW 获胜")
+        XCTAssertEqual(stored.remark, "另一台设备的新名字", "服务端 LWW 获胜，别名回落为 remark")
         XCTAssertEqual(stored.syncState, .synced)
         XCTAssertEqual(engine.status.pendingCount, 0)
 
@@ -259,7 +262,7 @@ final class SyncEngineTests: XCTestCase {
         let peripheralID = UUID()
         let local = SavedDevice(
             peripheralID: peripheralID,
-            name: "本地旧名",
+            advertisedName: "本地旧名",
             updatedAt: Date(timeIntervalSince1970: 1_700_000_000),
             syncState: .pending
         )
@@ -278,7 +281,7 @@ final class SyncEngineTests: XCTestCase {
         _ = runSync(engine)
 
         let stored = try XCTUnwrap(savedDeviceStore.fetch(id: local.id))
-        XCTAssertEqual(stored.name, "云端新名")
+        XCTAssertEqual(stored.remark, "云端新名")
         XCTAssertEqual(stored.syncState, .synced)
         XCTAssertTrue(engine.status.lastConflictMessages.first?.contains("另一台设备改过这条") == true)
     }
@@ -288,7 +291,7 @@ final class SyncEngineTests: XCTestCase {
         let localUpdated = Date(timeIntervalSince1970: 1_700_000_100)
         let local = SavedDevice(
             peripheralID: peripheralID,
-            name: "本地新名",
+            advertisedName: "本地新名",
             updatedAt: localUpdated,
             syncState: .pending
         )
@@ -306,7 +309,7 @@ final class SyncEngineTests: XCTestCase {
         _ = runSync(engine)
 
         let stored = try XCTUnwrap(savedDeviceStore.fetch(id: local.id))
-        XCTAssertEqual(stored.name, "本地新名", "本地 LWW 获胜时不能被拉取静默覆盖")
+        XCTAssertEqual(stored.displayName, "本地新名", "本地 LWW 获胜时不能被拉取静默覆盖")
         XCTAssertEqual(api.pushRequests.count, 1, "本地较新时应继续上传")
     }
 
@@ -333,7 +336,7 @@ final class SyncEngineTests: XCTestCase {
         let peripheralID = UUID()
         let local = SavedDevice(
             peripheralID: peripheralID,
-            name: "将被云端删除",
+            advertisedName: "将被云端删除",
             updatedAt: Date(timeIntervalSince1970: 1_700_000_000),
             syncState: .synced
         )
@@ -412,7 +415,7 @@ final class SyncEngineTests: XCTestCase {
     func testReloginClearsTokenResetsCursorAndReuploadsLocalDevices() throws {
         let device = SavedDevice(
             peripheralID: UUID(),
-            name: "本机设备",
+            advertisedName: "本机设备",
             updatedAt: Date(timeIntervalSince1970: 1_700_000_000),
             syncState: .synced
         )
@@ -456,6 +459,180 @@ final class SyncEngineTests: XCTestCase {
         XCTAssertEqual(api.authCount, 1, "失败后自动同步不得悄悄建新号")
     }
 
+    // MARK: - 0.3.3 三态 / 别名隔离
+
+    /// absent 必须完全省略字段；clear 必须编码为空串。两者不能混为一谈。
+    func testPatchEncodesAbsentAsOmittedAndClearAsEmptyString() throws {
+        let date = Date(timeIntervalSince1970: 1_700_000_000)
+        let payload = PushDevice(
+            id: "d-1",
+            platform: "ios",
+            externalID: "EXT-1",
+            mac: nil,
+            alias: .absent,
+            advertisedName: .set("PJ-Sensor"),
+            group: .clear,
+            updatedAt: date,
+            deleted: false
+        )
+        let object = try XCTUnwrap(
+            try JSONSerialization.jsonObject(with: JSONEncoder().encode(payload)) as? [String: Any]
+        )
+        XCTAssertEqual(object["group"] as? String, "", "显式清除分组编码为空串")
+        XCTAssertEqual(object["advertisedName"] as? String, "PJ-Sensor")
+        XCTAssertNil(object["alias"], "未上报的别名字段必须省略")
+
+        let allAbsent = PushDevice(
+            id: "d-2",
+            platform: "ios",
+            externalID: "EXT-2",
+            mac: nil,
+            updatedAt: date,
+            deleted: false
+        )
+        let absentObject = try XCTUnwrap(
+            try JSONSerialization.jsonObject(with: JSONEncoder().encode(allAbsent)) as? [String: Any]
+        )
+        XCTAssertNil(absentObject["alias"])
+        XCTAssertNil(absentObject["advertisedName"])
+        XCTAssertNil(absentObject["group"], "未修改时不得把分组编码成空串")
+    }
+
+    /// 扫描只写广播名，用户编辑只写别名，互不覆盖。
+    func testAliasAndAdvertisedNameAreIsolated() {
+        let scanned = makeSavedDevice(name: "PJ-Sensor", advertisedNamePatch: .set("PJ-Sensor"))
+        let scanPayload = PushDevice(device: scanned)
+        XCTAssertEqual(scanPayload.advertisedName, .set("PJ-Sensor"))
+        XCTAssertEqual(scanPayload.alias, .absent, "扫描不得上报别名")
+        XCTAssertEqual(scanPayload.group, .absent, "扫描不得上报分组")
+
+        var edited = scanned
+        edited.remark = "客厅面板"
+        edited.aliasPatch = .set("客厅面板")
+        edited.advertisedNamePatch = .absent
+
+        let editPayload = PushDevice(device: edited)
+        XCTAssertEqual(editPayload.alias, .set("客厅面板"))
+        XCTAssertEqual(editPayload.advertisedName, .absent, "用户编辑不得上报广播名")
+        XCTAssertEqual(edited.advertisedName, "PJ-Sensor", "编辑别名不覆盖广播名")
+        XCTAssertEqual(edited.displayName, "客厅面板", "展示顺序：别名 → 广播名 → 型号")
+    }
+
+    /// 幂等键只取上报字段：未上报字段的值不计入哈希，清除与未上报必须区分。
+    func testIdempotencyKeyExcludesUnreportedFields() {
+        let date = Date(timeIntervalSince1970: 1_700_000_000)
+        func make(_ alias: Patch<String> = .absent, group: Patch<String> = .absent) -> PushDevice {
+            PushDevice(
+                id: "d-1",
+                platform: "ios",
+                externalID: "EXT-1",
+                mac: nil,
+                alias: alias,
+                group: group,
+                updatedAt: date,
+                deleted: false
+            )
+        }
+        let base = SyncHashing.idempotencyKey(for: [make()])
+        XCTAssertEqual(base, SyncHashing.idempotencyKey(for: [make()]), "同内容重试必须稳定")
+        XCTAssertEqual(
+            base,
+            SyncHashing.idempotencyKey(for: [make(.absent, group: .absent)]),
+            "未上报字段不得因为空值进入哈希"
+        )
+        XCTAssertNotEqual(base, SyncHashing.idempotencyKey(for: [make(.set("别名"))]))
+        XCTAssertNotEqual(base, SyncHashing.idempotencyKey(for: [make(group: .clear)]), "清除与未上报必须区分")
+    }
+
+    /// 清空分组后必须显式上报空串；再次同步不得复活旧分组。
+    func testClearedGroupIsReportedAsEmptyAndDoesNotResurrect() throws {
+        let peripheralID = UUID()
+        let base = Date(timeIntervalSince1970: 1_700_000_000)
+        let synced = SavedDevice(
+            peripheralID: peripheralID,
+            advertisedName: "PJ-Sensor",
+            groupName: "客厅",
+            updatedAt: base,
+            syncState: .synced
+        )
+        try savedDeviceStore.upsert(synced)
+
+        var cleared = synced
+        cleared.groupName = SavedDevice.defaultGroupName
+        cleared.groupPatch = .clear
+        cleared.updatedAt = base.addingTimeInterval(10)
+        cleared.syncState = .pending
+        try savedDeviceStore.upsert(cleared)
+
+        let engine = makeEngine()
+        _ = runSync(engine)
+
+        let pushed = try XCTUnwrap(api.pushRequests.last?.devices.first)
+        XCTAssertEqual(pushed.id, synced.id.uuidString)
+        XCTAssertEqual(pushed.group, .clear, "删除分组必须上报 \"group\": \"\"")
+        XCTAssertEqual(pushed.alias, .absent, "未修改的别名不得上报")
+        XCTAssertEqual(pushed.advertisedName, .absent, "未修改的广播名不得上报")
+
+        // 服务端返回清除后的 group 空串，第二次同步不得把「客厅」拉回来。
+        let server = makeRemote(
+            id: synced.id.uuidString,
+            externalID: peripheralID.uuidString.uppercased(),
+            alias: nil,
+            group: "",
+            updatedAt: base.addingTimeInterval(20)
+        )
+        api.changesPages = [
+            .success(SyncChangesPage(changes: [makeChange(payload: server, op: "upsert")], nextCursor: 1, hasMore: false))
+        ]
+        _ = runSync(engine)
+
+        let stored = try XCTUnwrap(savedDeviceStore.fetch(id: synced.id))
+        XCTAssertEqual(stored.groupName, SavedDevice.defaultGroupName, "已清除的分组不得复活")
+        XCTAssertEqual(stored.groupPatch, .absent)
+        XCTAssertEqual(stored.advertisedName, "PJ-Sensor", "广播名不得被缺省字段清空")
+    }
+
+    /// 冲突响应省略可选字段时必须按 absent 解析并保留本地值。
+    func testConflictResponseWithOmittedFieldsKeepsLocalValues() throws {
+        let peripheralID = UUID()
+        let base = Date(timeIntervalSince1970: 1_700_000_000)
+        let local = SavedDevice(
+            peripheralID: peripheralID,
+            advertisedName: "PJ-Sensor",
+            remark: "本地别名",
+            groupName: "客厅",
+            updatedAt: base,
+            syncState: .pending
+        )
+        try savedDeviceStore.upsert(local)
+
+        let json = """
+        {"id":"\(local.id.uuidString)","platform":"ios",
+         "externalId":"\(peripheralID.uuidString.uppercased())",
+         "updatedAt":"\(SyncDateCodec.string(from: base.addingTimeInterval(100)))",
+         "serverSeq":9}
+        """
+        let server = try JSONDecoder().decode(RemoteDevice.self, from: Data(json.utf8))
+        XCTAssertNil(server.alias, "缺省别名按 absent 解析")
+        XCTAssertNil(server.group, "缺省分组按 absent 解析")
+        XCTAssertNil(server.advertisedName, "缺省广播名按 absent 解析")
+
+        let conflict = SyncConflict(
+            id: local.id.uuidString,
+            externalID: peripheralID.uuidString.uppercased(),
+            reason: "server_newer",
+            server: server
+        )
+        api.pushResults = [.success(PushResult(conflicts: [conflict]))]
+        _ = runSync(makeEngine())
+
+        let stored = try XCTUnwrap(savedDeviceStore.fetch(id: local.id))
+        XCTAssertEqual(stored.remark, "本地别名")
+        XCTAssertEqual(stored.advertisedName, "PJ-Sensor")
+        XCTAssertEqual(stored.groupName, "客厅")
+        XCTAssertEqual(stored.syncState, .synced)
+    }
+
     // MARK: - Helpers
 
     private func makeUpsertChange(id: String, externalID: String, alias: String, updatedAt: Date) -> SyncChange {
@@ -480,8 +657,8 @@ final class SyncEngineTests: XCTestCase {
             "clientId": "android-client",
             "platform": payload.platform,
             "externalId": payload.externalID,
-            "alias": payload.alias,
-            "group": payload.group,
+            "alias": payload.alias ?? "",
+            "group": payload.group ?? "",
             "updatedAt": SyncDateCodec.string(from: payload.updatedAt),
         ]
         if let deletedAt = payload.deletedAt {
@@ -574,8 +751,8 @@ final class SyncAPIClientTests: XCTestCase {
             platform: "ios",
             externalID: "abc",
             mac: nil,
-            alias: "设备",
-            group: "默认分组",
+            alias: .set("设备"),
+            group: .set("默认分组"),
             updatedAt: Date(timeIntervalSince1970: 1_700_000_000),
             deleted: false
         )
@@ -685,7 +862,9 @@ final class SyncDecodingTests: XCTestCase {
         XCTAssertEqual(payload.externalID, "ABC")
         XCTAssertEqual(payload.platform, SavedDevice.iosPlatform, "platform 缺失时按 iOS 兜底")
         XCTAssertNil(payload.mac)
-        XCTAssertEqual(payload.alias, "")
+        XCTAssertNil(payload.alias, "缺省别名按 absent 解析，而不是空串")
+        XCTAssertNil(payload.advertisedName, "缺省广播名按 absent 解析")
+        XCTAssertNil(payload.group, "缺省分组按 absent 解析")
         XCTAssertEqual(page.nextCursor, 0)
         XCTAssertFalse(page.hasMore)
     }
