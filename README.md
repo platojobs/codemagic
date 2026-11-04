@@ -12,7 +12,7 @@
 
 | 项 | 结果 |
 | --- | --- |
-| 版本 | **v0.3.3**（`MARKETING_VERSION 0.3.3`，`CURRENT_PROJECT_VERSION 7`，tag `v0.3.3`，契约对齐 Go 0.3.2） |
+| 版本 | **v0.3.4**（`MARKETING_VERSION 0.3.4`，`CURRENT_PROJECT_VERSION 8`，tag `v0.3.4`，契约对齐 Go 0.3.2） |
 | 五模块（首页 / 设备 / 产品 / 市场 / 我的） | 已实现，纯代码 UIKit，真实数据路径 |
 | CoreBluetooth 扫描 + 连接 | 已实现（`CBCentralManager`，真实 RSSI） |
 | 本地持久化 | 已实现（SQLite3，含同步字段；迁移 v3 增加 `saved_devices.device_type`） |
@@ -21,7 +21,7 @@
 | 自绘 RSSI + 代码组装空状态 | 已实现 |
 | 单元测试 | **74 个用例，0 失败**（`** TEST SUCCEEDED **`，2026-11-05，Xcode 27.2 / iPhone 17 模拟器） |
 | 模拟器构建 | **通过**（`xcodebuild ... build`，`** BUILD SUCCEEDED **`） |
-| CI | Codemagic `codemagic.yaml` 已配置（macOS + Xcode 16.4，构建 + 测试 + artifact）；**尚未在 Codemagic 上实际运行** |
+| CI | **GitHub Actions 已实际运行 success**（[run 41902292283](https://github.com/platojobs/codemagic/actions/runs/41902292283)，macos-15 + Xcode 16.4，build + 74 单测 + artifact）；`codemagic.yaml` 作为可选替代保留但未验证 |
 | 真机 BLE / 签名 | **未验证**：本机无真机与 Apple 开发者账号，需自行验证（见第 9 节） |
 | 真实后端同步 | **契约已联调**：`scripts/e2e-contract.sh` 对本地 `PJGoIoT` 0.3.2（`STORE=fixture`）跑 **71 项断言，全部 PASS**；App 内同步 UI 仍需真机手动验证 |
 
@@ -259,14 +259,28 @@ cd /path/to/codemagic
 
 ## 8. 持续集成
 
+### 8.1 GitHub Actions（已实际运行，当前主用）
+
+[`.github/workflows/ios.yml`](.github/workflows/ios.yml)：`runs-on: macos-15`，只做构建与单元测试，不做签名 / Archive。
+
+- 触发：**仅 push 到 `main` 与 `v*` tag**（另保留 `workflow_dispatch` 手动触发）；**PR 不跑**。
+- 步骤：`actions/checkout` → 选择 Xcode（优先 `Xcode_16.4`）并打印 `xcodebuild -version` / 可用模拟器 → `xcodebuild build`（`generic/platform=iOS Simulator`）→ `xcodebuild test`（从 `xcrun simctl list devices available` 动态取首个 iPhone 模拟器 UDID）→ 上传 `*.xcresult`（`actions/upload-artifact`，`if: always()`）。
+- 使用 `CODE_SIGNING_ALLOWED=NO`，不需要证书与描述文件。
+- 首次真实运行：[run 41902292283](https://github.com/platojobs/codemagic/actions/runs/41902292283)，**success**，Xcode 16.4，`** BUILD SUCCEEDED **` / `Executed 74 tests, with 0 failures` / `** TEST SUCCEEDED **`，`xcresult-41902292283.zip` 已上传。
+- 失败与修复：首次提交因 `run: |` 块内嵌的多行 Python 未随块缩进，YAML 解析失败（run（无任何 job）直接 failure）；改为单行 `simctl + grep/sed` 提取模拟器 UDID 后通过，未使用 `|| true` 降级。
+- **计费**：macOS runner 按分钟计费且显著高于 Linux，因此该 workflow 只在 `main` 与 tag 触发、不跑 PR，并用 `concurrency` 按 ref 取消重复运行。
+- 备注：`actions/checkout@v4` / `actions/upload-artifact@v4` 在 runner 上会有 Node 20 弃用告警，不影响结果。
+
+### 8.2 Codemagic（可选替代，未验证）
+
 仓库根目录 `codemagic.yaml`（Codemagic）：
 
 - 运行环境：Codemagic `mac_mini_m2`（macOS），指定 **Xcode 16.4**。
 - 步骤：`xcodebuild -version` → `xcodebuild -list` → 模拟器 `build` → 模拟器 `test` → 打包 `codemagic.app`。
 - 产物（artifact）：`codemagic-simulator-app.zip`（Debug-iphonesimulator）与 `build/ios/Logs/Test/*.xcresult`。
 - 使用 `CODE_SIGNING_ALLOWED=NO`，不依赖签名证书。
-- **该配置尚未在 Codemagic 上实际运行**；本地已用等价命令构建与测试通过。
-- 此前尝试 GitHub Actions 时，当前仓库 OAuth token 缺少 `workflow` 权限，无法推送 `.github/workflows/*`，因此改用 Codemagic（根目录配置不受该限制）。如需 GitHub Actions，请由仓库管理员补充 workflow 权限后自行添加。
+- **该配置尚未在 Codemagic 上实际运行**，仅作为可选替代方案保留；当前以 GitHub Actions 为真实 CI 证据。
+- 历史说明：本仓库 OAuth token 缺少 `workflow` scope，`.github/workflows/*` 无法用 HTTPS 推送；本次改用 SSH over 443（`ssh://git@ssh.github.com:443/platojobs/codemagic.git`）推送，未修改全局 git config。
 
 ---
 
@@ -296,6 +310,7 @@ cd /path/to/codemagic
 
 ## 10. 版本记录
 
+- `v0.3.4`：CI 落地（`MARKETING_VERSION 0.3.4` / build 8，tag `v0.3.4`）。新增 `.github/workflows/ios.yml`（macos-15 + Xcode 16.4，build + 74 单测 + xcresult artifact，仅 main/tag 触发）；GitHub Actions 首次真实运行 success（run 41902292283）；`codemagic.yaml` 保留为可选替代但未验证。
 - `v0.3.3`：对齐 `openapi.yaml` **0.3.2**（`MARKETING_VERSION 0.3.3` / build 7，tag `v0.3.3`）。接入 `UserDevice.deviceType` / `vendor` / `firmwareVersion` / `compatibility`（可空，详情页云端优先，null 显示「型号未知 / — / 暂无兼容性说明」，未注册型号仍展示别名 / 分组 / 最近出现）；catalog `firmwares` / `accessories` 接入 `vendor` / `compatibility`；市场新增按厂商与兼容性筛选（真实字段）；`PushDevice.deviceType` 可选，已知型号才上传；SQLite 迁移 v3（`saved_devices.device_type`）；单测 74 个，E2E 71 项（新增 catalog vendor/compatibility 与 UserDevice 新字段、null 降级断言）。
 - `v0.3.2`：文档补齐（`docs/acceptance.md` 真机验收清单、`docs/troubleshooting.md`、`docs/releasenotes.md`）；401 登录失效交互：「我的」页展示「登录已失效」+「重新登录」确认流程，确认后才换匿名账号，游标重置并重推本地活动设备；`sync.reloginRequired` 持久化，前后台自动同步不再静默建号；单测增至 68 个；`MARKETING_VERSION 0.3.2` / build 6，tag `v0.3.2`。
 - `v0.3.1`：对齐 `openapi.yaml` 0.3.1（`MARKETING_VERSION 0.3.1` / build 5，tag `v0.3.1`）；产品改为 `device-types` + `{type}/catalog`，市场由 catalog 聚合 firmware + accessories，iOS 设备详情改用复合键 `my/devices/ios/{externalId}`；移除产品 / 市场 / 设备详情的全部历史端点；E2E 扩至 55 项断言（含 catalog 与复合键 200/404）；单测 64 个。

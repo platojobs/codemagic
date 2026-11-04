@@ -1,6 +1,6 @@
 # KNOWN_ISSUES
 
-记录当前版本（v0.3.3）已知、且本机无法闭环验证的问题。已修复项不在此列。
+记录当前版本（v0.3.4）已知、且本机无法闭环验证的问题。已修复项不在此列。
 
 ## 需用户在真实环境验证
 
@@ -10,9 +10,10 @@
 2. **签名与分发未验证**
    - 本机无 Apple 开发者账号与证书，未执行 `archive` / `exportArchive`，未上架 App Store / TestFlight。
    - CI 与本地构建统一使用 `CODE_SIGNING_ALLOWED=NO`，只验证编译与测试。
-3. **CI 尚未实际运行**
-   - 根目录 `codemagic.yaml` 已编写（Codemagic，macOS + Xcode 16.4），但本机无法代替远端执行；需在 Codemagic 上首次运行后观察结果。
-   - GitHub Actions 方式因当前 OAuth token 缺少 `workflow` 权限被拒绝推送，未纳入仓库。
+3. **CI**
+   - GitHub Actions `ios.yml` 已实际运行成功（run [41902292283](https://github.com/platojobs/codemagic/actions/runs/41902292283)，macos-15 + Xcode 16.4，build + 74 单测 + xcresult artifact）；仅 push 到 `main` / tag 触发，PR 不跑（macOS runner 计费高）。
+   - 根目录 `codemagic.yaml`（Codemagic）保留为可选替代方案，**仍未在 Codemagic 上运行**，不能作为当前 CI 证据。
+   - 仓库 OAuth token 缺少 `workflow` scope，推送 `.github/workflows/*` 使用 SSH over 443（`ssh://git@ssh.github.com:443/platojobs/codemagic.git`），未改全局 git config。
 4. **后台同步调度未在真机验证**
    - `BGAppRefreshTask`（`com.platojobs.codemagic.sync`）已注册并在前后台切换时提交，但模拟器不执行后台刷新，实际触发频率与时长需真机 / Xcode Devices 观察。
 5. **App 内同步仍未在真机 + 真实后端闭环**

@@ -4,12 +4,31 @@
 
 | Tag | MARKETING_VERSION | Build | 日期 | 对齐后端 |
 | --- | --- | --- | --- | --- |
+| `v0.3.4` | 0.3.4 | 8 | 2026-11-05 | 0.3.2 |
 | `v0.3.3` | 0.3.3 | 7 | 2026-11-05 | 0.3.2 |
 | `v0.3.2` | 0.3.2 | 6 | 2026-11-05 | 0.3.1 |
 | `v0.3.1` | 0.3.1 | 5 | 2026-11-05 | 0.3.1 |
 | `v0.3.0` | 0.3.0 | 4 | 2026-11-05 | 0.3.0 |
 | `v0.2.0` | 0.2.0 | 3 | 2026-11-05 | 0.2.0 |
 | `v0.1.0` | — | 1 | 2026-11-05 | — |
+
+---
+
+## v0.3.4（build 8）
+
+**主题：GitHub Actions CI 首次真实运行**
+
+### 新增
+- `.github/workflows/ios.yml`：`runs-on: macos-15`，checkout → 选择 Xcode 16.4 并打印版本/模拟器 → `xcodebuild build`（generic iOS Simulator）→ `xcodebuild test`（动态选首个可用 iPhone 模拟器）→ 上传 `*.xcresult`。
+- 触发仅 `push` 到 `main` 与 `v*` tag（另有手动 `workflow_dispatch`），PR 不跑；macOS runner 计费高于 Linux，用 `concurrency` 取消同 ref 重复运行。
+
+### 修复
+- 首次 workflow 因 `run: |` 内多行 Python 未随块缩进导致 YAML 解析失败（无任何 job，run 直接 failure）；改为单行 `simctl + grep/sed` 提取模拟器 UDID 后通过。
+
+### 验证
+- GitHub Actions run [41902292283](https://github.com/platojobs/codemagic/actions/runs/41902292283)：**success**，Xcode 16.4，`** BUILD SUCCEEDED **`、`Executed 74 tests, with 0 failures`、`** TEST SUCCEEDED **`，xcresult 已作为 artifact 上传。
+- `codemagic.yaml` 保留为可选替代方案，仍未在 Codemagic 上运行。
+- `MARKETING_VERSION 0.3.4` / build 8。
 
 ---
 
