@@ -71,8 +71,8 @@ final class SavedDeviceStore {
             """
             INSERT OR REPLACE INTO saved_devices
             (id, peripheral_id, platform, external_id, name, remark, group_name, mac, vendor,
-             firmware_version, last_seen_at, created_at, updated_at, deleted_at, sync_state)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+             device_type, firmware_version, last_seen_at, created_at, updated_at, deleted_at, sync_state)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """,
             [
                 .text(device.id.uuidString),
@@ -84,6 +84,7 @@ final class SavedDeviceStore {
                 .text(device.groupName),
                 device.mac.map(SQLValue.text) ?? .null,
                 device.vendor.map(SQLValue.text) ?? .null,
+                device.deviceType.map(SQLValue.text) ?? .null,
                 device.firmwareVersion.map(SQLValue.text) ?? .null,
                 device.lastSeenAt.map { .double($0.timeIntervalSince1970) } ?? .null,
                 .double(device.createdAt.timeIntervalSince1970),
@@ -177,6 +178,7 @@ final class SavedDeviceStore {
             groupName: row.text("group_name") ?? SavedDevice.defaultGroupName,
             mac: row.text("mac"),
             vendor: row.text("vendor"),
+            deviceType: row.text("device_type"),
             firmwareVersion: row.text("firmware_version"),
             lastSeenAt: lastSeenAt,
             createdAt: createdAt,

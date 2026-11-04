@@ -137,7 +137,10 @@ final class DeviceDetailViewController: UIViewController {
 
         if let product = viewModel.product {
             localRows.append(Row(title: "厂商", value: product.vendor.isEmpty ? "—" : product.vendor))
-            localRows.append(Row(title: "型号", value: product.deviceType.isEmpty ? "—" : product.deviceType))
+            // 未注册型号时 deviceType 为 null：显示「型号未知」，不影响别名 / 分组 / 最近出现。
+            localRows.append(
+                Row(title: "型号", value: product.deviceType.isEmpty ? "型号未知" : product.deviceType)
+            )
             localRows.append(
                 Row(title: "固件版本", value: product.firmwareVersion.isEmpty ? "—" : product.firmwareVersion)
             )
@@ -155,13 +158,19 @@ final class DeviceDetailViewController: UIViewController {
 
             let compatibilityValue = product.compatibility.isEmpty
                 ? "暂无兼容性说明"
-                : product.compatibility.joined(separator: "、")
+                : product.compatibility.joined(separator: "；")
             sections.append(
                 SectionModel(
                     title: "兼容性",
                     rows: [Row(title: "兼容设备 / 固件", value: compatibilityValue)]
                 )
             )
+
+            if !product.note.isEmpty {
+                sections.append(
+                    SectionModel(title: "云端记录", rows: [Row(title: "同步信息", value: product.note)])
+                )
+            }
         }
 
         return sections

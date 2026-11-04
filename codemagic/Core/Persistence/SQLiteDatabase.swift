@@ -107,6 +107,9 @@ final class SQLiteDatabase {
         if version < 2 {
             try migrateToVersion2()
         }
+        if version < 3 {
+            try migrateToVersion3()
+        }
     }
 
     /// v1：五张业务表，均含 `id / updated_at / deleted_at / sync_state`。
@@ -189,6 +192,15 @@ final class SQLiteDatabase {
         CREATE UNIQUE INDEX IF NOT EXISTS idx_saved_devices_sync_key
             ON saved_devices(platform, external_id) WHERE deleted_at IS NULL;
         PRAGMA user_version = 2;
+        """)
+    }
+
+    /// v3：记录从云端详情拿到的型号，供推送 `PushDevice.deviceType` 使用。
+    /// 可为空；无法从 catalog 匹配时保持 NULL，不填假值。
+    private func migrateToVersion3() throws {
+        try executeScript("""
+        ALTER TABLE saved_devices ADD COLUMN device_type TEXT;
+        PRAGMA user_version = 3;
         """)
     }
 

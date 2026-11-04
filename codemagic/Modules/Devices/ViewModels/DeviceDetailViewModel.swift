@@ -132,10 +132,14 @@ final class DeviceDetailViewModel {
         }
     }
 
-    /// 把设备信息回写本地设备表，便于列表直接展示厂商与固件版本。
+    /// 把设备信息回写本地设备表，便于列表直接展示厂商与固件版本，
+    /// 并在后续推送时带上 `deviceType`（云端未返回型号时保留原值，不写空）。
     private func persist(product: ProductModel) {
         device.mac = product.mac.isEmpty ? nil : product.mac
         device.vendor = product.vendor.isEmpty ? nil : product.vendor
+        if !product.deviceType.isEmpty {
+            device.deviceType = product.deviceType
+        }
         device.firmwareVersion = product.firmwareVersion.isEmpty ? nil : product.firmwareVersion
         device.updatedAt = Date()
         device.syncState = .pending

@@ -171,10 +171,27 @@ final class PersistenceTests: XCTestCase {
         XCTAssertEqual(loaded.syncKey, "android:\(externalID)")
 
         let version = try testDatabase.database.query("PRAGMA user_version;").first?.integer("user_version")
-        XCTAssertEqual(version, 2)
+        XCTAssertEqual(version, 3)
     }
 
-    func testLegacyVersion1DatabaseMigratesToVersion2() throws {
+    func testDeviceTypeColumnRoundTrip() throws {
+        let store = SavedDeviceStore(database: testDatabase.database)
+        let externalID = SyncHashing.stableUUID(seed: "ios-device").uuidString
+        let device = SavedDevice(
+            peripheralID: UUID(uuidString: externalID)!,
+            platform: "ios",
+            externalID: externalID,
+            name: "iOS 设备",
+            deviceType: "tracker",
+            syncState: .pending
+        )
+        try store.upsert(device)
+
+        let loaded = try XCTUnwrap(store.fetch(platform: "ios", externalID: externalID))
+        XCTAssertEqual(loaded.deviceType, "tracker")
+    }
+
+    func testLegacyVersion1DatabaseMigratesToCurrentVersion() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("codemagic-legacy-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -217,9 +234,10 @@ final class PersistenceTests: XCTestCase {
         let device = try XCTUnwrap(devices.first)
         XCTAssertEqual(device.platform, "ios", "旧记录平台兜底为 ios")
         XCTAssertEqual(device.externalID, peripheralID.uuidString.uppercased(), "externalId 由 peripheral_id 回填")
+        XCTAssertNil(device.deviceType, "旧记录不知道型号，保持 NULL")
         XCTAssertEqual(device.syncState, .synced)
 
         let version = try migrated.query("PRAGMA user_version;").first?.integer("user_version")
-        XCTAssertEqual(version, 2)
+        XCTAssertEqual(version, 3)
     }
 }

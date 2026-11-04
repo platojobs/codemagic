@@ -88,24 +88,29 @@ final class NetworkingTests: XCTestCase {
 
     // MARK: - Client
 
-    /// 模拟 0.3.1 后端：型号列表 + catalog（含固件与配件）。
+    /// 模拟 0.3.2 后端：型号列表 + catalog（固件 / 配件均带 vendor 与 compatibility）。
     private func makeCatalogStub() -> StubHTTPClient {
         StubHTTPClient { url in
             switch url.path {
             case "/api/v1/device-types":
                 let json = """
                 {"items":[{"type":"tracker","name":"BLE Tracker","vendor":"Nordic Semiconductor",
-                  "description":"支持 BLE 5.0","gattServices":[{"uuid":"180F","name":"Battery"}]}]}
+                  "description":"支持 BLE 5.0","gattServices":[{"uuid":"180F","name":"Battery"}],
+                  "compatibility":{"platforms":["ios","android"],"protocol":"ble-gatt"}}]}
                 """
                 return .success(Data(json.utf8))
             case "/api/v1/device-types/tracker/catalog":
                 let json = """
                 {"deviceType":{"type":"tracker","name":"BLE Tracker","vendor":"Nordic Semiconductor",
-                   "description":"支持 BLE 5.0","gattServices":[{"uuid":"180F","name":"Battery"}]},
+                   "description":"支持 BLE 5.0","gattServices":[{"uuid":"180F","name":"Battery"}],
+                   "compatibility":{"platforms":["ios","android"],"protocol":"ble-gatt"}},
                  "firmwares":[{"id":"fw-1","deviceType":"tracker","version":"1.2.3",
-                   "releaseNotes":"修复断连重试问题","releasedAt":"2026-10-01T00:00:00Z"}],
+                   "releaseNotes":"修复断连重试问题","releasedAt":"2026-10-01T00:00:00Z",
+                   "vendor":"Acme Firmware",
+                   "compatibility":{"platforms":["ios"],"protocol":"ble-gatt","features":["dfu"]}}],
                  "accessories":[{"id":"acc-1","deviceType":"tracker","name":"磁吸底座",
-                   "sku":"SKU-1","description":"金属底座"}]}
+                   "sku":"SKU-1","description":"金属底座","vendor":"Acme Accessories",
+                   "compatibility":{"deviceTypes":["tracker"]}}]}
                 """
                 return .success(Data(json.utf8))
             default:
@@ -129,6 +134,7 @@ final class NetworkingTests: XCTestCase {
         XCTAssertEqual(products.first?.vendor, "Nordic Semiconductor")
         XCTAssertEqual(products.first?.firmwareVersion, "1.2.3")
         XCTAssertEqual(products.first?.gattServices.first?.uuid, "180F")
+        XCTAssertEqual(products.first?.compatibility, ["平台：ios、android", "协议：ble-gatt"])
         XCTAssertEqual(products.first?.id, "tracker")
         XCTAssertTrue(products.first?.note.contains("支持 BLE 5.0") == true)
         XCTAssertTrue(client.requestedURLs.contains { $0.path == "/api/v1/device-types" })
@@ -181,12 +187,16 @@ final class NetworkingTests: XCTestCase {
         XCTAssertEqual(items.count, 2)
         XCTAssertEqual(items[0].kind, .firmware)
         XCTAssertEqual(items[0].name, "固件 1.2.3")
-        XCTAssertEqual(items[0].vendor, "Nordic Semiconductor")
-        XCTAssertEqual(items[0].compatibility, "BLE Tracker")
+        XCTAssertEqual(items[0].vendor, "Acme Firmware", "厂商取固件自身真实字段")
+        XCTAssertEqual(items[0].compatibility, "平台：ios；协议：ble-gatt；特性：dfu")
+        XCTAssertEqual(items[0].compatibilityTags, ["平台：ios", "协议：ble-gatt"])
         XCTAssertEqual(items[0].summary, "修复断连重试问题")
         XCTAssertEqual(items[1].kind, .accessory)
         XCTAssertEqual(items[1].name, "磁吸底座")
         XCTAssertEqual(items[1].version, "SKU-1")
+        XCTAssertEqual(items[1].vendor, "Acme Accessories")
+        XCTAssertEqual(items[1].compatibility, "型号：tracker")
+        XCTAssertEqual(items[1].compatibilityTags, ["型号：tracker"])
         XCTAssertTrue(client.requestedURLs.contains { $0.path.hasSuffix("/catalog") })
         XCTAssertFalse(client.requestedURLs.contains { $0.path.contains("/api/market") })
     }
@@ -196,7 +206,9 @@ final class NetworkingTests: XCTestCase {
         let recordJSON = """
         {"id":"dev-1","clientId":"ios-client","platform":"ios",
          "externalId":"\(peripheralID.uuidString.lowercased())","mac":"AA:BB:CC:DD:EE:FF",
-         "alias":"我的追踪器","group":"客厅","updatedAt":"2026-11-05T00:00:00Z","serverSeq":9}
+         "alias":"我的追踪器","group":"客厅","updatedAt":"2026-11-05T00:00:00Z","serverSeq":9,
+         "deviceType":"tracker","vendor":"Nordic Semiconductor","firmwareVersion":"1.2.3",
+         "compatibility":{"platforms":["ios"],"protocol":"ble-gatt","minAppVersion":"0.3.3"}}
         """
         let client = StubHTTPClient { _ in .success(Data(recordJSON.utf8)) }
         let tokenStore = InMemoryTokenStore()
@@ -212,6 +224,13 @@ final class NetworkingTests: XCTestCase {
 
         XCTAssertEqual(product.mac, "AA:BB:CC:DD:EE:FF")
         XCTAssertEqual(product.id, "dev-1")
+        XCTAssertEqual(product.deviceType, "tracker", "云端 deviceType 优先展示")
+        XCTAssertEqual(product.vendor, "Nordic Semiconductor")
+        XCTAssertEqual(product.firmwareVersion, "1.2.3")
+        XCTAssertEqual(
+            product.compatibility,
+            ["平台：ios", "协议：ble-gatt", "最低 App：0.3.3"]
+        )
         XCTAssertTrue(product.note.contains("我的追踪器"))
         XCTAssertTrue(product.note.contains(peripheralID.uuidString.uppercased()))
 
@@ -246,7 +265,33 @@ final class NetworkingTests: XCTestCase {
         XCTAssertEqual(catalog.deviceType.name, "")
         XCTAssertEqual(catalog.firmwares.first?.id, "fw-1")
         XCTAssertEqual(catalog.firmwares.first?.version, "")
+        XCTAssertEqual(catalog.firmwares.first?.vendor, "", "缺失 vendor 时为空串")
+        XCTAssertNil(catalog.firmwares.first?.compatibility, "缺失 compatibility 时为 nil")
         XCTAssertTrue(catalog.accessories.isEmpty)
+    }
+
+    func testUserDeviceNullFieldsMapToNil() throws {
+        let json = """
+        {"id":"dev-2","platform":"ios","externalId":"UUID",
+         "updatedAt":"2026-11-05T00:00:00Z",
+         "deviceType":null,"vendor":null,"firmwareVersion":null,"compatibility":null}
+        """
+        let record = try JSONDecoder().decode(UserDeviceInfo.self, from: Data(json.utf8))
+        XCTAssertNil(record.deviceType)
+        XCTAssertNil(record.vendor)
+        XCTAssertNil(record.firmwareVersion)
+        XCTAssertNil(record.compatibility)
+
+        let emptyJSON = """
+        {"id":"dev-3","platform":"ios","externalId":"UUID",
+         "updatedAt":"2026-11-05T00:00:00Z",
+         "deviceType":"","vendor":"  ","firmwareVersion":"","compatibility":{}}
+        """
+        let empty = try JSONDecoder().decode(UserDeviceInfo.self, from: Data(emptyJSON.utf8))
+        XCTAssertNil(empty.deviceType, "空串按 null 渲染")
+        XCTAssertNil(empty.vendor, "空白按 null 渲染")
+        XCTAssertNil(empty.firmwareVersion)
+        XCTAssertEqual(empty.compatibility?.displayItems, [])
     }
 
     func testUnauthorizedMapsToAPIError() throws {
@@ -267,6 +312,42 @@ final class NetworkingTests: XCTestCase {
         }
         XCTAssertEqual(code, "UNAUTHORIZED")
         XCTAssertEqual(statusCode, 401)
+    }
+
+    func testPushDeviceEncodesDeviceTypeOnlyWhenKnown() throws {
+        let base = PushDevice(
+            id: "d1",
+            platform: "ios",
+            externalID: "UUID-1",
+            mac: nil,
+            alias: "设备",
+            group: "未分组",
+            updatedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            deleted: false,
+            deviceType: "tracker"
+        )
+        let knownData = try JSONEncoder().encode(base)
+        let known = try XCTUnwrap(
+            try JSONSerialization.jsonObject(with: knownData) as? [String: Any]
+        )
+        XCTAssertEqual(known["deviceType"] as? String, "tracker")
+
+        let unknown = PushDevice(
+            id: "d2",
+            platform: "ios",
+            externalID: "UUID-2",
+            mac: nil,
+            alias: "设备",
+            group: "未分组",
+            updatedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            deleted: false,
+            deviceType: "   "
+        )
+        let unknownData = try JSONEncoder().encode(unknown)
+        let unknownObject = try XCTUnwrap(
+            try JSONSerialization.jsonObject(with: unknownData) as? [String: Any]
+        )
+        XCTAssertNil(unknownObject["deviceType"], "未知型号不得写入空串或假值")
     }
 
     func testErrorCodesAreStable() {

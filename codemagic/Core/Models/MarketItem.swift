@@ -39,6 +39,8 @@ struct MarketItem: Identifiable, Decodable, Equatable {
     let vendor: String
     let version: String
     let compatibility: String
+    /// 来自兼容性对象的真实字段值（如「平台：ios」「协议：ble-gatt」），仅用于筛选。
+    let compatibilityTags: [String]
     let summary: String
 
     init(
@@ -48,6 +50,7 @@ struct MarketItem: Identifiable, Decodable, Equatable {
         vendor: String,
         version: String,
         compatibility: String,
+        compatibilityTags: [String] = [],
         summary: String
     ) {
         self.id = id
@@ -56,6 +59,7 @@ struct MarketItem: Identifiable, Decodable, Equatable {
         self.vendor = vendor
         self.version = version
         self.compatibility = compatibility
+        self.compatibilityTags = compatibilityTags
         self.summary = summary
     }
 
@@ -93,10 +97,16 @@ struct MarketItem: Identifiable, Decodable, Equatable {
 
         if let text = try? container.decode(String.self, forKey: .compatibility) {
             compatibility = text
+            compatibilityTags = []
         } else if let list = try? container.decode([String].self, forKey: .compatibility) {
             compatibility = list.joined(separator: "、")
+            compatibilityTags = []
+        } else if let info = try? container.decode(CompatibilityInfo.self, forKey: .compatibility) {
+            compatibility = info.displayItems.joined(separator: "；")
+            compatibilityTags = info.filterTags
         } else {
             compatibility = ""
+            compatibilityTags = []
         }
     }
 

@@ -141,7 +141,8 @@ private func madeDevice(
     alias: String,
     group: String,
     updatedAt: Date,
-    deleted: Bool = false
+    deleted: Bool = false,
+    deviceType: String? = nil
 ) -> [String: Any] {
     var device: [String: Any] = [
         "id": id,
@@ -157,7 +158,15 @@ private func madeDevice(
     if let mac {
         device["mac"] = mac
     }
+    if let deviceType {
+        device["deviceType"] = deviceType
+    }
     return device
+}
+
+private func compatibilityPlatforms(_ object: [String: Any]) -> [String] {
+    guard let compatibility = object["compatibility"] as? [String: Any] else { return [] }
+    return (compatibility["platforms"] as? [String]) ?? []
 }
 
 private func run() -> Int32 {
@@ -289,6 +298,10 @@ private func run() -> Int32 {
     var catalogOK = 0
     var totalFirmwares = 0
     var totalAccessories = 0
+    var firmwaresWithVendor = 0
+    var firmwaresWithCompatibility = 0
+    var accessoriesWithVendor = 0
+    var accessoriesWithCompatibility = 0
     var firstTypeKey = ""
     for deviceType in deviceTypes.prefix(10) {
         let typeKey = text(deviceType, "type")
@@ -302,11 +315,39 @@ private func run() -> Int32 {
             catalogOK += 1
             totalFirmwares += catalogFirmwares.count
             totalAccessories += catalogAccessories.count
+            firmwaresWithVendor += catalogFirmwares.filter { !text($0, "vendor").isEmpty }.count
+            firmwaresWithCompatibility += catalogFirmwares.filter {
+                compatibilityPlatforms($0).isEmpty == false
+            }.count
+            accessoriesWithVendor += catalogAccessories.filter { !text($0, "vendor").isEmpty }.count
+            accessoriesWithCompatibility += catalogAccessories.filter {
+                ($0["compatibility"] as? [String: Any]) != nil
+            }.count
         }
     }
     report.check(catalogOK == deviceTypes.prefix(10).count, "所有 catalog 返回 200 且 type 一致", "ok=\(catalogOK)/\(deviceTypes.prefix(10).count)")
     report.check(totalFirmwares > 0, "catalog 聚合含固件", "firmwares=\(totalFirmwares)")
     report.check(totalAccessories > 0, "catalog 聚合含配件", "accessories=\(totalAccessories)")
+    report.check(
+        firmwaresWithVendor > 0 && firmwaresWithVendor == totalFirmwares,
+        "固件均带非空 vendor",
+        "withVendor=\(firmwaresWithVendor)/\(totalFirmwares)"
+    )
+    report.check(
+        firmwaresWithCompatibility == totalFirmwares,
+        "固件均带 compatibility.platforms",
+        "withCompatibility=\(firmwaresWithCompatibility)/\(totalFirmwares)"
+    )
+    report.check(
+        accessoriesWithCompatibility == totalAccessories,
+        "配件均带 compatibility 对象",
+        "withCompatibility=\(accessoriesWithCompatibility)/\(totalAccessories)"
+    )
+    report.check(
+        accessoriesWithVendor > 0,
+        "配件含真实 vendor（允许未核实为空）",
+        "withVendor=\(accessoriesWithVendor)/\(totalAccessories)"
+    )
     report.check(
         catalogOK > 0,
         "catalog 示例型号可解析",
@@ -319,6 +360,98 @@ private func run() -> Int32 {
     report.check(text(compositeObject, "platform") == "ios", "复合键详情 platform=ios")
     report.check(text(compositeObject, "externalId") == iosExternalID, "复合键详情 externalId 为大写 UUID")
     report.check(text(compositeObject, "id") == iosID, "复合键详情 id 与推送一致")
+
+    // MARK: 3.6 UserDevice 元数据补全与 null 降级
+
+    report.section("3.6 UserDevice deviceType/vendor/compatibility 与 null 降级")
+    let knownMetaID = "33333333-3333-4333-8333-333333333333"
+    let unknownMetaID = "44444444-4444-4444-8444-444444444444"
+    let metadataUpdatedAt = Date(timeIntervalSinceNow: -30)
+    let knownMetaDevice = madeDevice(
+        id: knownMetaID,
+        platform: "ios",
+        externalID: knownMetaID.uppercased(),
+        mac: nil,
+        alias: "元数据设备",
+        group: "e2e-metadata",
+        updatedAt: metadataUpdatedAt,
+        deviceType: "nordic_uart"
+    )
+    let unknownMetaDevice = madeDevice(
+        id: unknownMetaID,
+        platform: "ios",
+        externalID: unknownMetaID.uppercased(),
+        mac: nil,
+        alias: "未注册型号设备",
+        group: "e2e-metadata",
+        updatedAt: metadataUpdatedAt
+    )
+    let metadataPush = client.request(
+        "POST",
+        "sync/push",
+        token: tokenA,
+        idempotencyKey: "\(idempotencyKey)-meta",
+        json: ["clientId": clientID, "devices": [knownMetaDevice, unknownMetaDevice]]
+    )
+    let metadataApplied = list((jsonObject(metadataPush.body) ?? [:])["applied"])
+    report.check(metadataPush.status == 200, "元数据设备 push 返回 200", "status=\(metadataPush.status)")
+    report.check(metadataApplied.count == 2, "元数据设备 applied 数量为 2", "applied=\(metadataApplied.count)")
+
+    let knownDetail = client.request(
+        "GET",
+        "my/devices/ios/\(knownMetaID.uppercased())",
+        token: tokenA
+    )
+    let knownObject = jsonObject(knownDetail.body) ?? [:]
+    report.check(knownDetail.status == 200, "已知型号详情返回 200", "status=\(knownDetail.status)")
+    report.check(
+        text(knownObject, "deviceType") == "nordic_uart",
+        "UserDevice 带 deviceType",
+        "deviceType=\(text(knownObject, "deviceType"))"
+    )
+    report.check(
+        text(knownObject, "vendor") == "Nordic Semiconductor",
+        "UserDevice 带 vendor（按型号补全）",
+        "vendor=\(text(knownObject, "vendor"))"
+    )
+    report.check(
+        compatibilityPlatforms(knownObject).contains("ios"),
+        "UserDevice 带 compatibility.platforms",
+        "body=\(bodyText(knownDetail.body))"
+    )
+
+    let unknownDetail = client.request(
+        "GET",
+        "my/devices/ios/\(unknownMetaID.uppercased())",
+        token: tokenA
+    )
+    let unknownObject = jsonObject(unknownDetail.body) ?? [:]
+    report.check(unknownDetail.status == 200, "未注册型号详情返回 200", "status=\(unknownDetail.status)")
+    report.check(
+        unknownObject["deviceType"] is NSNull,
+        "未注册型号 deviceType 为 null（客户端降级为「型号未知」）",
+        "deviceType=\(String(describing: unknownObject["deviceType"]))"
+    )
+    report.check(
+        unknownObject["vendor"] is NSNull,
+        "未注册型号 vendor 为 null，不编造",
+        "vendor=\(String(describing: unknownObject["vendor"]))"
+    )
+    report.check(
+        unknownObject["compatibility"] is NSNull,
+        "未注册型号 compatibility 为 null",
+        "compatibility=\(String(describing: unknownObject["compatibility"]))"
+    )
+    report.check(
+        text(unknownObject, "alias") == "未注册型号设备",
+        "未注册型号仍返回 alias（详情页可展示）",
+        "alias=\(text(unknownObject, "alias"))"
+    )
+    report.check(
+        text(unknownObject, "group") == "e2e-metadata",
+        "未注册型号仍返回 group",
+        "group=\(text(unknownObject, "group"))"
+    )
 
     // MARK: 4. 幂等重放
 
@@ -337,9 +470,15 @@ private func run() -> Int32 {
     report.check(list(replayObject["applied"]).count == 2, "重放返回原始 applied 结果")
     report.check(list(replayObject["conflicts"]).isEmpty, "重放不产生冲突")
 
+    let changesBeforeReplay = client.request("GET", "sync/changes?cursor=0&limit=200", token: tokenA)
+    let beforeReplayCount = list((jsonObject(changesBeforeReplay.body) ?? [:])["changes"]).count
     let changesAfterReplay = client.request("GET", "sync/changes?cursor=0&limit=200", token: tokenA)
     let replayChanges = list((jsonObject(changesAfterReplay.body) ?? [:])["changes"])
-    report.check(replayChanges.count == changes.count, "重放未产生重复变更", "before=\(changes.count) after=\(replayChanges.count)")
+    report.check(
+        replayChanges.count == beforeReplayCount,
+        "重放未产生重复变更",
+        "before=\(beforeReplayCount) after=\(replayChanges.count)"
+    )
 
     // MARK: 5. LWW 冲突
 

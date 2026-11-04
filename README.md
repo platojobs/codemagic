@@ -12,18 +12,18 @@
 
 | 项 | 结果 |
 | --- | --- |
-| 版本 | **v0.3.2**（`MARKETING_VERSION 0.3.2`，`CURRENT_PROJECT_VERSION 6`，tag `v0.3.2`，契约对齐 Go 0.3.1） |
+| 版本 | **v0.3.3**（`MARKETING_VERSION 0.3.3`，`CURRENT_PROJECT_VERSION 7`，tag `v0.3.3`，契约对齐 Go 0.3.2） |
 | 五模块（首页 / 设备 / 产品 / 市场 / 我的） | 已实现，纯代码 UIKit，真实数据路径 |
 | CoreBluetooth 扫描 + 连接 | 已实现（`CBCentralManager`，真实 RSSI） |
-| 本地持久化 | 已实现（SQLite3，含同步字段；迁移 v2 补齐 `platform / external_id`） |
-| 网络层 | 已实现（URLSession + Codable，对齐 `openapi.yaml` 0.3.1：device-types / catalog / 复合键详情） |
-| 同步 | **已实现**：匿名登录、增量拉取、批量推送（幂等键）、冲突提示、tombstone、Keychain token、前后台 / BGTask 触发、401 登录失效确认重登 |
+| 本地持久化 | 已实现（SQLite3，含同步字段；迁移 v3 增加 `saved_devices.device_type`） |
+| 网络层 | 已实现（URLSession + Codable，对齐 `openapi.yaml` 0.3.2：device-types / catalog / 复合键详情 / 设备新字段） |
+| 同步 | **已实现**：匿名登录、增量拉取、批量推送（幂等键 + 可选 `deviceType`）、冲突提示、tombstone、Keychain token、前后台 / BGTask 触发、401 登录失效确认重登 |
 | 自绘 RSSI + 代码组装空状态 | 已实现 |
-| 单元测试 | **68 个用例，0 失败**（`** TEST SUCCEEDED **`，2026-11-05，Xcode 27.2 / iPhone 17 模拟器） |
+| 单元测试 | **74 个用例，0 失败**（`** TEST SUCCEEDED **`，2026-11-05，Xcode 27.2 / iPhone 17 模拟器） |
 | 模拟器构建 | **通过**（`xcodebuild ... build`，`** BUILD SUCCEEDED **`） |
 | CI | Codemagic `codemagic.yaml` 已配置（macOS + Xcode 16.4，构建 + 测试 + artifact）；**尚未在 Codemagic 上实际运行** |
 | 真机 BLE / 签名 | **未验证**：本机无真机与 Apple 开发者账号，需自行验证（见第 9 节） |
-| 真实后端同步 | **契约已联调**：`scripts/e2e-contract.sh` 对本地 `PJGoIoT` 0.3.1（`STORE=fixture`）跑 **55 项断言，全部 PASS**；App 内同步 UI 仍需真机手动验证 |
+| 真实后端同步 | **契约已联调**：`scripts/e2e-contract.sh` 对本地 `PJGoIoT` 0.3.2（`STORE=fixture`）跑 **71 项断言，全部 PASS**；App 内同步 UI 仍需真机手动验证 |
 
 ---
 
@@ -39,16 +39,17 @@
 - 已保存设备：备注名、分组、最后出现时间、厂商与固件（详情页回写）。
 - 本地规则：**断开**、**RSSI 低于阈值**；可新增 / 启停 / 删除，规则持久化。
 - 规则触发写扫描日志并在首页提示；规则可绑定单台设备或全部已保存设备。
-- 设备详情：连接蓝牙 → `GET /api/v1/my/devices/ios/{externalId}` 拉取云端设备记录 → 展示别名 / 分组 / 外部 ID 与本地缓存；网络失败降级读本地缓存并标注缓存时间；无缓存显示失败空状态与重试。
+- 设备详情：连接蓝牙 → `GET /api/v1/my/devices/ios/{externalId}` 拉取云端设备记录，**优先展示云端 `deviceType` / `vendor` / `firmwareVersion` / `compatibility`**；云端字段为 `null` 时显示「型号未知」/「—」/「暂无兼容性说明」，绝不出 `"null"`；未注册型号仍展示别名、分组与最近出现时间，并在「云端记录」区展示同步信息；网络失败才降级本地缓存并标注缓存时间，无缓存显示失败空状态与重试。
 - 跨平台设备：服务端拉回的 `platform = android` 设备标注「来自 Android，本机不可连接」，无展开箭头、禁用点击与连接，不进入详情。
 
 ### 产品 Products（`Modules/Products`）
 - 型号库：厂商、型号、固件版本、GATT 服务与特征表。
 - 数据来自 `GET /api/v1/device-types` 型号列表 + 逐个 `GET /api/v1/device-types/{type}/catalog`（取固件与配件）；单个 catalog 失败降级为型号信息，全部失败显示错误空状态 + 重试。
-- 详情页 GATT / 特征由代码动态组装；catalog 无兼容性字段，兼容性区域为空（见 `KNOWN_ISSUES.md`）。
+- 详情页 GATT / 特征由代码动态组装；兼容性来自 catalog 的 `compatibility` 对象（0.3.2），按「平台 / 协议 / 特性 / 最低 App / 型号」摊平展示。
 
 ### 市场 Market（`Modules/Market`）
 - 配件与固件信息列表 + 兼容性说明，由各型号 `GET /api/v1/device-types/{type}/catalog` 聚合 firmware + accessories。
+- **筛选**：顶部「厂商：全部/xx」与「兼容性：全部/xx」两个入口，取值直接来自服务端真实字段（`vendor`、`compatibility` 展开的平台 / 协议 / 特性 / 型号），不造假分类；可叠加、可一键清除，无结果显示「没有符合筛选条件的条目」。
 - 页脚明确声明：**不提供下单、订单或支付**。
 
 ### 我的 Profile（`Modules/Profile`）
@@ -62,10 +63,10 @@
 ### 同步（`Core/Sync`）
 - 首次同步自动匿名登录，token 存 **Keychain**（非 UserDefaults）。
 - 增量拉取 `GET /api/v1/sync/changes`（游标持久化，`hasMore` 循环，最多 10 页）。
-- 批量推送 `POST /api/v1/sync/push`（每批 ≤100，`Idempotency-Key` 由批次内容哈希派生）。
+- 批量推送 `POST /api/v1/sync/push`（每批 ≤100，`Idempotency-Key` 由批次内容哈希派生）；`deviceType` 为可选字段，已知型号才随推送上传，未知时省略不填假值。
 - 冲突按服务端 LWW：云端获胜时写回并提示，**不静默覆盖本地修改**；tombstone 删除同样上传 / 写回。
 - 触发：回到前台（节流 120s）、进入后台（`BGAppRefreshTask`）、手动按钮。
-- 契约联调：`scripts/e2e-contract.sh` 直连本地 Go 服务，覆盖双平台推送、device-types/catalog、复合键详情、幂等重放、LWW 冲突、401/404；默认不进 CI（见 4.2）。
+- 契约联调：`scripts/e2e-contract.sh` 直连本地 Go 服务，覆盖双平台推送、device-types/catalog（含 vendor/compatibility）、复合键详情、UserDevice 新字段与 null 降级、幂等重放、LWW 冲突、401/404；默认不进 CI（见 4.2）。
 
 ---
 
@@ -96,7 +97,7 @@ Config/
 scripts/
 ├── e2e-contract.sh         # 启动本地 fixture 服务 + 运行联调 runner（不进 CI）
 └── e2e-contract.swift      # 独立 Swift 可执行 runner，真实 URLSession 直连 localhost
-codemagicTests/             # 68 个 XCTest 用例
+codemagicTests/             # 74 个 XCTest 用例
 docs/
 ├── architecture.md
 ├── consistency.md
@@ -160,7 +161,7 @@ xcodebuild -project codemagic.xcodeproj \
 - mock 由 Quickmock.dev 提供，任意路径返回同一份组合 JSON，**预计 2026-12-04 到期**；到期后产品 / 市场会显示错误空状态与重试，不会崩溃。
 - 正式域名确定后只改 `Release.xcconfig`，不需要改源码。
 - 临时联调可覆盖：`xcodebuild ... BASE_URL='https://...' build`。
-- 本地 Go 服务需 **0.3.1**（`git pull` 后运行），提供 `/api/v1/device-types`、`/api/v1/device-types/{type}/catalog`、`/api/v1/my/devices/{platform}/{externalId}`；iOS 已全部切换，不再请求 `api/products` / `api/market` / `api/device/{uuid}`；见 `docs/consistency.md` 第 3.4 节。
+- 本地 Go 服务需 **0.3.2**（`git pull` 后运行），提供 `/api/v1/device-types`、`/api/v1/device-types/{type}/catalog`、`/api/v1/my/devices/{platform}/{externalId}`，并在 `UserDevice` / catalog 固件与配件上提供 `deviceType` / `vendor` / `firmwareVersion` / `compatibility`；iOS 已全部切换，不再请求 `api/products` / `api/market` / `api/device/{uuid}`；见 `docs/consistency.md` 第 3.4 节。
 
 ### 4.2 端到端契约联调（手动运行，默认不进 CI）
 
@@ -177,21 +178,25 @@ cd /path/to/codemagic
 - 联调 runner：`scripts/e2e-contract.swift` 由 `swiftc` 编译为独立 macOS 可执行文件，使用真实 `URLSession` 直连 `127.0.0.1`，**不走 iOS 模拟器**。
 - 依赖本地 Go 服务与 fixture 数据，因此**不加入 `codemagic.yaml` 的 CI 流程**。
 
-本机 2026-11-05 实际运行（后端 0.3.1，端口 8080）：
+本机 2026-11-05 实际运行（后端 0.3.2，端口 8080）：
 
 ```
 [e2e] health 200
 [1. 匿名登录] 3/3 PASS
 [2. 双平台推送（ios + android 同一台设备）] 7/7 PASS
-[3. changes 拉回校验 platform / externalId] 22/22 PASS（含 device-types/catalog 与复合键详情）
+[3. changes 拉回校验 platform / externalId] 12/12 PASS
+[3.5 device-types/catalog 与 my/devices/{platform}/{externalId}] 14/14 PASS
+[3.6 UserDevice deviceType/vendor/compatibility 与 null 降级] 12/12 PASS
 [4. 同 Idempotency-Key 重放] 5/5 PASS
 [5. LWW 冲突：旧版本不静默覆盖新版本] 9/9 PASS
 [6. 无 token 401 / 跨用户 404] 9/9 PASS（含复合键越权）
 
 === E2E 合同联调结果 ===
-通过：55 项，失败：0 项
+通过：71 项，失败：0 项
 结论：PASS
 ```
+
+> 3.5 断言固件全部带 `vendor` 与 `compatibility.platforms`、配件全部带 `compatibility` 对象；3.6 断言已注册型号补全 `deviceType` / `vendor` / `compatibility`，未注册型号三者均为 `null` 但 `alias` / `group` 保留。
 
 服务端日志写入 `.build/e2e/pjgoiot-server.log`；脚本退出时通过 `trap` 关闭后端进程。
 
@@ -222,7 +227,7 @@ cd /path/to/codemagic
 
 数据库位置：`Application Support/com.platojobs.codemagic/codemagic.sqlite`。磁盘库失败时回退内存库，并在「我的」页提示。
 
-迁移：`PRAGMA user_version` 线性递增。v1 建五张表；**v2（v0.2.0）** 为 `saved_devices` 增加 `platform`（默认 `ios`）与 `external_id`，由 `peripheral_id` 大写回填，并建立 `(platform, external_id) WHERE deleted_at IS NULL` 唯一索引。旧库升级后无需重装或清数据。
+迁移：`PRAGMA user_version` 线性递增。v1 建五张表；**v2（v0.2.0）** 为 `saved_devices` 增加 `platform`（默认 `ios`）与 `external_id`，由 `peripheral_id` 大写回填，并建立 `(platform, external_id) WHERE deleted_at IS NULL` 唯一索引；**v3（v0.3.3）** 增加 `device_type TEXT`（可空，旧库升级后为 `NULL`，由云端详情回填）。旧库升级后无需重装或清数据。
 
 ---
 
@@ -242,13 +247,13 @@ cd /path/to/codemagic
 
 错误体 `{"error":{"code","message"}}` 解析为 `AppError.api`（客户端码 `NET-002`，保留服务端 code）。字段解码容忍未知字段与缺失字段。
 
-### 7.2 产品 / 市场 / 设备详情（0.3.1 新端点）
+### 7.2 产品 / 市场 / 设备详情（0.3.1 起新端点，0.3.2 扩字段）
 
 - 产品：`GET /api/v1/device-types` → `{items:[DeviceType]}`，再逐个 `GET /api/v1/device-types/{type}/catalog`
-- 市场：同一批 catalog 聚合 `firmwares` + `accessories`，用所属型号 vendor / name 补全展示字段
-- 设备详情：`GET /api/v1/my/devices/ios/{externalId}`（大写 UUID，Bearer token），失败降级本地缓存
+- 市场：同一批 catalog 聚合 `firmwares` + `accessories`，厂商与兼容性直接取条目的 `vendor` / `compatibility`
+- 设备详情：`GET /api/v1/my/devices/ios/{externalId}`（大写 UUID，Bearer token），云端优先、失败降级本地缓存
 
-字段：`DeviceType` 为 `type, name, vendor, description, gattServices[{uuid,name,characteristics?}]`；`DeviceCatalog` 为 `deviceType, firmwares[{id,version,releaseNotes,releasedAt}], accessories[{id,name,sku,description}]`；`UserDevice` 为 `id, clientId, platform, externalId, mac, alias, group, updatedAt, deletedAt, serverSeq`。解析忽略未知 / 缺失字段。catalog 无 `compatibility` 字段，详见 `KNOWN_ISSUES.md`。错误码见 `docs/consistency.md` 第 4 节。
+字段（0.3.2）：`DeviceType` 为 `type, name, vendor, description, gattServices[{uuid,name,characteristics?}]`；`DeviceCatalog` 为 `deviceType, firmwares[{id,version,releaseNotes,releasedAt,vendor,compatibility}], accessories[{id,name,sku,description,vendor,compatibility}]`；`UserDevice` 为 `id, clientId, platform, externalId, mac, alias, group, deviceType, vendor, firmwareVersion, compatibility, updatedAt, deletedAt, serverSeq`。四个新字段均可为 `null`，客户端归一为 `nil`，展示层用「型号未知 / — / 暂无兼容性说明」，不渲染 `"null"`。`PushDevice` 的 `deviceType` 可选，未知时整体省略。错误码见 `docs/consistency.md` 第 4 节。
 
 ---
 
@@ -275,22 +280,23 @@ cd /path/to/codemagic
 - [ ] 断开规则在设备离开范围后是否按预期触发（10s 未出现判定）。
 - [ ] RSSI 阈值规则的触发 / 恢复重新武装。
 - [ ] 后台 / 锁屏后的扫描与回调行为（当前未申请后台蓝牙模式）。
-- [ ] 真实后端域名下的产品 / 市场 / 设备详情 UI（服务端契约已由 E2E 覆盖，Release mock 尚未验证 0.3.1 端点）。
+- [ ] 真实后端域名下的产品 / 市场 / 设备详情 UI（服务端契约已由 E2E 覆盖，Release mock 尚未验证 0.3.2 端点与新字段）。
 - [ ] App 内同步在真机 + 真实后端的完整闭环（E2E 已覆盖服务端契约，但未覆盖 App 的 Keychain、BGTask 与 UI 提示）。
 - [ ] `BGAppRefreshTask` 在真机上的实际调度（模拟器不执行后台刷新）。
 - [ ] 真机上确认「来自 Android，本机不可连接」设备的列表样式与点击无响应。
 
 其他限制：
 
-- 模拟器无真实蓝牙，状态为 `unsupported`；产品 / 市场 / 详情依赖网络，需运行 0.3.1 的本地 Go 服务或已更新到 0.3.1 的 mock。
+- 模拟器无真实蓝牙，状态为 `unsupported`；产品 / 市场 / 详情依赖网络，需运行 0.3.2 的本地 Go 服务或已更新到 0.3.2 的 mock。
 - 未实现真实 GATT 服务发现 / 读写 / OTA，GATT 仅展示 catalog 返回的元数据。
-- 契约已用本地 fixture 服务端到端验证（55 项断言 PASS）；App 内的 Keychain token、BGTask 调度与真实网络环境仍需真机验证。
+- 契约已用本地 fixture 服务端到端验证（71 项断言 PASS）；App 内的 Keychain token、BGTask 调度与真实网络环境仍需真机验证。
 - Release 签名与 App Store 上架未验证（无 Apple 开发者账号 / 证书）。
 
 ---
 
 ## 10. 版本记录
 
+- `v0.3.3`：对齐 `openapi.yaml` **0.3.2**（`MARKETING_VERSION 0.3.3` / build 7，tag `v0.3.3`）。接入 `UserDevice.deviceType` / `vendor` / `firmwareVersion` / `compatibility`（可空，详情页云端优先，null 显示「型号未知 / — / 暂无兼容性说明」，未注册型号仍展示别名 / 分组 / 最近出现）；catalog `firmwares` / `accessories` 接入 `vendor` / `compatibility`；市场新增按厂商与兼容性筛选（真实字段）；`PushDevice.deviceType` 可选，已知型号才上传；SQLite 迁移 v3（`saved_devices.device_type`）；单测 74 个，E2E 71 项（新增 catalog vendor/compatibility 与 UserDevice 新字段、null 降级断言）。
 - `v0.3.2`：文档补齐（`docs/acceptance.md` 真机验收清单、`docs/troubleshooting.md`、`docs/releasenotes.md`）；401 登录失效交互：「我的」页展示「登录已失效」+「重新登录」确认流程，确认后才换匿名账号，游标重置并重推本地活动设备；`sync.reloginRequired` 持久化，前后台自动同步不再静默建号；单测增至 68 个；`MARKETING_VERSION 0.3.2` / build 6，tag `v0.3.2`。
 - `v0.3.1`：对齐 `openapi.yaml` 0.3.1（`MARKETING_VERSION 0.3.1` / build 5，tag `v0.3.1`）；产品改为 `device-types` + `{type}/catalog`，市场由 catalog 聚合 firmware + accessories，iOS 设备详情改用复合键 `my/devices/ios/{externalId}`；移除产品 / 市场 / 设备详情的全部历史端点；E2E 扩至 55 项断言（含 catalog 与复合键 200/404）；单测 64 个。
 - `v0.3.0`：版本号对齐（`MARKETING_VERSION 0.3.0` / build 4，tag `v0.3.0`，保留 `v0.2.0`）；新增 `scripts/e2e-contract.sh` + 独立 Swift runner，对本地 `PJGoIoT`（`STORE=fixture`）完成 43 项契约联调（匿名登录、双平台推送、changes 形状、幂等重放、LWW 冲突、401/404）；跨平台 Android 设备在列表标注「来自 Android，本机不可连接」并禁用连接；按 `openapi.yaml` 修正 `docs/consistency.md` 的错误码与对齐状态；单测增至 63 个。

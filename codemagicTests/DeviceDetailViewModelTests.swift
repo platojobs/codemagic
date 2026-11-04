@@ -107,6 +107,49 @@ final class DeviceDetailViewModelTests: XCTestCase {
         XCTAssertNil(bluetooth.connectionHandler)
     }
 
+    func testCloudDeviceTypePersistsForPush() throws {
+        let device = makeSavedDevice(name: "面板")
+        let product = ProductModel(
+            mac: "",
+            vendor: "厂商乙",
+            deviceType: "tracker",
+            firmwareVersion: "1.2.3",
+            gattServices: [],
+            compatibility: ["平台：ios"],
+            note: ""
+        )
+        productService.deviceInfoResult = .success(product)
+        let viewModel = try makeViewModel(device: device)
+        viewModel.start()
+        bluetooth.emitConnection(.connected(peripheralID: device.peripheralID))
+
+        let saved = try XCTUnwrap(savedDeviceStore.fetch(peripheralID: device.peripheralID))
+        XCTAssertEqual(saved.deviceType, "tracker", "云端 deviceType 应落库")
+        XCTAssertEqual(saved.vendor, "厂商乙")
+        XCTAssertEqual(PushDevice(device: saved).deviceType, "tracker", "已知型号时推送带上 deviceType")
+    }
+
+    func testNullDeviceFieldsAreNotPersistedOrPushed() throws {
+        let device = makeSavedDevice(name: "未知型号设备")
+        let product = ProductModel(
+            mac: "",
+            vendor: "",
+            deviceType: "",
+            firmwareVersion: "",
+            gattServices: [],
+            compatibility: [],
+            note: ""
+        )
+        productService.deviceInfoResult = .success(product)
+        let viewModel = try makeViewModel(device: device)
+        viewModel.start()
+        bluetooth.emitConnection(.connected(peripheralID: device.peripheralID))
+
+        let saved = try XCTUnwrap(savedDeviceStore.fetch(peripheralID: device.peripheralID))
+        XCTAssertNil(saved.deviceType, "null 型号保持为空，不写假值")
+        XCTAssertNil(PushDevice(device: saved).deviceType, "未知型号不传 deviceType")
+    }
+
     func testAndroidDeviceSkipsBluetoothAndShowsUnavailableNotice() throws {
         var device = makeSavedDevice(name: "安卓同步设备")
         device.platform = "android"
@@ -209,5 +252,48 @@ final class ProductsAndMarketViewModelTests: XCTestCase {
             return XCTFail("应加载失败")
         }
         XCTAssertEqual(error.code, "NET-003")
+    }
+
+    func testMarketFiltersByVendorAndCompatibility() {
+        let service = StubProductService()
+        service.marketResult = .success([
+            MarketItem(
+                id: "fw-1", kind: .firmware, name: "固件 1.0", vendor: "Acme",
+                version: "1.0", compatibility: "平台：ios；协议：ble-gatt",
+                compatibilityTags: ["平台：ios", "协议：ble-gatt"], summary: ""
+            ),
+            MarketItem(
+                id: "fw-2", kind: .firmware, name: "固件 2.0", vendor: "Acme",
+                version: "2.0", compatibility: "平台：android",
+                compatibilityTags: ["平台：android"], summary: ""
+            ),
+            MarketItem(
+                id: "acc-1", kind: .accessory, name: "底座", vendor: "Other",
+                version: "SKU-1", compatibility: "", summary: ""
+            ),
+        ])
+        let viewModel = MarketViewModel(productService: service)
+        viewModel.loadIfNeeded()
+        XCTAssertEqual(viewModel.items.count, 3)
+        XCTAssertEqual(viewModel.vendors, ["Acme", "Other"])
+        XCTAssertEqual(
+            Set(viewModel.compatibilityOptions),
+            Set(["平台：android", "平台：ios", "协议：ble-gatt"])
+        )
+
+        viewModel.selectVendor("Acme")
+        XCTAssertEqual(viewModel.items.count, 2)
+        XCTAssertTrue(viewModel.hasActiveFilter)
+
+        viewModel.selectCompatibility("平台：ios")
+        XCTAssertEqual(viewModel.items.count, 1)
+        XCTAssertEqual(viewModel.items.first?.id, "fw-1")
+
+        viewModel.selectVendor("Other")
+        XCTAssertTrue(viewModel.items.isEmpty, "筛选组合无结果时为空列表而非错误")
+
+        viewModel.resetFilters()
+        XCTAssertEqual(viewModel.items.count, 3)
+        XCTAssertFalse(viewModel.hasActiveFilter)
     }
 }

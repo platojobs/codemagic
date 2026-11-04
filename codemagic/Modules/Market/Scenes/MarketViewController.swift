@@ -5,6 +5,10 @@ final class MarketViewController: UIViewController {
     private let tableView = UITableView(frame: .zero, style: .plain)
     private let emptyStateView = EmptyStateView()
     private let loadingView = LoadingStateView()
+    private let filterBar = UIStackView()
+    private let vendorButton = UIButton(type: .system)
+    private let compatibilityButton = UIButton(type: .system)
+    private let resetFilterButton = UIButton(type: .system)
 
     private let viewModel: MarketViewModel
 
@@ -22,6 +26,7 @@ final class MarketViewController: UIViewController {
         super.viewDidLoad()
         title = "市场"
         view.backgroundColor = AppTheme.Palette.background
+        configureFilterBar()
         configureTableView()
         navigationItem.rightBarButtonItem = UIBarButtonItem(
             title: "刷新",
@@ -36,6 +41,50 @@ final class MarketViewController: UIViewController {
         viewModel.loadIfNeeded()
     }
 
+    private func configureFilterBar() {
+        filterBar.translatesAutoresizingMaskIntoConstraints = false
+        filterBar.axis = .horizontal
+        filterBar.spacing = 8
+        filterBar.alignment = .center
+        filterBar.isLayoutMarginsRelativeArrangement = true
+        filterBar.layoutMargins = UIEdgeInsets(top: 8, left: 20, bottom: 8, right: 20)
+
+        var vendorConfig = UIButton.Configuration.gray()
+        vendorConfig.cornerStyle = .capsule
+        vendorConfig.contentInsets = NSDirectionalEdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12)
+        vendorButton.configuration = vendorConfig
+        vendorButton.titleLabel?.font = UIFont.preferredFont(forTextStyle: .subheadline)
+        vendorButton.addTarget(self, action: #selector(handleVendorFilter), for: .touchUpInside)
+
+        var compatibilityConfig = UIButton.Configuration.gray()
+        compatibilityConfig.cornerStyle = .capsule
+        compatibilityConfig.contentInsets = NSDirectionalEdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12)
+        compatibilityButton.configuration = compatibilityConfig
+        compatibilityButton.titleLabel?.font = UIFont.preferredFont(forTextStyle: .subheadline)
+        compatibilityButton.addTarget(
+            self,
+            action: #selector(handleCompatibilityFilter),
+            for: .touchUpInside
+        )
+
+        resetFilterButton.setTitle("清除", for: .normal)
+        resetFilterButton.titleLabel?.font = UIFont.preferredFont(forTextStyle: .subheadline)
+        resetFilterButton.addTarget(self, action: #selector(handleResetFilters), for: .touchUpInside)
+
+        filterBar.addArrangedSubview(vendorButton)
+        filterBar.addArrangedSubview(compatibilityButton)
+        filterBar.addArrangedSubview(resetFilterButton)
+        filterBar.addArrangedSubview(UIView())
+        view.addSubview(filterBar)
+
+        NSLayoutConstraint.activate([
+            filterBar.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            filterBar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            filterBar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            filterBar.heightAnchor.constraint(equalToConstant: 44),
+        ])
+    }
+
     private func configureTableView() {
         tableView.translatesAutoresizingMaskIntoConstraints = false
         tableView.register(MarketItemCell.self, forCellReuseIdentifier: MarketItemCell.reuseIdentifier)
@@ -46,7 +95,7 @@ final class MarketViewController: UIViewController {
         view.addSubview(tableView)
 
         NSLayoutConstraint.activate([
-            tableView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            tableView.topAnchor.constraint(equalTo: filterBar.bottomAnchor),
             tableView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             tableView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             tableView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
@@ -72,6 +121,7 @@ final class MarketViewController: UIViewController {
 
     private func reloadContent() {
         navigationItem.rightBarButtonItem?.isEnabled = viewModel.state != .loading
+        updateFilterBar()
 
         switch viewModel.state {
         case .idle, .loading:
@@ -88,7 +138,17 @@ final class MarketViewController: UIViewController {
             )
             tableView.backgroundView = emptyStateView
 
-        case .loaded(let items) where items.isEmpty:
+        case .loaded(_) where viewModel.items.isEmpty && viewModel.hasActiveFilter:
+            emptyStateView.configure(
+                symbolName: SymbolName.marketTab,
+                title: "没有符合筛选条件的条目",
+                message: "当前筛选：\(filterSummary)。调整厂商或兼容性筛选，或清除筛选。",
+                actionTitle: "清除筛选",
+                action: { [weak self] in self?.viewModel.resetFilters() }
+            )
+            tableView.backgroundView = emptyStateView
+
+        case .loaded(_) where viewModel.items.isEmpty:
             emptyStateView.configure(
                 symbolName: SymbolName.marketTab,
                 title: "暂无市场信息",
@@ -103,6 +163,73 @@ final class MarketViewController: UIViewController {
         }
 
         tableView.reloadData()
+    }
+
+    private func updateFilterBar() {
+        let hasData = !viewModel.allItems.isEmpty
+        vendorButton.isEnabled = hasData
+        compatibilityButton.isEnabled = hasData
+        resetFilterButton.isHidden = !viewModel.hasActiveFilter
+
+        vendorButton.configuration?.title = viewModel.selectedVendor.map { "厂商：\($0)" } ?? "厂商：全部"
+        compatibilityButton.configuration?.title = viewModel.selectedCompatibility.map {
+            "兼容性：\($0)"
+        } ?? "兼容性：全部"
+    }
+
+    private var filterSummary: String {
+        [
+            viewModel.selectedVendor.map { "厂商 \($0)" },
+            viewModel.selectedCompatibility.map { "兼容性 \($0)" },
+        ].compactMap { $0 }.joined(separator: "，")
+    }
+
+    // MARK: - Actions
+
+    @objc private func handleVendorFilter() {
+        presentFilterSheet(
+            title: "按厂商筛选",
+            options: viewModel.vendors,
+            selected: viewModel.selectedVendor,
+            sourceView: vendorButton
+        ) { [weak self] value in
+            self?.viewModel.selectVendor(value)
+        }
+    }
+
+    @objc private func handleCompatibilityFilter() {
+        presentFilterSheet(
+            title: "按兼容性筛选",
+            options: viewModel.compatibilityOptions,
+            selected: viewModel.selectedCompatibility,
+            sourceView: compatibilityButton
+        ) { [weak self] value in
+            self?.viewModel.selectCompatibility(value)
+        }
+    }
+
+    @objc private func handleResetFilters() {
+        viewModel.resetFilters()
+    }
+
+    /// 选项来自服务端真实字段值；`nil` 表示「全部」。
+    private func presentFilterSheet(
+        title: String,
+        options: [String],
+        selected: String?,
+        sourceView: UIView,
+        onSelect: @escaping (String?) -> Void
+    ) {
+        let sheet = UIAlertController(title: title, message: nil, preferredStyle: .actionSheet)
+        sheet.addAction(UIAlertAction(title: "全部", style: .default) { _ in onSelect(nil) })
+        for option in options {
+            let actionTitle = option == selected ? "✓ \(option)" : option
+            sheet.addAction(UIAlertAction(title: actionTitle, style: .default) { _ in onSelect(option) })
+        }
+        sheet.addAction(UIAlertAction(title: "取消", style: .cancel))
+        sheet.popoverPresentationController?.sourceView = sourceView
+        sheet.popoverPresentationController?.sourceRect = sourceView.bounds
+        present(sheet, animated: true)
     }
 
     @objc private func handleRefresh() {

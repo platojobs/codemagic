@@ -1,6 +1,6 @@
 # KNOWN_ISSUES
 
-记录当前版本（v0.3.2）已知、且本机无法闭环验证的问题。已修复项不在此列。
+记录当前版本（v0.3.3）已知、且本机无法闭环验证的问题。已修复项不在此列。
 
 ## 需用户在真实环境验证
 
@@ -16,7 +16,7 @@
 4. **后台同步调度未在真机验证**
    - `BGAppRefreshTask`（`com.platojobs.codemagic.sync`）已注册并在前后台切换时提交，但模拟器不执行后台刷新，实际触发频率与时长需真机 / Xcode Devices 观察。
 5. **App 内同步仍未在真机 + 真实后端闭环**
-   - 服务端契约已通过 `scripts/e2e-contract.sh` 对本地 `PJGoIoT` 0.3.1（`STORE=fixture`）完成 55 项断言（匿名登录、双平台推送、changes 形状、device-types/catalog、复合键详情、幂等重放、LWW 冲突、401/404），结果 PASS（2026-11-05）。
+   - 服务端契约已通过 `scripts/e2e-contract.sh` 对本地 `PJGoIoT` 0.3.2（`STORE=fixture`）完成 71 项断言（匿名登录、双平台推送、changes 形状、device-types/catalog 的 vendor/compatibility、复合键详情、UserDevice 新字段与 null 降级、幂等重放、LWW 冲突、401/404），结果 PASS（2026-11-05）。
    - 该联调使用独立 Swift 可执行程序直连 localhost，**不覆盖** App 内的 Keychain token 读写、`BGAppRefreshTask` 调度、前后台触发与「我的」同步状态 UI；这些仍需真机 + 真实后端验证。
    - fixture 为内存存储，重启后数据清空；不等价于生产 PostgreSQL / 对象存储环境。
 
@@ -25,21 +25,21 @@
 6. **Release BASE_URL 为临时 mock**
    - `Config/Release.xcconfig` 指向 `https://quickmock.dev/m/ecHT7ex3yQPA/`（与 Android 共用），预计 **2026-12-04 到期**。
    - 到期后产品 / 市场会显示错误空状态与重试；同步在 Release 下也会失败并保留待上传记录。需替换为正式域名。
-7. **catalog 与设备详情的字段缺口（已按 openapi 实现，但展示不完整）**
-   - `GET /device-types/{type}/catalog` 没有 `compatibility` 字段，产品详情「兼容性」只能显示空；固件 / 配件也没有 vendor，市场列表用所属型号的 vendor 填充。
-   - `UserDevice` 没有 `deviceType` / `model` 字段，iOS 设备详情无法自动选择 catalog，因此详情只展示云端记录（别名、分组、externalId）与本地缓存，不再显示厂商 / GATT / 固件。
-   - 旧 `GET /api/v1/devices/{mac}` 仍可用，但**仅 Android 使用**；iOS 无 MAC 不再调用。
-8. **Release mock 未必支持 0.3.1 新端点**
-   - Debug `BASE_URL = http://127.0.0.1:8080`，需先 `git pull` 并运行 0.3.1 的 `PJGoIoT`。
-   - Release 仍指向 `https://quickmock.dev/m/ecHT7ex3yQPA/`（与 Android 共用，预计 2026-12-04 到期）；该 mock 若未更新 `/device-types/{type}/catalog` 与 `/my/devices/{platform}/{externalId}`，产品 / 市场 / 详情会显示错误空状态或缓存降级。
+7. **catalog 字段已补齐，但存在 null / 空串差异**
+   - openapi 0.3.2 后 catalog 的 `firmwares` / `accessories` 已带 `vendor` 与 `compatibility`，`UserDevice` 已带 `deviceType` / `vendor` / `firmwareVersion` / `compatibility`；v0.3.3 已全部接入。
+   - 仍需注意：固件 / 配件的 `vendor` 在未核实时是**空串**而非 `null`（iOS 模型保留 `""`，UI 显示「—」，且不进入市场厂商筛选项）；`UserDevice` 的四个新字段可能是 `null`（iOS 归一为 `nil`，显示「型号未知 / — / 暂无兼容性说明」）。这些差异由 E2E 断言覆盖，但真实数据下仍可能有服务端未补全的条目。
+8. **Release mock 未必支持 0.3.2 新端点 / 新字段**
+   - Debug `BASE_URL = http://127.0.0.1:8080`，需先 `git pull` 并运行 0.3.2 的 `PJGoIoT`。
+   - Release 仍指向 `https://quickmock.dev/m/ecHT7ex3yQPA/`（与 Android 共用，预计 2026-12-04 到期）；该 mock 若未更新 `/device-types/{type}/catalog`、`/my/devices/{platform}/{externalId}` 与新增的 `deviceType` / `vendor` / `firmwareVersion` / `compatibility` 字段，产品 / 市场 / 详情会显示错误空状态、缓存降级，或字段一律为空。
 9. **iOS 无法读取蓝牙 MAC（已规避）**
    - iOS `platform=ios`、`externalId=CBPeripheral.identifier`（大写），`mac` 为空；详情改用复合键 `/my/devices/ios/{externalId}`，不再依赖 MAC。
 10. **跨平台拉取的设备无法在本机连接（已做 UI 防误触，未真机验证）**
     - 从服务端拉取的 Android 设备会以远端 `id` 生成占位 `peripheral_id`，CoreBluetooth 无法连接。
     - v0.3.0 已在列表标注「来自 Android，本机不可连接」，移除展开箭头、禁用高亮与点击，并在详情 ViewModel 增加守卫；仍需真机确认视觉效果与点击无响应。
-11. **catalog 缺少字段导致详情无法复用**
-    - `DeviceTypeInfo` 有 `type/name/vendor/description/gattServices`，`DeviceCatalog` 有 `firmwares/accessories`，但 `UserDevice` 无型号标识；iOS 无法把一台本机设备映射到某个 catalog。
-    - 若后端后续在 `UserDevice` 增加 `deviceType`，详情可恢复厂商 / 固件 / GATT 展示。
+11. **型号映射已可用，但依赖服务端补全**
+    - openapi 0.3.2 的 `UserDevice.deviceType` 已可用于映射 catalog；v0.3.3 已把云端型号写回本地并在推送时携带。
+    - 但服务端只有在 `deviceType` 命中 `public_devices` / `device_types`（或按 MAC 匹配）时才补全 `vendor` / `compatibility`；未注册型号返回 `null`，详情显示「型号未知」。此时 iOS 不会猜测型号，也不会把型号写进推送。
+    - GATT 服务与特征仍来自 catalog 型号元数据；`UserDevice` 不返回 GATT，详情页在无型号时不展示 GATT 区。
 12. **401 需用户确认重新登录，不自动建号**
     - 401 `UNAUTHORIZED` 表示 token 失效：按契约必须由用户重新登录（重新获取匿名会话）后重试，客户端不得静默调用 `auth/anonymous` 新建账号，避免设备归属漂移。
     - v0.3.2 已在「我的」页展示「登录已失效」+「重新登录」入口：确认弹窗说明旧账号云端数据**不会自动合并**，本机设备会重新上传；确认后才换新匿名账号，游标重置为 0 并重推本地活动设备；重登失败保持待重登，后台同步不会悄悄建号。

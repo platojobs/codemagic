@@ -14,6 +14,7 @@ struct SavedDevice: Identifiable, Equatable {
     var groupName: String
     var mac: String?
     var vendor: String?
+    var deviceType: String?
     var firmwareVersion: String?
     var lastSeenAt: Date?
     let createdAt: Date
@@ -35,6 +36,7 @@ struct SavedDevice: Identifiable, Equatable {
         groupName: String = SavedDevice.defaultGroupName,
         mac: String? = nil,
         vendor: String? = nil,
+        deviceType: String? = nil,
         firmwareVersion: String? = nil,
         lastSeenAt: Date? = nil,
         createdAt: Date = Date(),
@@ -54,6 +56,7 @@ struct SavedDevice: Identifiable, Equatable {
         self.groupName = groupName.isEmpty ? SavedDevice.defaultGroupName : groupName
         self.mac = mac
         self.vendor = vendor
+        self.deviceType = deviceType
         self.firmwareVersion = firmwareVersion
         self.lastSeenAt = lastSeenAt
         self.createdAt = createdAt

@@ -175,6 +175,7 @@ final class ProductAPIClient: ProductServicing {
         let deviceType = catalog?.deviceType.name.isEmpty == false
             ? (catalog?.deviceType.name ?? "")
             : (type.name.isEmpty ? type.type : type.name)
+        let compatibility = catalog?.deviceType.compatibility ?? type.compatibility
         let noteParts = [
             type.descriptionText,
             catalog?.accessories.isEmpty == false ? "配件 \(catalog?.accessories.count ?? 0) 件" : "",
@@ -185,7 +186,7 @@ final class ProductAPIClient: ProductServicing {
             deviceType: deviceType,
             firmwareVersion: firmware,
             gattServices: type.gattServices,
-            compatibility: [],
+            compatibility: compatibility?.displayItems ?? [],
             note: noteParts.filter { !$0.isEmpty }.joined(separator: "；"),
             apiIdentifier: type.type
         )
@@ -194,11 +195,11 @@ final class ProductAPIClient: ProductServicing {
     private func product(from record: UserDeviceInfo) -> ProductModel {
         ProductModel(
             mac: record.mac,
-            vendor: "",
-            deviceType: "",
-            firmwareVersion: "",
+            vendor: record.vendor ?? "",
+            deviceType: record.deviceType ?? "",
+            firmwareVersion: record.firmwareVersion ?? "",
             gattServices: [],
-            compatibility: [],
+            compatibility: record.compatibility?.displayItems ?? [],
             note: recordNote(record),
             apiIdentifier: record.id
         )
@@ -220,20 +221,17 @@ final class ProductAPIClient: ProductServicing {
 
     private func marketItems(from pairs: [CatalogPair]) -> [MarketItem] {
         pairs.flatMap { pair -> [MarketItem] in
-            let vendor = pair.type.vendor
-            let compatibility = pair.catalog?.deviceType.name.isEmpty == false
-                ? (pair.catalog?.deviceType.name ?? "")
-                : pair.type.name
-
             var items: [MarketItem] = []
             for firmware in pair.catalog?.firmwares ?? [] {
                 items.append(MarketItem(
                     id: firmware.id,
                     kind: .firmware,
                     name: firmware.version.isEmpty ? "未命名固件" : "固件 \(firmware.version)",
-                    vendor: vendor,
+                    // 未核实发布方时保留空串，不回退成型号厂商，避免编造。
+                    vendor: firmware.vendor,
                     version: firmware.version,
-                    compatibility: compatibility,
+                    compatibility: firmware.compatibility?.displayItems.joined(separator: "；") ?? "",
+                    compatibilityTags: firmware.compatibility?.filterTags ?? [],
                     summary: firmware.releaseNotes
                 ))
             }
@@ -242,9 +240,10 @@ final class ProductAPIClient: ProductServicing {
                     id: accessory.id,
                     kind: .accessory,
                     name: accessory.name,
-                    vendor: vendor,
+                    vendor: accessory.vendor,
                     version: accessory.sku,
-                    compatibility: compatibility,
+                    compatibility: accessory.compatibility?.displayItems.joined(separator: "；") ?? "",
+                    compatibilityTags: accessory.compatibility?.filterTags ?? [],
                     summary: accessory.descriptionText
                 ))
             }

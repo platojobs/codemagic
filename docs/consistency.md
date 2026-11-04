@@ -4,7 +4,7 @@
 
 - Android 侧口径以 `PKotlinApp/README.md` 与 `PJGoIoT/api/openapi.yaml` 为准。
 - iOS 侧以本仓库 `README.md`、`docs/architecture.md` 为准。
-- 后端 `openapi.yaml` 当前标注版本 **0.3.1**（本地 `PJGoIoT` HEAD `ebf542f`，tag `v0.3.1`）。iOS v0.3.2（`MARKETING_VERSION 0.3.2`，build 6）契约仍对齐 0.3.1，本轮补齐 401 重新登录交互与验收文档；端到端联调以运行中的 fixture 服务实际行为为准（见 3.5）。
+- 后端 `openapi.yaml` 当前标注版本 **0.3.2**（本地 `PJGoIoT` tag `v0.3.2`，提交 `10fb27b`、`cf1d8a2`）。iOS v0.3.3（`MARKETING_VERSION 0.3.3`，build 7）契约对齐 0.3.2，本轮接入 `UserDevice` 的 `deviceType` / `vendor` / `firmwareVersion` / `compatibility`，catalog 固件与配件的 `vendor` / `compatibility`，以及 `PushDevice.deviceType` 可选字段；端到端联调以运行中的 fixture 服务实际行为为准（见 3.5）。
 
 ---
 
@@ -33,7 +33,7 @@ iOS 设备详情页独立于底部导航：`Modules/Devices/Scenes/DeviceDetailV
 | 产品 | 网络型号库 | Retrofit `GET api/products` | `GET /api/v1/device-types` + `GET /api/v1/device-types/{type}/catalog` |
 | 市场 | 网络配件与固件信息 | Retrofit `GET api/market` | `GET /api/v1/device-types/{type}/catalog` 聚合 firmware + accessories |
 | 我的 | 系统权限状态 + 本地扫描日志 + 版本信息 + 同步状态 | 系统 API + Room `scan_logs` + 同步引擎 | `CBManager.authorization` + SQLite `scan_logs` + `SyncEngine` 状态 |
-| 设备详情 | 连接蓝牙后拉取设备信息，失败降级本地缓存 | Retrofit `GET /api/v1/devices/{mac}` + Room 缓存 | `GET /api/v1/my/devices/ios/{externalId}`（复合键）+ SQLite `device_info_cache` |
+| 设备详情 | 连接蓝牙后拉取设备信息，失败降级本地缓存 | Retrofit `GET /api/v1/devices/{mac}` + Room 缓存 | `GET /api/v1/my/devices/ios/{externalId}`（复合键）优先；云端字段缺失或断网时降级 SQLite `device_info_cache` / `saved_devices` |
 | 同步（后台） | 后端 `/api/v1/sync/*` + Keychain token | Android 同步客户端 | `Core/Sync/SyncEngine` + `SyncAPIClient` + `KeychainTokenStore` |
 
 规则/日志/最近设备均为本地数据，**不依赖网络**；断网时首页、设备、我的仍可用，同步进入降级状态并保留待上传记录。
@@ -67,15 +67,52 @@ Base URL 均由构建配置注入，**不写死在源码**：
 - iOS：`Info.plist` 的 `BASE_URL` ← `Config/Debug.xcconfig` / `Config/Release.xcconfig`。
 - `/api/v1/*` 路径由客户端在 `BASE_URL` 后拼接，因此 Debug 下 `http://127.0.0.1:8080` 可直接访问本地 `PJGoIoT`。
 
-### 3.2 字段命名（canonical）
+### 3.2 字段命名（canonical，openapi 0.3.2）
 
 设备信息 / 型号条目统一使用：
 
 ```
-mac, vendor, deviceType, firmwareVersion,
-gattServices: [{ uuid, name, characteristics? }],
-compatibility
+mac, vendor, deviceType, firmwareVersion, compatibility,
+gattServices: [{ uuid, name, characteristics? }]
 ```
+
+`GET /api/v1/my/devices/{platform}/{externalId}`（`UserDevice`）与 `POST /api/v1/sync/push`（`PushDevice`）字段：
+
+| 字段 | 类型 | 0.3.2 语义 | iOS 处理 |
+| --- | --- | --- | --- |
+| `platform` | string | `ios` / `android`，与 `externalId` 组成唯一键 | 必填，`ios` |
+| `externalId` | string | iOS 为大写 UUID，Android 为大写 MAC | 必填 |
+| `deviceType` | string \| null | 型号 id（如 `nordic_uart`） | **可 null**；null/空串 → 不展示、不落库、推送不带 |
+| `vendor` | string \| null | 厂商名，服务端按 `deviceType` / MAC 补全 | **可 null**；null/空串 → `nil` |
+| `firmwareVersion` | string \| null | 固件版本字符串 | **可 null**；null/空串 → `nil` |
+| `compatibility` | object \| null | 结构见下 | **可 null**；`displayItems` 供展示、`filterTags` 供筛选 |
+| `alias` / `group` / `mac` / `note` | string | 与 0.3.1 一致 | 与固件/厂商缺失无关，始终展示 |
+
+`catalog` 的 `firmwares[]` / `accessories[]`：
+
+| 字段 | 类型 | 0.3.2 语义 |
+| --- | --- | --- |
+| `vendor` | string | 厂商名；**未核实时为空串**（不是 null） |
+| `compatibility` | object | 兼容性描述对象，`accessories` 用 `deviceTypes` 表达适用型号 |
+
+`Compatibility` 为 `additionalProperties: true` 的开放对象，当前已知 key：
+
+- `platforms`：字符串数组，如 `["ios", "android"]`；
+- `minAppVersion`：字符串，最低 App 版本；
+- `protocol` / `protocolName`：字符串，如 `ble-gatt`；
+- `features`：字符串数组，如 `["dfu"]`；
+- `deviceTypes`：字符串数组（配件专用，表示适用型号）。
+
+未知 key 不丢弃：iOS 解析为 `extras` 并按「显示名：值」摊平。
+
+**null 语义（全端统一）**
+
+- `null`、字段缺失、空串 `""`、纯空白串，在 iOS 模型层一律归一为 `nil`，**绝不渲染为字符串 `"null"` 或空串占位**。
+- 展示层：`deviceType` 为 `nil` → 「型号未知」；`vendor` / `firmwareVersion` 为 `nil` → 「—」；`compatibility` 为 `nil` → 「暂无兼容性说明」。
+- `null` 不等于 0 值：不写入本地缓存，不参与推送（`PushDevice` 用 `encodeIfPresent`，字段整体省略而不是 `null`）。
+- 服务端补全失败时返回 `null` 而非猜测值；客户端**不得自行编造厂商/型号/兼容性**。
+
+其他通用规则：
 
 - 字段名使用 **lowerCamelCase**，与后端 JSON 一致。
 - 未知字段必须忽略，不得因未知字段导致整包解析失败。
@@ -103,12 +140,14 @@ compatibility
 - 服务端只做大小写规范化，不改写格式：iOS 的 `externalId` 必须是 UUID，Android 的必须是 6 字节 MAC，否则 400 `INVALID_MAC` / `BAD_REQUEST`。
 - 设备表同时保留本机 `peripheral_id`（CoreBluetooth 标识）与服务端键 `platform + external_id`；迁移 v2 由 `peripheral_id` 回填 `external_id`。
 - iOS 的型号元数据与固件 / 配件使用 `GET /api/v1/device-types/{type}/catalog`；单台设备详情使用 `GET /api/v1/my/devices/ios/{externalId}`，均不依赖 MAC。
-- `PushDevice` / `UserDevice` **没有 `model` / `type` 字段**：同一型号或同一台实体设备只能用 `alias`、`group` 与可选 `mac` 元数据表达。iOS 与 Android 即使 `mac` 相同，也按 `platform` 分为两条独立记录（键为 `(platform, externalId)`）。
+- `PushDevice` / `UserDevice` **不再缺型号字段**（openapi 0.3.2）：`UserDevice` 已含 `deviceType` / `vendor` / `firmwareVersion` / `compatibility`；`PushDevice.deviceType` 为**可选**字段。
+- iOS 推送 `deviceType` 的真实来源：设备详情从 `GET /my/devices/ios/{externalId}` 或 catalog 匹配拿到型号后写回 `saved_devices.device_type`，下次推送带上；无法推导时**保持 NULL 不传**，不填假值。`vendor` / `firmwareVersion` 仍为展示用元数据，不参与同类设备归类。
+- iOS 与 Android 即使 `mac` 相同，也按 `platform` 分为两条独立记录（键为 `(platform, externalId)`）。
 - 拉回的 Android 设备保留 `mac` 但没有可用的 `CBPeripheral.identifier`，因此 iOS 列表标注「来自 Android，本机不可连接」并禁用连接。
 
 ### 3.4 与 `openapi.yaml` 的对齐状态
 
-`PJGoIoT/api/openapi.yaml`（当前标注 v0.3.1）提供 `POST /auth/anonymous`、`GET /sync/changes`、`POST /sync/push`、`GET /device-types/{type}/catalog`、`GET /my/devices/{platform}/{externalId}` 等。逐项核对结果：
+`PJGoIoT/api/openapi.yaml`（当前标注 v0.3.2）提供 `POST /auth/anonymous`、`GET /sync/changes`、`POST /sync/push`、`GET /device-types/{type}/catalog`、`GET /my/devices/{platform}/{externalId}` 等。逐项核对结果：
 
 | 项 | 状态 |
 | --- | --- |
@@ -122,6 +161,9 @@ compatibility
 | `GET /api/v1/device-types` | **已对齐**：产品列表数据源；兼容 `{items}` 与裸数组 |
 | `GET /api/v1/device-types/{type}/catalog` | **已对齐**：产品型号元数据、市场固件 + 配件、型号 GATT 均来自该端点；E2E 校验结构 |
 | `GET /api/v1/my/devices/ios/{externalId}` | **已对齐**：iOS 设备详情主数据源，携带 Bearer token；E2E 校验 200 与跨用户 404 |
+| `UserDevice.deviceType` / `vendor` / `firmwareVersion` / `compatibility`（0.3.2） | **已对齐**：四个字段均可 null；`ProductModel` 解析后参与详情页展示，`deviceType` 同时写回本地供推送；E2E 校验已注册型号（`nordic_uart` → `vendor=Nordic Semiconductor`、`compatibility.platforms` 含 `ios`）与未注册型号（三字段均为 `null`，`alias` / `group` 仍返回） |
+| catalog `firmwares[]` / `accessories[]` 的 `vendor` / `compatibility`（0.3.2） | **已对齐**：固件与配件均解析 `vendor` 与兼容性对象；市场条目展示真实厂商与兼容性，筛选维度直接取自这些字段；E2E 校验固件全部带 `vendor` 与 `compatibility.platforms`、配件全部带 `compatibility` |
+| `PushDevice.deviceType`（0.3.2，可选） | **已对齐**：本地新增 `saved_devices.device_type`（迁移 v3）；已知型号才编码该字段，未知时省略；E2E 覆盖带 `deviceType` 的推送与拉回比对 |
 | `GET /api/v1/my/devices` / `GET /api/v1/my/devices/{mac}` | **App 未使用**：列表走 `sync/changes`，iOS 详情走复合键；仅 E2E 校验鉴权与越权 |
 | 产品 / 市场 / 设备详情（iOS） | **已切到新端点**，不再请求 `api/products` / `api/market` / `api/device/{peripheralUUID}` |
 | `GET /api/v1/devices/{mac}` | **仍可用，但仅 Android 使用**；iOS 本机设备没有 MAC，不再调用该端点 |
@@ -136,12 +178,29 @@ iOS 端不再存在“历史端点”调用；唯一保留的旧路径 `/api/v1/
 - 同一台实体设备分别以 `platform=ios`（`externalId` 大写 UUID）与 `platform=android`（`externalId` 大写 MAC）推送，两条记录共享 `mac` / `alias` / `group`；
 - `changes` 拉回 `platform` / `externalId` / `mac` 形状；
 - `GET /device-types` 与 `GET /device-types/{type}/catalog` 返回型号、固件、配件；
+- catalog 的固件全部带 `vendor` 与 `compatibility.platforms`，配件全部带 `compatibility` 对象，且至少 1 个配件带 `vendor`；
 - `GET /my/devices/ios/{externalId}` 返回 `platform=ios` 与大写 UUID；
+- 推送已注册型号（`deviceType = nordic_uart`）后拉回：`deviceType`、`vendor`、`compatibility` 均补全；推送未注册型号后拉回：三者均为 `null`，且 `alias` / `group` 仍在；
 - 相同 `Idempotency-Key` 重放返回 `Idempotent-Replayed: true`，不新增变更；
 - 旧 `updatedAt` 推送触发 `server_newer` 冲突，服务端保留较新版本；
 - 无 token 返回 401 `UNAUTHORIZED`；第二用户访问他人设备（按 MAC 与复合键）均返回 404 `NOT_FOUND`。
 
+当前共 **71 项断言全部通过**（v0.3.3 联调记录）。
+
 运行记录见 `README.md` 第 4.2 节；该脚本依赖本地 Go 服务，**不纳入 Codemagic CI**。
+
+### 3.6 市场筛选维度（真实字段，不造假分类）
+
+市场页筛选只使用接口返回的字段，不做本地臆造分类：
+
+| 维度 | 来源字段 | 取值 | 说明 |
+| --- | --- | --- | --- |
+| 厂商 | `MarketItem.vendor` ← catalog `firmwares[].vendor` / `accessories[].vendor` | 去重后的真实厂商名；空串（未核实）不进入筛选项 | 不伪造厂商名，也不生成「未知厂商」假分类 |
+| 兼容性 | `MarketItem.compatibilityTags` ← `CompatibilityInfo.filterTags` | 「平台：ios」「协议：ble-gatt」「特性：dfu」「型号：xxx」等 | 由 `platforms` / `protocol` / `features` / `deviceTypes` / 扩展 key 生成 |
+
+- 两个维度可叠加；筛选结果为空时展示「没有符合筛选条件的条目」并提供清除筛选。
+- 刷新后若某厂商或某兼容性标签已不存在，自动清除失效筛选，避免卡在空结果。
+- 不提供「按价格 / 按分类」等接口未提供的维度。
 
 ---
 
@@ -189,8 +248,10 @@ iOS 端不再存在“历史端点”调用；唯一保留的旧路径 `/api/v1/
 | 产品请求失败 | 错误空状态（含错误码）+「重试」，不展示假型号 |
 | 产品返回空数组 | 空状态 +「刷新」，不展示假数据 |
 | 市场请求失败 / 空列表 | 错误或空状态 +「重试/刷新」；页脚明确「不提供下单、订单或支付」 |
+| 市场筛选无结果 | 空状态「没有符合筛选条件的条目」+「清除筛选」；不展示假数据 |
 | 设备详情网络失败且无缓存 | 失败空状态 +「重试读取设备信息」 |
 | 设备详情网络失败但有缓存 | **降级显示缓存**，并标注缓存时间与错误码，不白屏 |
+| 设备详情云端型号为空（`deviceType = null`） | 型号显示「型号未知」；厂商 / 固件显示「—」；兼容性显示「暂无兼容性说明」；**alias、分组、最近出现时间照常展示** |
 | 我的扫描日志为空 | 空状态说明扫描会话会自动记录 |
 | 我的同步未完成 / 失败 | 显示上次同步时间、待上传条数、错误码与降级说明；本地功能不受影响 |
 | 我的同步冲突 | 明确提示「另一台设备改过这条」，并说明已采用云端版本 |
@@ -234,12 +295,13 @@ iOS 迁移版本：
 
 - v1：五张业务表，含上述同步字段。
 - v2（v0.2.0）：`saved_devices` 增加 `platform`（默认 `ios`）与 `external_id`，由 `peripheral_id` 大写回填；唯一索引 `(platform, external_id) WHERE deleted_at IS NULL`。
+- v3（v0.3.3，对齐 openapi 0.3.2）：`saved_devices` 增加 `device_type TEXT`（可空）；旧库升级后为 `NULL`，由设备详情拿到云端 `deviceType` 后回填。
 
 iOS 表结构（`codemagic.sqlite`）：
 
 | 表 | 关键字段 |
 | --- | --- |
-| `saved_devices` | `id, peripheral_id, platform, external_id, name, remark, group_name, mac, vendor, firmware_version, last_seen_at, created_at, updated_at, deleted_at, sync_state` |
+| `saved_devices` | `id, peripheral_id, platform, external_id, name, remark, group_name, mac, vendor, device_type, firmware_version, last_seen_at, created_at, updated_at, deleted_at, sync_state` |
 | `rules` | `id, name, trigger, threshold, device_id, enabled, created_at, updated_at, deleted_at, sync_state` |
 | `scan_logs` | `id, category, level, message, created_at, updated_at, deleted_at, sync_state` |
 | `recent_devices` | `peripheral_id, name, rssi, last_seen_at, updated_at, deleted_at, sync_state` |

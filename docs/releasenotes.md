@@ -4,11 +4,37 @@
 
 | Tag | MARKETING_VERSION | Build | 日期 | 对齐后端 |
 | --- | --- | --- | --- | --- |
+| `v0.3.3` | 0.3.3 | 7 | 2026-11-05 | 0.3.2 |
 | `v0.3.2` | 0.3.2 | 6 | 2026-11-05 | 0.3.1 |
 | `v0.3.1` | 0.3.1 | 5 | 2026-11-05 | 0.3.1 |
 | `v0.3.0` | 0.3.0 | 4 | 2026-11-05 | 0.3.0 |
 | `v0.2.0` | 0.2.0 | 3 | 2026-11-05 | 0.2.0 |
 | `v0.1.0` | — | 1 | 2026-11-05 | — |
+
+---
+
+## v0.3.3（build 7）
+
+**主题：接入 openapi 0.3.2 新字段**
+
+### 新增
+- **设备详情**：展示云端 `deviceType` / `vendor` / `firmwareVersion` / `compatibility`；`compatibility` 按「平台 / 协议 / 特性 / 最低 App / 型号」摊平，并以「；」连接。云端优先，本地缓存仅断网降级。
+- **null 语义**：`deviceType` 为 `null` 显示「型号未知」，厂商 / 固件显示「—」，兼容性显示「暂无兼容性说明」；不渲染 `"null"` 或空串。未注册型号仍展示别名、分组与最近出现时间，并新增「云端记录」区展示同步信息。
+- **市场筛选**：顶部「厂商：全部/xx」「兼容性：全部/xx」，取值来自服务端真实 `vendor` 与 `compatibility` 展开字段，可叠加、可清除；刷新后自动清除失效筛选；无结果显示「没有符合筛选条件的条目」。
+- **catalog**：`firmwares[]` / `accessories[]` 解析 `vendor` 与 `compatibility`（配件 `deviceTypes` 映射为「型号」）；产品 / 市场详情展示真实厂商与兼容性。
+
+### 变更
+- `PushDevice` 增加可选 `deviceType`：设备详情拿到云端型号后写回本地，下次推送带上；无法推导时整体省略，不填假值。
+- SQLite 迁移 **v3**：`saved_devices` 增加 `device_type TEXT`（可空），旧库升级后为 `NULL`。
+- `MARKETING_VERSION 0.3.3` / build 7。
+
+### 修复
+- 固件 / 配件不再用所属型号厂商兜底，避免展示未经核实的厂商。
+
+### 验证
+- `xcodebuild build`：`** BUILD SUCCEEDED **`
+- `xcodebuild test`：**74 个用例，0 失败**
+- `scripts/e2e-contract.sh`（后端 0.3.2，fixture）：**71 项断言全部 PASS**，新增 catalog `vendor` / `compatibility` 与 `UserDevice` 新字段、null 降级断言
 
 ---
 

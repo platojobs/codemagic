@@ -234,6 +234,8 @@ struct PushDevice: Encodable, Equatable {
     let group: String
     let updatedAt: Date
     let deleted: Bool
+    /// openapi 0.3.2 可选字段；未知型号时为 nil，不填假值。
+    let deviceType: String?
 
     private enum CodingKeys: String, CodingKey {
         case id
@@ -244,9 +246,20 @@ struct PushDevice: Encodable, Equatable {
         case group
         case updatedAt
         case deleted
+        case deviceType
     }
 
-    init(id: String, platform: String, externalID: String, mac: String?, alias: String, group: String, updatedAt: Date, deleted: Bool) {
+    init(
+        id: String,
+        platform: String,
+        externalID: String,
+        mac: String?,
+        alias: String,
+        group: String,
+        updatedAt: Date,
+        deleted: Bool,
+        deviceType: String? = nil
+    ) {
         self.id = id
         self.platform = platform
         self.externalID = externalID
@@ -255,6 +268,8 @@ struct PushDevice: Encodable, Equatable {
         self.group = group
         self.updatedAt = updatedAt
         self.deleted = deleted
+        let trimmed = deviceType?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        self.deviceType = trimmed.isEmpty ? nil : trimmed
     }
 
     init(device: SavedDevice) {
@@ -266,7 +281,8 @@ struct PushDevice: Encodable, Equatable {
             alias: device.syncAlias,
             group: device.groupName,
             updatedAt: device.updatedAt,
-            deleted: device.deletedAt != nil
+            deleted: device.deletedAt != nil,
+            deviceType: device.deviceType
         )
     }
 
@@ -280,6 +296,7 @@ struct PushDevice: Encodable, Equatable {
         try container.encode(group, forKey: .group)
         try container.encode(SyncDateCodec.string(from: updatedAt), forKey: .updatedAt)
         try container.encode(deleted, forKey: .deleted)
+        try container.encodeIfPresent(deviceType, forKey: .deviceType)
     }
 }
 
@@ -413,12 +430,14 @@ struct PushResult: Decodable, Equatable {
 }
 
 /// `GET /device-types/{type}`：iOS 无法拿到 MAC 时按型号查询元数据。
+/// openapi 0.3.2 增加 `compatibility`（可为 null）。
 struct DeviceTypeInfo: Decodable, Equatable {
     let type: String
     let name: String
     let vendor: String
     let descriptionText: String
     let gattServices: [GATTService]
+    let compatibility: CompatibilityInfo?
 
     private enum CodingKeys: String, CodingKey {
         case type
@@ -426,6 +445,7 @@ struct DeviceTypeInfo: Decodable, Equatable {
         case vendor
         case description
         case gattServices
+        case compatibility
     }
 
     init(from decoder: Decoder) throws {
@@ -435,5 +455,22 @@ struct DeviceTypeInfo: Decodable, Equatable {
         vendor = (try? container.decodeIfPresent(String.self, forKey: .vendor)) ?? ""
         descriptionText = (try? container.decodeIfPresent(String.self, forKey: .description)) ?? ""
         gattServices = (try? container.decodeIfPresent([GATTService].self, forKey: .gattServices)) ?? []
+        compatibility = try? container.decodeIfPresent(CompatibilityInfo.self, forKey: .compatibility)
+    }
+
+    init(
+        type: String,
+        name: String,
+        vendor: String,
+        descriptionText: String,
+        gattServices: [GATTService],
+        compatibility: CompatibilityInfo? = nil
+    ) {
+        self.type = type
+        self.name = name
+        self.vendor = vendor
+        self.descriptionText = descriptionText
+        self.gattServices = gattServices
+        self.compatibility = compatibility
     }
 }
