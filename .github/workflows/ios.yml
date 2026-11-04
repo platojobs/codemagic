@@ -1,0 +1,73 @@
+name: iOS Build & Test
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    name: Build & Test (iOS Simulator)
+    runs-on: macos-15
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode and show environment
+        run: |
+          for candidate in /Applications/Xcode_16.4.app /Applications/Xcode_16.3.app /Applications/Xcode_16.2.app; do
+            if [ -d "$candidate" ]; then
+              sudo xcode-select -s "$candidate"
+              break
+            fi
+          done
+          xcodebuild -version
+          echo "Developer dir: $(xcode-select -p)"
+          xcrun simctl list devices available | head -40
+
+      - name: Build (generic iOS Simulator)
+        run: |
+          xcodebuild -project codemagic.xcodeproj \
+            -scheme codemagic \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath .build/DerivedData \
+            CODE_SIGNING_ALLOWED=NO build
+
+      - name: Unit tests (iPhone simulator)
+        run: |
+          SIM_UDID=$(xcrun simctl list devices available -j | python3 -c '
+import json, sys
+devices = json.load(sys.stdin)["devices"]
+for runtime in sorted(devices, reverse=True):
+    if "iOS" not in runtime:
+        continue
+    for device in devices[runtime]:
+        if device["name"].startswith("iPhone") and device.get("isAvailable", True):
+            print(device["udid"])
+            sys.exit(0)
+sys.exit(1)
+')
+          echo "Using simulator: $SIM_UDID"
+          xcodebuild -project codemagic.xcodeproj \
+            -scheme codemagic \
+            -destination "platform=iOS Simulator,id=$SIM_UDID" \
+            -derivedDataPath .build/DerivedData \
+            CODE_SIGNING_ALLOWED=NO test
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcresult-${{ github.run_id }}
+          path: .build/DerivedData/Logs/Test/*.xcresult
+          if-no-files-found: warn
