@@ -45,18 +45,11 @@ jobs:
 
       - name: Unit tests (iPhone simulator)
         run: |
-          SIM_UDID=$(xcrun simctl list devices available -j | python3 -c '
-import json, sys
-devices = json.load(sys.stdin)["devices"]
-for runtime in sorted(devices, reverse=True):
-    if "iOS" not in runtime:
-        continue
-    for device in devices[runtime]:
-        if device["name"].startswith("iPhone") and device.get("isAvailable", True):
-            print(device["udid"])
-            sys.exit(0)
-sys.exit(1)
-')
+          SIM_UDID=$(xcrun simctl list devices available | grep -m1 -E "iPhone" | sed -E 's/.*\(([0-9A-Fa-f-]{36})\).*/\1/')
+          if [ -z "$SIM_UDID" ]; then
+            echo "No available iPhone simulator found"
+            exit 1
+          fi
           echo "Using simulator: $SIM_UDID"
           xcodebuild -project codemagic.xcodeproj \
             -scheme codemagic \
