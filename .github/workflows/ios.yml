@@ -84,7 +84,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Go (version from PJGoIoT/go.mod)
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version-file: PJGoIoT/go.mod
           cache-dependency-path: PJGoIoT/go.sum
