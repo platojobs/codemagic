@@ -11,7 +11,7 @@
    - 本机无 Apple 开发者账号与证书，未执行 `archive` / `exportArchive`，未上架 App Store / TestFlight。
    - CI 与本地构建统一使用 `CODE_SIGNING_ALLOWED=NO`，只验证编译与测试。
 3. **CI**
-   - GitHub Actions `ios.yml` 已实际运行成功（run [41906015761](https://github.com/platojobs/codemagic/actions/runs/41906015761)，macos-15 + Xcode 16.4；并行 `build-test` 81 单测与 `e2e-contract` 87 项断言均 PASS）；仅 push 到 `main` / tag 触发，PR 不跑（macOS runner 计费高），按 `github.sha` 去重。
+   - GitHub Actions `ios.yml` 已实际运行成功（tag 运行 [41913477079](https://github.com/platojobs/codemagic/actions/runs/41913477079)，macos-15 + Xcode 16.4；并行 `build-test` 81 单测与 `e2e-contract` 87 项断言均 PASS）；仅 push 到 `main` / tag 触发，PR 不跑（macOS runner 计费高），按 `github.sha` 去重。
    - CI 的 `e2e-contract` 使用 `platojobs/PJGoIoT` 默认分支与 `go.mod` 中的 Go 版本；后端后续若改变 fixture 数据或契约，CI 会先红，需要同步更新断言。
    - 根目录 `codemagic.yaml`（Codemagic）保留为可选替代方案，**仍未在 Codemagic 上运行**，不能作为当前 CI 证据。
    - 仓库 OAuth token 缺少 `workflow` scope，推送 `.github/workflows/*` 使用 SSH over 443（`ssh://git@ssh.github.com:443/platojobs/codemagic.git`），未改全局 git config。

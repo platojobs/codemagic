@@ -209,7 +209,7 @@ iOS 端不再存在“历史端点”调用；唯一保留的旧路径 `/api/v1/
 
 当前共 **87 项断言全部通过**（v0.3.6 联调记录）。
 
-运行记录见 `README.md` 第 4.2 节；该脚本已接入 GitHub Actions `ios.yml` 的 `e2e-contract` job（macOS runner，与 build 并行）。
+运行记录见 `README.md` 第 4.2 节；该脚本已接入 GitHub Actions `ios.yml` 的 `e2e-contract` job（macOS runner，与 build 并行）。v0.3.6 的实际 CI 运行 [41913477079](https://github.com/platojobs/codemagic/actions/runs/41913477079) 中，`e2e-contract` 43s、`build-test` 249s，二者均 success。
 
 ### 3.6 市场筛选维度（真实字段，不造假分类）
 
