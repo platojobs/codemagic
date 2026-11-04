@@ -177,10 +177,11 @@ cd /path/to/codemagic
 
 ```
 [e2e] health 200
+[1. 匿名登录] 3/3 PASS
 [2. 双平台推送（ios + android 同一台设备）] 7/7 PASS
-[3. changes 拉回校验 platform / externalId] 13/13 PASS
+[3. changes 拉回校验 platform / externalId] 12/12 PASS
 [4. 同 Idempotency-Key 重放] 5/5 PASS
-[5. LWW 冲突：旧版本不静默覆盖新版本] 11/11 PASS
+[5. LWW 冲突：旧版本不静默覆盖新版本] 9/9 PASS
 [6. 无 token 401 / 跨用户 404] 7/7 PASS
 
 === E2E 合同联调结果 ===
