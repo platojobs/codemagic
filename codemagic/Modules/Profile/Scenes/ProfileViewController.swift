@@ -105,6 +105,20 @@ final class ProfileViewController: UIViewController {
         present(alert, animated: true)
     }
 
+    /// 重新登录必须由用户确认：会换新的匿名账号，旧账号云端数据不会自动合并。
+    private func confirmRelogin() {
+        let alert = UIAlertController(
+            title: "重新登录？",
+            message: "将创建新的匿名账号，旧账号的云端数据不会自动合并到新账号；本机已有设备会重新上传到新账号。",
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "取消", style: .cancel))
+        alert.addAction(UIAlertAction(title: "重新登录", style: .destructive) { [weak self] _ in
+            self?.viewModel.relogin()
+        })
+        present(alert, animated: true)
+    }
+
     private func openLogs() {
         let logs = ScanLogViewController(scanLogStore: scanLogStore)
         navigationController?.pushViewController(logs, animated: true)
@@ -132,7 +146,7 @@ extension ProfileViewController: UITableViewDataSource {
         switch section {
         case .bluetooth: return 3
         case .localData: return 2
-        case .sync: return 4
+        case .sync: return 4 + (viewModel.needsRelogin ? 1 : 0)
         case .settings: return 2
         case .about: return 3
         }
@@ -201,8 +215,13 @@ extension ProfileViewController: UITableViewDataSource {
                     title: viewModel.isSyncing ? "同步中…" : "立即同步",
                     color: viewModel.isSyncing ? AppTheme.Palette.secondaryText : AppTheme.Palette.accent
                 )
-            default:
+            case 3:
                 return makeValueCell(title: "匿名账号", value: viewModel.accountText)
+            default:
+                return makeActionCell(
+                    title: viewModel.isSyncing ? "登录中…" : "重新登录",
+                    color: AppTheme.Palette.accent
+                )
             }
 
         case .settings:
@@ -258,6 +277,8 @@ extension ProfileViewController: UITableViewDelegate {
             confirmClearLogs()
         case .sync where indexPath.row == 2:
             viewModel.manualSync()
+        case .sync where indexPath.row == 4:
+            confirmRelogin()
         case .about where indexPath.row == 2:
             openAbout()
         default:

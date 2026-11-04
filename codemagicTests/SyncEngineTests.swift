@@ -105,6 +105,14 @@ final class SyncEngineTests: XCTestCase {
         return captured
     }
 
+    /// 假接口重新登录回调，便于断言结果。
+    @discardableResult
+    private func runRelogin(_ engine: SyncEngine) -> Result<SyncEngine.Summary, AppError>? {
+        var captured: Result<SyncEngine.Summary, AppError>?
+        engine.relogin { captured = $0 }
+        return captured
+    }
+
     private func makeEngine(now: @escaping () -> Date = Date.init) -> SyncEngine {
         SyncEngine(
             api: api,
@@ -364,6 +372,88 @@ final class SyncEngineTests: XCTestCase {
         XCTAssertNotNil(engine.status.lastError)
         XCTAssertTrue(engine.status.lastOutcomeMessage?.contains("本地数据仍可用") == true)
         XCTAssertEqual(api.pushRequests.count, 0, "拉取失败时不应继续推送")
+    }
+
+    // MARK: - 401 与重新登录
+
+    func testUnauthorizedMarksReloginRequiredWithoutCreatingNewAccount() throws {
+        tokenStore.session = AnonymousSession(userID: "user-1", token: "token-1")
+        api.changesPages = [.failure(.api(code: "UNAUTHORIZED", statusCode: 401, message: "token expired"))]
+
+        let engine = makeEngine()
+        guard case .failure(let error) = try XCTUnwrap(runSync(engine)) else {
+            return XCTFail("401 应导致同步失败")
+        }
+        XCTAssertTrue(error.isUnauthorized)
+        XCTAssertTrue(engine.status.needsRelogin)
+        XCTAssertTrue(metadata.reloginRequired)
+        XCTAssertEqual(api.authCount, 0, "401 时不得静默新建匿名账号")
+        XCTAssertEqual(tokenStore.session?.token, "token-1", "未确认前保留旧 token 等待用户操作")
+
+        // 后续自动同步（前台 / 后台）也必须停在待重新登录，不得建号。
+        api.changesPages = [.failure(.api(code: "UNAUTHORIZED", statusCode: 401, message: "token expired"))]
+        _ = runSync(engine)
+        XCTAssertEqual(api.authCount, 0)
+        XCTAssertTrue(engine.status.needsRelogin)
+    }
+
+    func testMissingTokenWithReloginRequiredDoesNotAutoCreateAccount() throws {
+        metadata.reloginRequired = true
+
+        let engine = makeEngine()
+        guard case .failure(let error) = try XCTUnwrap(runSync(engine)) else {
+            return XCTFail("缺少会话应失败")
+        }
+        XCTAssertEqual(error.code, "SYNC-001")
+        XCTAssertEqual(api.authCount, 0, "等待用户确认时不得静默建号")
+        XCTAssertTrue(engine.status.needsRelogin)
+    }
+
+    func testReloginClearsTokenResetsCursorAndReuploadsLocalDevices() throws {
+        let device = SavedDevice(
+            peripheralID: UUID(),
+            name: "本机设备",
+            updatedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            syncState: .synced
+        )
+        try savedDeviceStore.upsert(device)
+        metadata.cursor = 42
+        metadata.userID = "user-1"
+        metadata.lastSyncAt = Date(timeIntervalSince1970: 1_700_000_000)
+        tokenStore.session = AnonymousSession(userID: "user-1", token: "old-token")
+        api.authResult = .success(AnonymousSession(userID: "user-2", token: "token-2"))
+
+        let engine = makeEngine()
+        guard case .success = try XCTUnwrap(runRelogin(engine)) else {
+            return XCTFail("重新登录应成功")
+        }
+
+        XCTAssertEqual(api.authCount, 1, "重新登录只创建一次新匿名账号")
+        XCTAssertEqual(tokenStore.session?.token, "token-2")
+        XCTAssertEqual(metadata.userID, "user-2")
+        XCTAssertEqual(api.changesRequests.last?.cursor, 0, "换号后必须从游标 0 重新拉取")
+        XCTAssertEqual(api.pushRequests.count, 1, "本机设备需重新上传到新账号")
+        XCTAssertEqual(api.pushRequests.first?.devices.first?.id, device.id.uuidString)
+        XCTAssertEqual(engine.status.pendingCount, 0)
+        XCTAssertFalse(engine.status.needsRelogin)
+        XCTAssertFalse(metadata.reloginRequired)
+        XCTAssertNotNil(metadata.lastSyncAt)
+    }
+
+    func testReloginFailureKeepsReloginRequiredAndDoesNotFallBackToAutoLogin() throws {
+        tokenStore.session = AnonymousSession(userID: "user-1", token: "old-token")
+        api.authResult = .failure(.network("offline"))
+
+        let engine = makeEngine()
+        guard case .failure = try XCTUnwrap(runRelogin(engine)) else {
+            return XCTFail("重新登录失败应返回错误")
+        }
+        XCTAssertNil(tokenStore.session, "已确认换号，旧 token 不恢复")
+        XCTAssertTrue(metadata.reloginRequired)
+        XCTAssertTrue(engine.status.needsRelogin)
+
+        _ = runSync(engine)
+        XCTAssertEqual(api.authCount, 1, "失败后自动同步不得悄悄建新号")
     }
 
     // MARK: - Helpers

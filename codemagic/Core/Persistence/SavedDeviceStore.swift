@@ -138,6 +138,20 @@ final class SavedDeviceStore {
         }
     }
 
+    /// 换匿名账号后把本机全部活动设备重新标记为待上传，让新账号重新拿到这些记录。
+    /// tombstone 不重传（新账号没有对应记录可删）。返回受影响行数。
+    @discardableResult
+    func markAllPendingForRelogin() throws -> Int {
+        let active = try database.query(
+            "SELECT COUNT(*) AS total FROM saved_devices WHERE deleted_at IS NULL;"
+        )
+        try database.execute(
+            "UPDATE saved_devices SET sync_state = ? WHERE deleted_at IS NULL;",
+            [.text(SyncState.pending.rawValue)]
+        )
+        return Int(active.first?.integer("total") ?? 0)
+    }
+
     // MARK: - Mapping
 
     private static func makeDevice(from row: SQLRow) -> SavedDevice? {

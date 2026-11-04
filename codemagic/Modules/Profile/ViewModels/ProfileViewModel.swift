@@ -71,7 +71,18 @@ final class ProfileViewModel {
         }
     }
 
+    /// 用户确认后：换新的匿名账号、重置游标、把本机设备重新上传。
+    func relogin() {
+        guard !syncStatus.isSyncing else { return }
+        syncEngine.relogin { [weak self] _ in
+            self?.refresh()
+        }
+    }
+
     var isSyncing: Bool { syncStatus.isSyncing }
+
+    /// 匿名 token 已失效，需要用户在「我的」页确认重新登录。
+    var needsRelogin: Bool { syncStatus.needsRelogin }
 
     var lastSyncText: String {
         guard let lastSyncAt = syncStatus.lastSyncAt else { return "尚未同步" }
@@ -83,21 +94,31 @@ final class ProfileViewModel {
     }
 
     var accountText: String {
+        if syncStatus.needsRelogin {
+            return "登录已失效"
+        }
         guard let userID = syncStatus.userID, !userID.isEmpty else { return "匿名账号尚未创建" }
         return userID
     }
 
-    /// 同步区状态：进行中 / 上次结果 / 失败原因 / 从未同步。
+    /// 同步区状态：登录失效 / 进行中 / 上次结果 / 失败原因 / 从未同步。
     var syncStatusText: String {
         if syncStatus.isSyncing { return "正在同步…" }
+        if syncStatus.needsRelogin {
+            return "登录已失效：匿名会话 token 已过期，云端同步已暂停。"
+        }
         if let lastOutcome = syncStatus.lastOutcomeMessage { return lastOutcome }
         if let error = syncStatus.lastError { return "\(error.code) \(error.message)" }
         return "尚未同步。点击「立即同步」或回到前台后自动同步。"
     }
 
-    /// 降级说明：网络/后端不可用时本地功能不受影响。
+    /// 降级说明：网络/后端不可用时本地功能不受影响；登录失效时说明换号后果。
     var syncDegradationText: String {
-        var lines = ["断网或后端不可用时同步会自动失败并保留待上传记录；恢复后前后台切换或后台任务会重试，本地功能不受影响。"]
+        var lines: [String] = []
+        if syncStatus.needsRelogin {
+            lines.append("重新登录会创建新的匿名账号，旧账号的云端数据不会自动合并；本机已有设备会重新上传到新账号。")
+        }
+        lines.append("断网或后端不可用时同步会自动失败并保留待上传记录；恢复后前后台切换或后台任务会重试，本地功能不受影响。")
         if let conflict = syncStatus.lastConflictMessages.first {
             lines.append(conflict)
         }

@@ -4,7 +4,7 @@
 
 - Android 侧口径以 `PKotlinApp/README.md` 与 `PJGoIoT/api/openapi.yaml` 为准。
 - iOS 侧以本仓库 `README.md`、`docs/architecture.md` 为准。
-- 后端 `openapi.yaml` 当前标注版本 **0.3.1**（本地 `PJGoIoT` HEAD `ebf542f`，tag `v0.3.1`）。iOS v0.3.1（`MARKETING_VERSION 0.3.1`，build 5）已按该版本切换产品 / 市场 / 设备详情端点；端到端联调以运行中的 fixture 服务实际行为为准（见 3.5）。
+- 后端 `openapi.yaml` 当前标注版本 **0.3.1**（本地 `PJGoIoT` HEAD `ebf542f`，tag `v0.3.1`）。iOS v0.3.2（`MARKETING_VERSION 0.3.2`，build 6）契约仍对齐 0.3.1，本轮补齐 401 重新登录交互与验收文档；端到端联调以运行中的 fixture 服务实际行为为准（见 3.5）。
 
 ---
 
@@ -169,7 +169,7 @@ iOS 端不再存在“历史端点”调用；唯一保留的旧路径 `/api/v1/
 - 展示与日志中同时保留服务端 `code` 与 `message`（如 `NET-002 RATE_LIMITED 请求过于频繁`）；
 - 同一 `Idempotency-Key` 用于不同请求体时返回 409 `IDEMPOTENCY_CONFLICT`（不是 `IDEMPOTENCY_KEY_REUSED`）；
 - **401 `UNAUTHORIZED` 语义**：token 已失效，必须由用户重新登录（重新获取匿名会话）后重试。客户端**不得在 401 时静默调用 `auth/anonymous` 新建匿名账号**，以免设备归属漂移。
-- iOS 当前在 401 时保留待上传记录并展示错误；由于暂无独立登录入口，需用户清理 Keychain token 后主动触发同步才会建立新会话（不会自动重登）。见 `KNOWN_ISSUES.md`。
+- iOS 当前在 401 时保留待上传记录并展示「登录已失效」：「我的」页显示状态与「重新登录」入口，用户确认后才调用 `auth/anonymous` 换新匿名账号；**不做自动重登**。确认后同步游标重置为 0，本机活动设备重新上传到新账号；旧账号云端数据不自动合并。见 `KNOWN_ISSUES.md`。
 
 ---
 

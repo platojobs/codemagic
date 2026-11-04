@@ -56,4 +56,14 @@ enum AppError: Error, Equatable {
     var localizedDescriptionText: String {
         "\(code) \(message)"
     }
+
+    /// 匿名 token 失效（HTTP 401）。此时必须由用户确认重新登录，不得静默新建匿名账号。
+    var isUnauthorized: Bool {
+        switch self {
+        case .api(_, statusCode: 401, _), .server(statusCode: 401):
+            return true
+        default:
+            return false
+        }
+    }
 }

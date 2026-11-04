@@ -8,6 +8,7 @@ final class SyncMetadataStore {
         static let lastSyncAt = "sync.lastSyncAt"
         static let userID = "sync.userId"
         static let clientID = "sync.clientId"
+        static let reloginRequired = "sync.reloginRequired"
     }
 
     private let defaults: UserDefaults
@@ -41,6 +42,12 @@ final class SyncMetadataStore {
     var userID: String? {
         get { defaults.string(forKey: Key.userID) }
         set { defaults.set(newValue, forKey: Key.userID) }
+    }
+
+    /// 登录已失效、等待用户确认重新登录。为 true 时不得静默新建匿名账号。
+    var reloginRequired: Bool {
+        get { defaults.bool(forKey: Key.reloginRequired) }
+        set { defaults.set(newValue, forKey: Key.reloginRequired) }
     }
 
     /// 客户端标识，随安装持久；写入服务端 `clientId`，用于诊断最后写入方。

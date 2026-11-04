@@ -4,7 +4,7 @@
 
 **不包含** SwiftUI 主界面、第三方 UI 库、假数据、假购物车 / 订单 / 支付。
 
-> 行为口径（模块顺序、字段、错误码、空状态、权限）见 **[docs/consistency.md](docs/consistency.md)**。结构与分层见 **[docs/architecture.md](docs/architecture.md)**。
+> 行为口径（模块顺序、字段、错误码、空状态、权限）见 **[docs/consistency.md](docs/consistency.md)**。结构与分层见 **[docs/architecture.md](docs/architecture.md)**；真机验收见 **[docs/acceptance.md](docs/acceptance.md)**，故障排查见 **[docs/troubleshooting.md](docs/troubleshooting.md)**，版本变更见 **[docs/releasenotes.md](docs/releasenotes.md)**。
 
 ---
 
@@ -12,14 +12,14 @@
 
 | 项 | 结果 |
 | --- | --- |
-| 版本 | **v0.3.1**（`MARKETING_VERSION 0.3.1`，`CURRENT_PROJECT_VERSION 5`，tag `v0.3.1`，对齐 Go 0.3.1） |
+| 版本 | **v0.3.2**（`MARKETING_VERSION 0.3.2`，`CURRENT_PROJECT_VERSION 6`，tag `v0.3.2`，契约对齐 Go 0.3.1） |
 | 五模块（首页 / 设备 / 产品 / 市场 / 我的） | 已实现，纯代码 UIKit，真实数据路径 |
 | CoreBluetooth 扫描 + 连接 | 已实现（`CBCentralManager`，真实 RSSI） |
 | 本地持久化 | 已实现（SQLite3，含同步字段；迁移 v2 补齐 `platform / external_id`） |
 | 网络层 | 已实现（URLSession + Codable，对齐 `openapi.yaml` 0.3.1：device-types / catalog / 复合键详情） |
-| 同步 | **已实现**：匿名登录、增量拉取、批量推送（幂等键）、冲突提示、tombstone、Keychain token、前后台 / BGTask 触发 |
+| 同步 | **已实现**：匿名登录、增量拉取、批量推送（幂等键）、冲突提示、tombstone、Keychain token、前后台 / BGTask 触发、401 登录失效确认重登 |
 | 自绘 RSSI + 代码组装空状态 | 已实现 |
-| 单元测试 | **64 个用例，0 失败**（`** TEST SUCCEEDED **`，2026-11-05，Xcode 27.2 / iPhone 17 模拟器） |
+| 单元测试 | **68 个用例，0 失败**（`** TEST SUCCEEDED **`，2026-11-05，Xcode 27.2 / iPhone 17 模拟器） |
 | 模拟器构建 | **通过**（`xcodebuild ... build`，`** BUILD SUCCEEDED **`） |
 | CI | Codemagic `codemagic.yaml` 已配置（macOS + Xcode 16.4，构建 + 测试 + artifact）；**尚未在 Codemagic 上实际运行** |
 | 真机 BLE / 签名 | **未验证**：本机无真机与 Apple 开发者账号，需自行验证（见第 9 节） |
@@ -55,6 +55,7 @@
 - 蓝牙授权与开关状态自检，跳转系统设置。
 - 本地扫描日志列表、计数与清空。
 - **同步状态**：上次同步时间、待上传条数、「立即同步」按钮、匿名账号；失败时展示错误码与降级说明，冲突时提示「另一台设备改过这条」。
+- **登录失效（401）**：token 过期时显示「登录已失效」，出现「重新登录」入口；确认弹窗说明旧账号云端数据不自动合并、本机设备会重新上传，确认后才换新匿名账号（游标重置为 0）。未确认前前后台自动同步不会静默建号，见 `docs/troubleshooting.md` 第 3.1 节。
 - 基础设置：自动记录最近设备、启动自动扫描。
 - 版本与关于：读取 `CFBundleShortVersionString / CFBundleVersion` 与当前 `BASE_URL`。
 
@@ -95,10 +96,13 @@ Config/
 scripts/
 ├── e2e-contract.sh         # 启动本地 fixture 服务 + 运行联调 runner（不进 CI）
 └── e2e-contract.swift      # 独立 Swift 可执行 runner，真实 URLSession 直连 localhost
-codemagicTests/             # 64 个 XCTest 用例
+codemagicTests/             # 68 个 XCTest 用例
 docs/
 ├── architecture.md
-└── consistency.md
+├── consistency.md
+├── acceptance.md           # 真机验收清单（五模块 / 蓝牙 / 规则 / 降级 / BGTask / Release）
+├── troubleshooting.md      # Xcode / 签名 / Keychain / BGTask / BASE_URL / Go 服务 / 端口
+└── releasenotes.md         # 按 tag 的真实发布说明
 ```
 
 ### 分层
@@ -287,6 +291,7 @@ cd /path/to/codemagic
 
 ## 10. 版本记录
 
+- `v0.3.2`：文档补齐（`docs/acceptance.md` 真机验收清单、`docs/troubleshooting.md`、`docs/releasenotes.md`）；401 登录失效交互：「我的」页展示「登录已失效」+「重新登录」确认流程，确认后才换匿名账号，游标重置并重推本地活动设备；`sync.reloginRequired` 持久化，前后台自动同步不再静默建号；单测增至 68 个；`MARKETING_VERSION 0.3.2` / build 6，tag `v0.3.2`。
 - `v0.3.1`：对齐 `openapi.yaml` 0.3.1（`MARKETING_VERSION 0.3.1` / build 5，tag `v0.3.1`）；产品改为 `device-types` + `{type}/catalog`，市场由 catalog 聚合 firmware + accessories，iOS 设备详情改用复合键 `my/devices/ios/{externalId}`；移除产品 / 市场 / 设备详情的全部历史端点；E2E 扩至 55 项断言（含 catalog 与复合键 200/404）；单测 64 个。
 - `v0.3.0`：版本号对齐（`MARKETING_VERSION 0.3.0` / build 4，tag `v0.3.0`，保留 `v0.2.0`）；新增 `scripts/e2e-contract.sh` + 独立 Swift runner，对本地 `PJGoIoT`（`STORE=fixture`）完成 43 项契约联调（匿名登录、双平台推送、changes 形状、幂等重放、LWW 冲突、401/404）；跨平台 Android 设备在列表标注「来自 Android，本机不可连接」并禁用连接；按 `openapi.yaml` 修正 `docs/consistency.md` 的错误码与对齐状态；单测增至 63 个。
 - `v0.2.0`：落地同步层（匿名登录 / Keychain token / 增量拉取 / 批量推送幂等 / 冲突提示 / tombstone）、SQLite 迁移 v2（`platform` + `external_id`）、`BGAppRefreshTask` 与前后台触发、「我的」同步状态与手动同步、版本号对齐；新增同步相关单元测试并更新 `docs/consistency.md`。

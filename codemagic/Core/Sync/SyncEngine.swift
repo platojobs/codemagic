@@ -23,6 +23,8 @@ final class SyncEngine {
         var lastError: AppError?
         var lastConflictMessages: [String] = []
         var lastOutcomeMessage: String?
+        /// 匿名 token 已失效，等待用户确认重新登录。
+        var needsRelogin: Bool = false
     }
 
     private(set) var status = Status()
@@ -69,6 +71,7 @@ final class SyncEngine {
         status.lastSyncAt = metadataStore.lastSyncAt
         status.pendingCount = pending
         status.isSyncing = isSyncing
+        status.needsRelogin = metadataStore.reloginRequired
     }
 
     /// 前后台切换触发：距上次同步不足 `minimumInterval` 时直接跳过。
@@ -100,35 +103,59 @@ final class SyncEngine {
                 self.finish(.failure(error), completion: completion)
 
             case .success(let session):
+                self.runSync(session: session, summary: Summary(), completion: completion)
+            }
+        }
+    }
+
+    /// 用户确认重新登录：换新的匿名账号，重置游标，并把本机设备全部重新上传。
+    ///
+    /// 旧账号数据不会自动合并；本机数据保留，只更换云端归属。重复点击由 `isSyncing` 拦截。
+    func relogin(completion: ((Result<Summary, AppError>) -> Void)? = nil) {
+        guard !isSyncing else {
+            completion?(.failure(.sync("上一次同步尚未结束")))
+            return
+        }
+        isSyncing = true
+        sessionConflictMessages = []
+        status.isSyncing = true
+        status.lastError = nil
+        notify()
+
+        // 丢弃旧会话与游标，账号标识清空；本地设备数据保留。
+        // reloginRequired 保持 true 直到新会话创建成功，避免中途杀进程后自动建号。
+        tokenStore.clear()
+        metadataStore.resetCursor()
+        metadataStore.userID = nil
+        metadataStore.reloginRequired = true
+
+        do {
+            let requeued = try deviceStore.markAllPendingForRelogin()
+            recordLog("重新登录：本地 \(requeued) 条设备将上传到新匿名账号")
+        } catch {
+            finish(.failure(.database("重新登录前重置同步状态失败：\(error)")), completion: completion)
+            return
+        }
+
+        api.createAnonymousSession { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .failure(let error):
+                // 不恢复旧 token；保持待重新登录，避免下次自动同步静默建号。
+                self.metadataStore.reloginRequired = true
+                self.status.needsRelogin = true
+                self.finish(.failure(error), completion: completion)
+
+            case .success(let session):
+                do {
+                    try self.tokenStore.save(session)
+                } catch {
+                    self.recordLog("重新登录成功，但 token 写入 Keychain 失败：\(error)")
+                }
                 self.metadataStore.userID = session.userID
-                self.pull(
-                    cursor: self.metadataStore.cursor,
-                    token: session.token,
-                    page: 0,
-                    summary: Summary(),
-                    completion: { [weak self] pullResult in
-                        guard let self else { return }
-                        switch pullResult {
-                        case .failure(let error):
-                            self.finish(.failure(error), completion: completion)
-                        case .success(let summary):
-                            self.pushPending(
-                                token: session.token,
-                                summary: summary,
-                                completion: { [weak self] pushResult in
-                                    guard let self else { return }
-                                    switch pushResult {
-                                    case .failure(let error):
-                                        self.finish(.failure(error), completion: completion)
-                                    case .success(let finalSummary):
-                                        self.metadataStore.lastSyncAt = self.now()
-                                        self.finish(.success(finalSummary), completion: completion)
-                                    }
-                                }
-                            )
-                        }
-                    }
-                )
+                self.metadataStore.reloginRequired = false
+                self.status.needsRelogin = false
+                self.runSync(session: session, summary: Summary(), completion: completion)
             }
         }
     }
@@ -138,6 +165,11 @@ final class SyncEngine {
     private func ensureSession(completion: @escaping (Result<AnonymousSession, AppError>) -> Void) {
         if let session = tokenStore.load(), !session.token.isEmpty {
             completion(.success(session))
+            return
+        }
+        // token 已失效且用户尚未确认重新登录：禁止静默新建匿名账号，避免设备归属漂移。
+        guard !metadataStore.reloginRequired else {
+            completion(.failure(.sync("匿名登录已失效，请在「我的」页重新登录")))
             return
         }
         api.createAnonymousSession { [weak self] result in
@@ -154,6 +186,41 @@ final class SyncEngine {
                 completion(.success(session))
             case .failure(let error):
                 completion(.failure(error))
+            }
+        }
+    }
+
+    /// 使用给定会话执行「拉取 → 推送」，首次同步与重新登录共用。
+    private func runSync(
+        session: AnonymousSession,
+        summary: Summary,
+        completion: ((Result<Summary, AppError>) -> Void)?
+    ) {
+        metadataStore.userID = session.userID
+        pull(
+            cursor: metadataStore.cursor,
+            token: session.token,
+            page: 0,
+            summary: summary
+        ) { [weak self] pullResult in
+            guard let self else { return }
+            switch pullResult {
+            case .failure(let error):
+                self.finish(.failure(error), completion: completion)
+            case .success(let summary):
+                self.pushPending(
+                    token: session.token,
+                    summary: summary
+                ) { [weak self] pushResult in
+                    guard let self else { return }
+                    switch pushResult {
+                    case .failure(let error):
+                        self.finish(.failure(error), completion: completion)
+                    case .success(let finalSummary):
+                        self.metadataStore.lastSyncAt = self.now()
+                        self.finish(.success(finalSummary), completion: completion)
+                    }
+                }
             }
         }
     }
@@ -402,6 +469,8 @@ final class SyncEngine {
         switch result {
         case .success(let summary):
             status.lastError = nil
+            metadataStore.reloginRequired = false
+            status.needsRelogin = false
             let base = "同步完成：拉取 \(summary.pulled) 条，上传 \(summary.pushed) 条"
             status.lastOutcomeMessage = summary.conflicts > 0
                 ? "\(base)，冲突 \(summary.conflicts) 条（已采用云端版本）"
@@ -411,8 +480,16 @@ final class SyncEngine {
         case .failure(let error):
             status.lastError = error
             status.lastConflictMessages = sessionConflictMessages
-            status.lastOutcomeMessage = "同步失败：\(error.code) \(error.message)；本地数据仍可用，稍后自动重试"
-            recordLog("同步失败：\(error.code) \(error.message)", level: .warning)
+            if error.isUnauthorized {
+                // 401：token 已失效。保留本地数据与 token，等待用户在「我的」页确认重新登录。
+                metadataStore.reloginRequired = true
+                status.needsRelogin = true
+                status.lastOutcomeMessage = "登录已失效：匿名 token 已过期，请点「重新登录」；本地数据仍可用"
+                recordLog("登录已失效（HTTP 401）：等待用户重新登录", level: .warning)
+            } else {
+                status.lastOutcomeMessage = "同步失败：\(error.code) \(error.message)；本地数据仍可用，稍后自动重试"
+                recordLog("同步失败：\(error.code) \(error.message)", level: .warning)
+            }
         }
 
         refreshStatus()

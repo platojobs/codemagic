@@ -42,7 +42,7 @@ codemagic/
 Config/
 ├── Debug.xcconfig              # BASE_URL → 本地 Go 服务
 └── Release.xcconfig            # BASE_URL → 线上（当前为与 Android 共用的 mock）
-codemagicTests/                 # XCTest 单元测试（64 个用例）
+codemagicTests/                 # XCTest 单元测试（68 个用例）
 scripts/                        # e2e-contract.sh + 独立 Swift 联调 runner（不进 CI）
 docs/
 ├── architecture.md             # 本文件
@@ -115,6 +115,8 @@ CoreBluetoothService.discoveryHandler
 
 SyncEngine
   ├─ ensureSession：Keychain 有 token 则复用，否则 POST /auth/anonymous → 写 Keychain
+  │    例外：reloginRequired（登录已失效待确认）时失败返回，禁止静默建号
+  ├─ relogin：清 token + 游标归零 + 本地设备全部置 pending → 新建匿名账号 → 重跑下面的 pull/push
   ├─ pull：GET /sync/changes(cursor, limit=200) 循环 hasMore（≤10 页）
   │    └─ apply：本地无 → 插入 synced；本地已同步 → 云端覆盖；
   │              本地 pending 且云端更新 → 云端获胜 + 提示「另一台设备改过这条」
@@ -126,6 +128,7 @@ SyncEngine
 
 - token 仅存 Keychain；游标 / userId / clientId 存 UserDefaults（非凭据）。
 - 同步状态通过 `SyncEngine.onChange` 推给「我的」页，失败时保留 pending 并展示错误码与降级说明。
+- 401：`AppError.isUnauthorized` → `metadata.reloginRequired = true`，「我的」页展示「登录已失效」与「重新登录」；用户确认后才换号（旧账号数据不合并），否则前后台自动同步直接失败，不会静默建号。
 - 后台任务标识 `com.platojobs.codemagic.sync` 已在 `Info.plist` 的 `BGTaskSchedulerPermittedIdentifiers` 声明。
 - 契约联调：`scripts/e2e-contract.sh` 启动本地 `PJGoIoT`（`STORE=fixture`）并运行独立 Swift runner，真实网络覆盖匿名登录、双平台推送、device-types/catalog、复合键详情、幂等重放、LWW 冲突与 401/404；默认不进 CI。
 - 产品 / 市场 / 详情：`ProductAPIClient` 使用 `device-types` + `{type}/catalog`（一次拿固件与配件），设备详情使用 `my/devices/ios/{externalId}` 复合键，不依赖 MAC。
