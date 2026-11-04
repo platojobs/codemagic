@@ -20,6 +20,14 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>BASE_URL</key>
 	<string>$(BASE_URL)</string>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>com.platojobs.codemagic.sync</string>
+	</array>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>fetch</string>
+	</array>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>用于扫描附近的蓝牙设备、显示信号强度，并在设备详情页建立连接读取厂商与固件信息。</string>
 	<key>NSBluetoothPeripheralUsageDescription</key>

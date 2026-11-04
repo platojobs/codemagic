@@ -21,11 +21,13 @@ codemagic/
 │   ├── AppDelegate.swift
 │   ├── SceneDelegate.swift     # 纯代码 UIWindow → MainTabBarController
 │   ├── AppEnvironment.swift    # 数据库、Store、网络、蓝牙的唯一组装点
+│   ├── SyncCoordinator.swift   # BGAppRefreshTask 注册、前后台触发同步
 │   └── MainTabBarController.swift # 五个 Tab：首页/设备/产品/市场/我的
 ├── Core/
 │   ├── Models/                 # 领域模型（Codable，宽松解析）
 │   ├── Networking/             # APIConfiguration / HTTPClient / ProductAPIClient / AppError
 │   ├── Persistence/            # SQLiteDatabase 与各 Store
+│   ├── Sync/                   # SyncEngine / SyncAPIClient / SyncModels / KeychainTokenStore / SyncMetadataStore
 │   ├── Bluetooth/              # CoreBluetoothService（扫描 / 连接 / 授权）
 │   ├── Rules/                  # RuleEvaluator（断开 / RSSI 阈值）
 │   └── Formatting/             # 时间与 RSSI 格式化
@@ -40,7 +42,7 @@ codemagic/
 Config/
 ├── Debug.xcconfig              # BASE_URL → 本地 Go 服务
 └── Release.xcconfig            # BASE_URL → 线上（当前为与 Android 共用的 mock）
-codemagicTests/                 # XCTest 单元测试（44 个用例）
+codemagicTests/                 # XCTest 单元测试（62 个用例）
 docs/
 ├── architecture.md             # 本文件
 └── consistency.md              # Android/iOS 共用行为说明
@@ -101,7 +103,29 @@ CoreBluetoothService.discoveryHandler
 - `APIConfiguration` 从 `Info.plist` 读取 `BASE_URL`（由 xcconfig 注入），校验 scheme 与 host，源码不含地址。
 - `URLSessionHTTPClient`：15s 超时、`ephemeral` 配置、`reloadIgnoringLocalCacheData`；非 2xx → `AppError.server`。
 - `ProductAPIClient`：`GET api/products`、`GET api/market`、`GET api/device/{peripheralUUID}`；Codable 宽松解码，兼容响应包裹与裸数组。
-- `AppError` 统一错误码：`NET-001` / `NET-002` / `NET-003` / `NET-004` / `DB-001` / `BT-004`。
+- `AppError` 统一错误码：`NET-001` / `NET-002` / `NET-003` / `NET-004` / `DB-001` / `BT-004` / `SYNC-001`。
+
+### 6.1 同步（v0.2.0）
+
+```
+场景回到前台 → SyncCoordinator.syncOnForeground（120s 节流）
+场景进入后台 → BGAppRefreshTask(com.platojobs.codemagic.sync)
+「我的」立即同步 → SyncEngine.sync
+
+SyncEngine
+  ├─ ensureSession：Keychain 有 token 则复用，否则 POST /auth/anonymous → 写 Keychain
+  ├─ pull：GET /sync/changes(cursor, limit=200) 循环 hasMore（≤10 页）
+  │    └─ apply：本地无 → 插入 synced；本地已同步 → 云端覆盖；
+  │              本地 pending 且云端更新 → 云端获胜 + 提示「另一台设备改过这条」
+  └─ push：fetchPending（≤100/批，按 id 排序）
+       ├─ Idempotency-Key = SHA-256(批次内容) → 失败重试复用
+       ├─ 成功 → markSynced；conflicts → 写回云端版本 + 提示
+       └─ tombstone（deleted: true）同样走推送
+```
+
+- token 仅存 Keychain；游标 / userId / clientId 存 UserDefaults（非凭据）。
+- 同步状态通过 `SyncEngine.onChange` 推给「我的」页，失败时保留 pending 并展示错误码与降级说明。
+- 后台任务标识 `com.platojobs.codemagic.sync` 已在 `Info.plist` 的 `BGTaskSchedulerPermittedIdentifiers` 声明。
 
 ## 7. 持久化（SQLite）
 
@@ -110,6 +134,7 @@ CoreBluetoothService.discoveryHandler
 - 数据库文件：`Application Support/com.platojobs.codemagic/codemagic.sqlite`。
 - 打开参数：`READWRITE | CREATE | FULLMUTEX`；迁移使用 `PRAGMA user_version`，多语句脚本用 `sqlite3_exec`。
 - 所有读写串行在一个专用队列；软删除保留行以便后续同步。
+- 迁移版本：v1 建五张表；v2（v0.2.0）给 `saved_devices` 增加 `platform` / `external_id`，并由 `peripheral_id` 大写回填。
 - 5 张表：`saved_devices`、`rules`、`scan_logs`、`recent_devices`、`device_info_cache`。
 - 磁盘库打开失败时回退 `:memory:`，应用仍可启动，「我的」页显示 `DB-001` 启动提示。
 

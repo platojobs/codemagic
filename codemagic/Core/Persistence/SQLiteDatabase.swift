@@ -101,8 +101,16 @@ final class SQLiteDatabase {
 
     private func migrate() throws {
         let version = try currentUserVersion()
-        guard version < 1 else { return }
+        if version < 1 {
+            try migrateToVersion1()
+        }
+        if version < 2 {
+            try migrateToVersion2()
+        }
+    }
 
+    /// v1：五张业务表，均含 `id / updated_at / deleted_at / sync_state`。
+    private func migrateToVersion1() throws {
         try executeScript("""
         CREATE TABLE IF NOT EXISTS saved_devices (
             id TEXT PRIMARY KEY NOT NULL,
@@ -167,6 +175,20 @@ final class SQLiteDatabase {
         );
 
         PRAGMA user_version = 1;
+        """)
+    }
+
+    /// v2：补齐服务端设备唯一键 `(platform, externalId)`。
+    /// - 新增列后立即用 `peripheral_id` 回填，保证旧数据也能参与同步；
+    /// - 唯一索引限定 `deleted_at IS NULL`，tombstone 与同名新记录可以并存。
+    private func migrateToVersion2() throws {
+        try executeScript("""
+        ALTER TABLE saved_devices ADD COLUMN platform TEXT NOT NULL DEFAULT 'ios';
+        ALTER TABLE saved_devices ADD COLUMN external_id TEXT NOT NULL DEFAULT '';
+        UPDATE saved_devices SET external_id = UPPER(peripheral_id) WHERE external_id = '';
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_saved_devices_sync_key
+            ON saved_devices(platform, external_id) WHERE deleted_at IS NULL;
+        PRAGMA user_version = 2;
         """)
     }
 

@@ -6,6 +6,10 @@ enum AppError: Error, Equatable {
     case network(String)
     /// 服务端返回非 2xx。
     case server(statusCode: Int)
+    /// 服务端返回了结构化错误体 `{"error":{"code","message"}}`。
+    case api(code: String, statusCode: Int, message: String)
+    /// 同步流程本身的前置条件不满足（如上一次同步尚未结束）。
+    case sync(String)
     /// 响应无法解析为约定结构。
     case decoding(String)
     /// BASE_URL 缺失或非法。
@@ -19,10 +23,12 @@ enum AppError: Error, Equatable {
         switch self {
         case .network: return "NET-001"
         case .server: return "NET-002"
+        case .api: return "NET-002"
         case .decoding: return "NET-003"
         case .configuration: return "NET-004"
         case .database: return "DB-001"
         case .bluetooth: return "BT-004"
+        case .sync: return "SYNC-001"
         }
     }
 
@@ -32,6 +38,10 @@ enum AppError: Error, Equatable {
             return "网络请求失败，请检查网络或本地服务是否启动"
         case .server(let statusCode):
             return "服务端返回异常状态（HTTP \(statusCode)）"
+        case .api(let code, let statusCode, let message):
+            return "服务端错误（HTTP \(statusCode) / \(code)）：\(message)"
+        case .sync(let detail):
+            return detail
         case .decoding:
             return "响应数据结构与约定不符"
         case .configuration:

@@ -75,6 +75,7 @@ final class MainTabBarController: UITabBarController {
                     bluetooth: environment.bluetooth,
                     scanLogStore: environment.scanLogStore,
                     settingsStore: environment.settingsStore,
+                    syncEngine: environment.syncEngine,
                     baseURLText: environment.apiConfiguration?.displayString ?? "未配置",
                     startupWarning: environment.startupWarning
                 ),

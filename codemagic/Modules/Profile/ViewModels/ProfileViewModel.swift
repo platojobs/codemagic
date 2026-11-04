@@ -1,10 +1,11 @@
 import Foundation
 
-/// 「我的」视图模型：蓝牙权限自检、本地扫描日志与基础设置。
+/// 「我的」视图模型：蓝牙权限自检、本地扫描日志、基础设置与同步状态。
 final class ProfileViewModel {
     private(set) var authorization: BluetoothAuthorization = .unknown
     private(set) var bluetoothState: BluetoothState = .unknown
     private(set) var logCount: Int = 0
+    private(set) var syncStatus = SyncEngine.Status()
 
     let startupWarning: String?
     let baseURLText: String
@@ -14,17 +15,20 @@ final class ProfileViewModel {
     private let bluetooth: BluetoothServicing
     private let scanLogStore: ScanLogStore
     private let settingsStore: SettingsStore
+    private let syncEngine: SyncEngine
 
     init(
         bluetooth: BluetoothServicing,
         scanLogStore: ScanLogStore,
         settingsStore: SettingsStore,
+        syncEngine: SyncEngine,
         baseURLText: String,
         startupWarning: String?
     ) {
         self.bluetooth = bluetooth
         self.scanLogStore = scanLogStore
         self.settingsStore = settingsStore
+        self.syncEngine = syncEngine
         self.baseURLText = baseURLText
         self.startupWarning = startupWarning
     }
@@ -36,18 +40,68 @@ final class ProfileViewModel {
             self?.bluetoothState = state
             self?.onChange?()
         }
+        syncEngine.onChange = { [weak self] in
+            guard let self else { return }
+            self.syncStatus = self.syncEngine.status
+            self.onChange?()
+        }
         refresh()
     }
 
     func deactivate() {
         bluetooth.stateChangeHandler = nil
+        syncEngine.onChange = nil
     }
 
     func refresh() {
         authorization = bluetooth.currentAuthorization()
         bluetoothState = bluetooth.state
         logCount = (try? scanLogStore.count()) ?? 0
+        syncStatus = syncEngine.status
         onChange?()
+    }
+
+    // MARK: - Sync
+
+    /// 手动同步：不受前后台节流限制，失败时状态区会给出错误码与降级说明。
+    func manualSync() {
+        guard !syncStatus.isSyncing else { return }
+        syncEngine.sync { [weak self] _ in
+            self?.refresh()
+        }
+    }
+
+    var isSyncing: Bool { syncStatus.isSyncing }
+
+    var lastSyncText: String {
+        guard let lastSyncAt = syncStatus.lastSyncAt else { return "尚未同步" }
+        return AppDateFormat.absolute(lastSyncAt)
+    }
+
+    var pendingUploadText: String {
+        syncStatus.pendingCount == 0 ? "无待上传" : "\(syncStatus.pendingCount) 条"
+    }
+
+    var accountText: String {
+        guard let userID = syncStatus.userID, !userID.isEmpty else { return "匿名账号尚未创建" }
+        return userID
+    }
+
+    /// 同步区状态：进行中 / 上次结果 / 失败原因 / 从未同步。
+    var syncStatusText: String {
+        if syncStatus.isSyncing { return "正在同步…" }
+        if let lastOutcome = syncStatus.lastOutcomeMessage { return lastOutcome }
+        if let error = syncStatus.lastError { return "\(error.code) \(error.message)" }
+        return "尚未同步。点击「立即同步」或回到前台后自动同步。"
+    }
+
+    /// 降级说明：网络/后端不可用时本地功能不受影响。
+    var syncDegradationText: String {
+        var lines = ["断网或后端不可用时同步会自动失败并保留待上传记录；恢复后前后台切换或后台任务会重试，本地功能不受影响。"]
+        if let conflict = syncStatus.lastConflictMessages.first {
+            lines.append(conflict)
+        }
+        return lines.joined(separator: "\n")
     }
 
     // MARK: - Settings

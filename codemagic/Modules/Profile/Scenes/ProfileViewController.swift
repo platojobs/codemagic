@@ -1,10 +1,11 @@
 import UIKit
 
-/// 「我的」页：蓝牙权限自检、本地扫描日志入口、基础设置与关于。
+/// 「我的」页：蓝牙权限自检、本地扫描日志入口、同步状态、基础设置与关于。
 final class ProfileViewController: UIViewController {
     private enum Section: Int, CaseIterable {
         case bluetooth
         case localData
+        case sync
         case settings
         case about
     }
@@ -131,6 +132,7 @@ extension ProfileViewController: UITableViewDataSource {
         switch section {
         case .bluetooth: return 3
         case .localData: return 2
+        case .sync: return 4
         case .settings: return 2
         case .about: return 3
         }
@@ -141,6 +143,7 @@ extension ProfileViewController: UITableViewDataSource {
         switch section {
         case .bluetooth: return "蓝牙权限"
         case .localData: return "本地数据"
+        case .sync: return "同步"
         case .settings: return "设置"
         case .about: return "关于"
         }
@@ -151,6 +154,8 @@ extension ProfileViewController: UITableViewDataSource {
         switch section {
         case .bluetooth:
             return viewModel.permissionGuidance
+        case .sync:
+            return "\(viewModel.syncStatusText)\n\(viewModel.syncDegradationText)"
         case .about:
             return viewModel.startupWarning ?? "行为口径与 Android 端共用 docs/consistency.md。"
         case .localData, .settings:
@@ -184,6 +189,21 @@ extension ProfileViewController: UITableViewDataSource {
                 )
             }
             return makeActionCell(title: "清空扫描日志", color: AppTheme.Palette.promotion)
+
+        case .sync:
+            switch indexPath.row {
+            case 0:
+                return makeValueCell(title: "上次同步时间", value: viewModel.lastSyncText)
+            case 1:
+                return makeValueCell(title: "待上传", value: viewModel.pendingUploadText)
+            case 2:
+                return makeActionCell(
+                    title: viewModel.isSyncing ? "同步中…" : "立即同步",
+                    color: viewModel.isSyncing ? AppTheme.Palette.secondaryText : AppTheme.Palette.accent
+                )
+            default:
+                return makeValueCell(title: "匿名账号", value: viewModel.accountText)
+            }
 
         case .settings:
             guard let cell = tableView.dequeueReusableCell(
@@ -236,6 +256,8 @@ extension ProfileViewController: UITableViewDelegate {
             openLogs()
         case .localData where indexPath.row == 1:
             confirmClearLogs()
+        case .sync where indexPath.row == 2:
+            viewModel.manualSync()
         case .about where indexPath.row == 2:
             openAbout()
         default:

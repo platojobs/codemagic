@@ -16,6 +16,9 @@ final class AppEnvironment {
     let productService: ProductServicing
     let apiConfiguration: APIConfiguration?
     let bluetooth: BluetoothServicing
+    let syncMetadataStore: SyncMetadataStore
+    let tokenStore: TokenStoring
+    let syncEngine: SyncEngine
 
     /// 启动期降级说明，非空时在「我的」页展示。
     private(set) var startupWarning: String?
@@ -46,9 +49,27 @@ final class AppEnvironment {
         if let configuration = try? APIConfiguration.fromBundle() {
             apiConfiguration = configuration
             productService = ProductAPIClient(configuration: configuration)
+            syncMetadataStore = SyncMetadataStore()
+            tokenStore = KeychainTokenStore()
+            syncEngine = SyncEngine(
+                api: SyncAPIClient(configuration: configuration),
+                tokenStore: tokenStore,
+                metadataStore: syncMetadataStore,
+                deviceStore: savedDeviceStore,
+                logStore: scanLogStore
+            )
         } else {
             apiConfiguration = nil
             productService = UnavailableProductService()
+            syncMetadataStore = SyncMetadataStore()
+            tokenStore = KeychainTokenStore()
+            syncEngine = SyncEngine(
+                api: UnavailableSyncAPI(),
+                tokenStore: tokenStore,
+                metadataStore: syncMetadataStore,
+                deviceStore: savedDeviceStore,
+                logStore: scanLogStore
+            )
             if startupWarning == nil {
                 startupWarning = "\(AppError.configuration("").code) BASE_URL 未正确配置，产品与市场数据不可用"
             }

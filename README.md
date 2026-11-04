@@ -12,15 +12,18 @@
 
 | 项 | 结果 |
 | --- | --- |
+| 版本 | **v0.2.0**（`MARKETING_VERSION 0.2.0`，tag `v0.2.0`） |
 | 五模块（首页 / 设备 / 产品 / 市场 / 我的） | 已实现，纯代码 UIKit，真实数据路径 |
 | CoreBluetooth 扫描 + 连接 | 已实现（`CBCentralManager`，真实 RSSI） |
-| 本地持久化 | 已实现（SQLite3，含同步字段） |
+| 本地持久化 | 已实现（SQLite3，含同步字段；迁移 v2 补齐 `platform / external_id`） |
 | 网络层 | 已实现（URLSession + Codable，兼容 Android mock 契约） |
+| 同步 | **已实现**：匿名登录、增量拉取、批量推送（幂等键）、冲突提示、tombstone、Keychain token、前后台 / BGTask 触发 |
 | 自绘 RSSI + 代码组装空状态 | 已实现 |
-| 单元测试 | **44 个用例，0 失败**（`** TEST SUCCEEDED **`，2026-11-05，Xcode 27.2 / iPhone 17 模拟器） |
+| 单元测试 | **62 个用例，0 失败**（`** TEST SUCCEEDED **`，2026-11-05，Xcode 27.2 / iPhone 17 模拟器） |
 | 模拟器构建 | **通过**（`xcodebuild ... build`，`** BUILD SUCCEEDED **`） |
 | CI | Codemagic `codemagic.yaml` 已配置（macOS + Xcode 16.4，构建 + 测试 + artifact）；**尚未在 Codemagic 上实际运行** |
 | 真机 BLE / 签名 | **未验证**：本机无真机与 Apple 开发者账号，需自行验证（见第 9 节） |
+| 真实后端同步 | **未联调**：本地无运行中的 `PJGoIoT`，契约按 `openapi.yaml` 实现并用单元测试覆盖 |
 
 ---
 
@@ -50,8 +53,16 @@
 ### 我的 Profile（`Modules/Profile`）
 - 蓝牙授权与开关状态自检，跳转系统设置。
 - 本地扫描日志列表、计数与清空。
+- **同步状态**：上次同步时间、待上传条数、「立即同步」按钮、匿名账号；失败时展示错误码与降级说明，冲突时提示「另一台设备改过这条」。
 - 基础设置：自动记录最近设备、启动自动扫描。
 - 版本与关于：读取 `CFBundleShortVersionString / CFBundleVersion` 与当前 `BASE_URL`。
+
+### 同步（`Core/Sync`）
+- 首次同步自动匿名登录，token 存 **Keychain**（非 UserDefaults）。
+- 增量拉取 `GET /api/v1/sync/changes`（游标持久化，`hasMore` 循环，最多 10 页）。
+- 批量推送 `POST /api/v1/sync/push`（每批 ≤100，`Idempotency-Key` 由批次内容哈希派生）。
+- 冲突按服务端 LWW：云端获胜时写回并提示，**不静默覆盖本地修改**；tombstone 删除同样上传 / 写回。
+- 触发：回到前台（节流 120s）、进入后台（`BGAppRefreshTask`）、手动按钮。
 
 ---
 
@@ -59,11 +70,12 @@
 
 ```
 codemagic/
-├── App/                    # AppDelegate / SceneDelegate / AppEnvironment / MainTabBarController
+├── App/                    # AppDelegate / SceneDelegate / AppEnvironment / MainTabBarController / SyncCoordinator
 ├── Core/
 │   ├── Models/             # ScannedDevice、SavedDevice、DeviceRule、ProductModel、MarketItem…
 │   ├── Networking/         # APIConfiguration、HTTPClient、ProductAPIClient、AppError
 │   ├── Persistence/        # SQLiteDatabase + 5 个 Store
+│   ├── Sync/               # SyncEngine、SyncAPIClient、SyncModels、KeychainTokenStore、SyncMetadataStore
 │   ├── Bluetooth/          # CoreBluetoothService
 │   ├── Rules/              # RuleEvaluator
 │   └── Formatting/         # AppDateFormat
@@ -78,7 +90,7 @@ codemagic/
 Config/
 ├── Debug.xcconfig          # BASE_URL → http://127.0.0.1:8080（本地 Go 服务）
 └── Release.xcconfig        # BASE_URL → https://quickmock.dev/m/ecHT7ex3yQPA/（与 Android 共用 mock）
-codemagicTests/             # 44 个 XCTest 用例
+codemagicTests/             # 62 个 XCTest 用例
 docs/
 ├── architecture.md
 └── consistency.md
@@ -92,8 +104,8 @@ docs/
 
 1. 在 `codemagic/Modules/<Feature>/` 新建 `Scenes/`、`ViewModels/`、`Views/`，命名沿用现有风格（如 `XxxViewController` / `XxxViewModel` / `XxxCell`）。
 2. ViewModel 用构造器注入依赖，使用 `private(set)` 状态 + `onChange` 回调驱动 UI。
-3. 新增表：在 `Core/Persistence/SQLiteDatabase.swift` 的 `migrate()` 提高版本并加 `CREATE TABLE`，再写对应 Store（保留 `id / updated_at / deleted_at / sync_state`）。
-4. 新增网络接口：扩展 `ProductServicing` 或新建 Service，错误统一用 `AppError`。
+3. 新增表：在 `Core/Persistence/SQLiteDatabase.swift` 的 `migrate()` 提高版本并加 `CREATE TABLE`，再写对应 Store（保留 `id / updated_at / deleted_at / sync_state`；需要参与同步的表再加 `platform / external_id`）。
+4. 新增网络接口：扩展 `ProductServicing` / `SyncAPIServicing` 或新建 Service，错误统一用 `AppError`。
 5. 页面骨架纯代码；空状态统一用 `EmptyStateView`；信号类控件优先自绘。
 6. 在 `MainTabBarController` 装配，并更新 `docs/consistency.md` 第 1 节。
 7. 补 XCTest，`xcodebuild test` 必须通过。
@@ -139,7 +151,7 @@ xcodebuild -project codemagic.xcodeproj \
 - mock 由 Quickmock.dev 提供，任意路径返回同一份组合 JSON，**预计 2026-12-04 到期**；到期后产品 / 市场会显示错误空状态与重试，不会崩溃。
 - 正式域名确定后只改 `Release.xcconfig`，不需要改源码。
 - 临时联调可覆盖：`xcodebuild ... BASE_URL='https://...' build`。
-- 本地 Go 服务当前实现 `openapi.yaml` 的 `/api/v1/...` 路径，与客户端 `api/products` / `api/market` 尚未完全对齐，Debug 下产品 / 市场可能显示 404 错误空状态；见 `docs/consistency.md` 第 3.4 节。
+- 本地 Go 服务实现 `openapi.yaml` 的 `/api/v1/...` 路径，同步链路可直接联调；产品 / 市场仍为客户端历史端点 `api/products` / `api/market`，Debug 下可能显示 404 错误空状态；见 `docs/consistency.md` 第 3.4 节。
 
 ---
 
@@ -153,7 +165,7 @@ xcodebuild -project codemagic.xcodeproj \
 
 授权流程：iOS 13+ 由 `CBCentralManager` 首次初始化 / 扫描时触发系统授权弹窗，不自建权限页。「我的」页展示 `CBManager.authorization` 与蓝牙开关状态，未授权 / 受限时提供跳转系统设置入口。
 
-> iOS 不向 App 暴露蓝牙 MAC，设备详情接口使用 `CBPeripheral.identifier`；与后端 `openapi.yaml` 的 `/devices/{mac}` 存在差异，已在 `docs/consistency.md` 标注「待与 openapi.yaml 对齐」。
+> iOS 不向 App 暴露蓝牙 MAC，因此设备唯一键使用 `platform="ios"` + `externalId=CBPeripheral.identifier`（大写），`mac` 允许为空；型号元数据走 `GET /api/v1/device-types/{type}`，不依赖 MAC。
 
 ---
 
@@ -168,9 +180,24 @@ xcodebuild -project codemagic.xcodeproj \
 
 数据库位置：`Application Support/com.platojobs.codemagic/codemagic.sqlite`。磁盘库失败时回退内存库，并在「我的」页提示。
 
+迁移：`PRAGMA user_version` 线性递增。v1 建五张表；**v2（v0.2.0）** 为 `saved_devices` 增加 `platform`（默认 `ios`）与 `external_id`，由 `peripheral_id` 大写回填，并建立 `(platform, external_id) WHERE deleted_at IS NULL` 唯一索引。旧库升级后无需重装或清数据。
+
 ---
 
 ## 7. 网络契约
+
+### 7.1 同步 / 鉴权（v0.2.0，与 `PJGoIoT/api/openapi.yaml` 对齐）
+
+| 接口 | 方法 | 说明 |
+| --- | --- | --- |
+| `/api/v1/auth/anonymous` | `POST` | 返回 `{userId, token}`；token 存 Keychain |
+| `/api/v1/sync/changes?cursor=&limit=` | `GET` | 返回 `{changes[], nextCursor, hasMore}`，需 `Authorization: Bearer <token>` |
+| `/api/v1/sync/push` | `POST` | Body `{clientId, devices[]}`；Header `Idempotency-Key`；返回 `{applied[], conflicts[], nextCursor}` |
+| `/api/v1/device-types/{type}` | `GET` | 型号元数据（不依赖 MAC） |
+
+错误体 `{"error":{"code","message"}}` 解析为 `AppError.api`（客户端码 `NET-002`，保留服务端 code）。字段解码容忍未知字段与缺失字段。
+
+### 7.2 产品 / 市场 / 设备详情（历史端点）
 
 - `GET api/products` → `{"products":[...]}`，兼容裸数组
 - `GET api/market` → `{"marketItems":[...]}`，兼容裸数组
@@ -204,16 +231,19 @@ xcodebuild -project codemagic.xcodeproj \
 - [ ] RSSI 阈值规则的触发 / 恢复重新武装。
 - [ ] 后台 / 锁屏后的扫描与回调行为（当前未申请后台蓝牙模式）。
 - [ ] 真实后端域名下的产品 / 市场 / 设备详情数据。
+- [ ] 与真实 `PJGoIoT` 联调同步：匿名登录、跨设备冲突、`Idempotency-Key` 重放、tombstone。
+- [ ] `BGAppRefreshTask` 在真机上的实际调度（模拟器不执行后台刷新）。
 
 其他限制：
 
 - 模拟器无真实蓝牙，状态为 `unsupported`；产品 / 市场依赖网络，Debug 本地 Go 服务路径尚未对齐。
 - 未实现真实 GATT 服务发现 / 读写 / OTA，GATT 仅展示网络返回的元数据。
-- 未实现账号体系与同步推送；本地已保留同步字段。
+- 同步已接通，但未与运行中的后端做端到端联调；契约与单元测试已覆盖幂等、冲突、tombstone、未知字段。
 - Release 签名与 App Store 上架未验证（无 Apple 开发者账号 / 证书）。
 
 ---
 
 ## 10. 版本记录
 
-- `v0.1.0`：五模块（首页 / 设备 / 产品 / 市场 / 我的）、CoreBluetooth 扫描与连接、SQLite 持久化、URLSession + Codable 网络层、本地规则、设备详情缓存降级、自绘 RSSI、代码空状态、44 个单元测试、GitHub Actions 工作流。
+- `v0.2.0`：落地同步层（匿名登录 / Keychain token / 增量拉取 / 批量推送幂等 / 冲突提示 / tombstone）、SQLite 迁移 v2（`platform` + `external_id`）、`BGAppRefreshTask` 与前后台触发、「我的」同步状态与手动同步、版本号对齐；新增同步相关单元测试并更新 `docs/consistency.md`。
+- `v0.1.0`：五模块（首页 / 设备 / 产品 / 市场 / 我的）、CoreBluetooth 扫描与连接、SQLite 持久化、URLSession + Codable 网络层、本地规则、设备详情缓存降级、自绘 RSSI、代码空状态、44 个单元测试、Codemagic CI。

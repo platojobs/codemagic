@@ -1,3 +1,4 @@
+import SQLite3
 import XCTest
 @testable import codemagic
 
@@ -148,5 +149,77 @@ final class PersistenceTests: XCTestCase {
         let reopened = try testDatabase.makeDatabaseHandle()
         let reopenedStore = SavedDeviceStore(database: reopened)
         XCTAssertEqual(try reopenedStore.fetchAll().count, 1)
+    }
+
+    // MARK: - v0.2.0 同步字段迁移
+
+    func testSyncIdentityColumnsExistAndRoundTrip() throws {
+        let store = SavedDeviceStore(database: testDatabase.database)
+        let externalID = "AA:BB:CC:DD:EE:FF"
+        let device = SavedDevice(
+            peripheralID: SyncHashing.stableUUID(seed: externalID),
+            platform: "android",
+            externalID: externalID,
+            name: "安卓设备",
+            syncState: .synced
+        )
+        try store.upsert(device)
+
+        let loaded = try XCTUnwrap(store.fetch(platform: "android", externalID: externalID.lowercased()))
+        XCTAssertEqual(loaded.platform, "android")
+        XCTAssertEqual(loaded.externalID, externalID)
+        XCTAssertEqual(loaded.syncKey, "android:\(externalID)")
+
+        let version = try testDatabase.database.query("PRAGMA user_version;").first?.integer("user_version")
+        XCTAssertEqual(version, 2)
+    }
+
+    func testLegacyVersion1DatabaseMigratesToVersion2() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codemagic-legacy-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let path = directory.appendingPathComponent("legacy.sqlite").path
+
+        let peripheralID = UUID()
+        var handle: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(path, &handle), SQLITE_OK)
+        XCTAssertNotNil(handle)
+        let legacySQL = """
+        CREATE TABLE saved_devices (
+            id TEXT PRIMARY KEY NOT NULL,
+            peripheral_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            remark TEXT NOT NULL DEFAULT '',
+            group_name TEXT NOT NULL DEFAULT '未分组',
+            mac TEXT,
+            vendor TEXT,
+            firmware_version TEXT,
+            last_seen_at REAL,
+            created_at REAL NOT NULL,
+            updated_at REAL NOT NULL,
+            deleted_at REAL,
+            sync_state TEXT NOT NULL
+        );
+        INSERT INTO saved_devices
+            (id, peripheral_id, name, remark, group_name, updated_at, created_at, sync_state)
+            VALUES ('\(UUID().uuidString)', '\(peripheralID.uuidString)', '旧版本设备', '', '未分组', 1000, 900, 'synced');
+        PRAGMA user_version = 1;
+        """
+        XCTAssertEqual(sqlite3_exec(handle, legacySQL, nil, nil, nil), SQLITE_OK)
+        sqlite3_close(handle)
+
+        let migrated = try SQLiteDatabase(path: path)
+        defer { migrated.close() }
+
+        let store = SavedDeviceStore(database: migrated)
+        let devices = try store.fetchAll()
+        let device = try XCTUnwrap(devices.first)
+        XCTAssertEqual(device.platform, "ios", "旧记录平台兜底为 ios")
+        XCTAssertEqual(device.externalID, peripheralID.uuidString.uppercased(), "externalId 由 peripheral_id 回填")
+        XCTAssertEqual(device.syncState, .synced)
+
+        let version = try migrated.query("PRAGMA user_version;").first?.integer("user_version")
+        XCTAssertEqual(version, 2)
     }
 }

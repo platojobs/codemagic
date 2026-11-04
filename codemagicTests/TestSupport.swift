@@ -105,18 +105,34 @@ final class StubProductService: ProductServicing {
     }
 }
 
-/// 记录请求 URL 并返回预设数据的 HTTP 客户端。
+/// 记录请求 URL/头部并返回预设数据或状态码的 HTTP 客户端。
 final class StubHTTPClient: HTTPClient {
     var handler: (URL) -> Result<Data, AppError>
-    private(set) var requestedURLs: [URL] = []
+    var statusCode: Int
+    var responseHeaders: [String: String]
 
-    init(handler: @escaping (URL) -> Result<Data, AppError> = { _ in .failure(.network("stub")) }) {
+    private(set) var requestedURLs: [URL] = []
+    private(set) var requests: [HTTPRequest] = []
+
+    init(
+        statusCode: Int = 200,
+        responseHeaders: [String: String] = [:],
+        handler: @escaping (URL) -> Result<Data, AppError> = { _ in .failure(.network("stub")) }
+    ) {
+        self.statusCode = statusCode
+        self.responseHeaders = responseHeaders
         self.handler = handler
     }
 
-    func get(_ url: URL, completion: @escaping (Result<Data, AppError>) -> Void) {
-        requestedURLs.append(url)
-        completion(handler(url))
+    func send(_ request: HTTPRequest, completion: @escaping (Result<HTTPResponse, AppError>) -> Void) {
+        requestedURLs.append(request.url)
+        requests.append(request)
+        switch handler(request.url) {
+        case .success(let data):
+            completion(.success(HTTPResponse(statusCode: statusCode, headers: responseHeaders, data: data)))
+        case .failure(let error):
+            completion(.failure(error))
+        }
     }
 }
 
