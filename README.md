@@ -25,7 +25,7 @@
 | 首启引导 | **已实现**：3 步（蓝牙 / 通知 / 后台采集），仅首次或未走完时出现，可跳过；步骤与完成标记持久化到 `UserDefaults` |
 | 单元测试 | **226 个用例，0 失败**（`** TEST SUCCEEDED **`，2026-11-05，Xcode 27.2 / iPhone 17 模拟器；含 36 语义色与深浅变体、10 级字号、硬编码色值/字号审计、场景动作真实调用与失败汇总、迁移 v5→v6、刷新去抖/退避、通知节流、CSV 分页、接管码、注销、后台限流、首启持久化与术语审计） |
 | 模拟器构建 | **通过**（`xcodebuild ... build`，`** BUILD SUCCEEDED **`） |
-| CI | **GitHub Actions 已实际运行 success**：v0.9.0 run 待回填（macos-15 + Xcode 16.4），并行 `build-test`（226 单测）与 `e2e-contract`（151 项，0 SKIP）；v0.8.0 run [41967922243](https://github.com/platojobs/codemagic/actions/runs/41967922243) 为上一基线；`codemagic.yaml` 作为可选替代保留但未验证 |
+| CI | **GitHub Actions 已实际运行 success**：v0.9.0 run [41973731269](https://github.com/platojobs/codemagic/actions/runs/41973731269)（success，macos-15 + Xcode 16.4，提交 `08f88d6`），并行 `Build & Test`（226 单测）与 `E2E contract`（151 项，0 SKIP）；v0.8.0 run [41967922243](https://github.com/platojobs/codemagic/actions/runs/41967922243) 为上一基线；`codemagic.yaml` 作为可选替代保留但未验证 |
 | 真机 BLE / 签名 | **未验证**：本机无真机与 Apple 开发者账号；读数采集与图表需真机 / 可穿戴设备验证（见第 9 节） |
 | 真实后端同步 | **契约已联调**：`scripts/e2e-contract.sh` 对本地 `PJGoIoT` **v0.7.0**（`STORE=fixture`）跑 **151 项断言，全部 PASS**（含接管码生成/失效/一次性、导出分页、注销后 token 失效，以及既有读数/设备/series/metrics 契约）；App 内同步 UI 仍需真机手动验证 |
 | 上架材料 | **已补齐**：`docs/store-listing.md`、`docs/privacy-policy.md`、`docs/app-privacy.md` 与 `codemagic/Resources/PrivacyInfo.xcprivacy`（未使用能力不声明） |
