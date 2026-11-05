@@ -4,7 +4,7 @@
 
 - Android 侧口径以 `PKotlinApp/README.md` 与 `PJGoIoT/api/openapi.yaml` 为准。
 - iOS 侧以本仓库 `README.md`、`docs/architecture.md` 为准。
-- 后端 `openapi.yaml` 当前标注版本 **0.3.3**，但 `PJGoIoT` main 已合入读数链路（提交 `292e493`，**尚未打 v0.4.0 tag**）。iOS v0.4.0（`MARKETING_VERSION 0.4.0`，build 11）按冻结的 readings 契约实现：推送 `readings`（≤500/批、按 `id` 幂等）、查询 `readings`（倒序、cursor）、`readings/summary`（24h min/max/avg/last）；服务端保留 90 天，客户端本地保留 7 天。0.3.3 的 `advertisedName` 与三态语义保持不变。
+- 后端 `openapi.yaml` 当前标注版本 **0.3.3**，但 `PJGoIoT` main 已合入读数链路（提交 `292e493`，**尚未打 v0.4.0 tag**）。iOS v0.4.1（`MARKETING_VERSION 0.4.1`，build 12）按冻结的 readings 契约实现：推送 `readings`（≤500/批、按 `id` 幂等）、查询 `readings`（倒序、cursor）、`readings/summary`（24h min/max/avg/last）；服务端保留 90 天，客户端本地保留 7 天。v0.4.1 起两端读数解析以 **3.8 黄金用例表**为唯一口径。0.3.3 的 `advertisedName` 与三态语义保持不变。
 
 ---
 
@@ -259,6 +259,43 @@ iOS 端不再存在“历史端点”调用；唯一保留的旧路径 `/api/v1/
 解析失败（空帧、NaN/Inf、越界、非 UTF-8、超长）**静默丢弃并写本地日志（分类「读数」）**，不崩溃、不写脏数据。
 
 **展示**：设备详情「数据」区依次为指标选择（仅该设备真实已有指标）→ 最近 60 点自绘折线图（`draw(_:)` 手绘坐标轴/网格/折线/数据点，支持 0/1/60 点）→ 24h 汇总（min/max/avg/last）→ 最近记录。无读数展示「连接设备后开始采集」；蓝牙未授权提示前往系统设置；不展示任何伪造数据。
+
+### 3.8 读数解析黄金用例（v0.4.1，两端共用）
+
+两端（iOS `ReadingParser` / Android 解析器）以**同一张黄金表**为准：每条固定为「特征 + 原始字节 → 唯一期望」。
+iOS 用例固化在 `codemagicTests/ReadingsGoldenTests.swift`；新增特征或调整规则时，先在此表补行、再写用例、最后改实现，避免两端口径漂移。
+
+| 特征 | 输入 hex | 期望 |
+| --- | --- | --- |
+| 心率 | `00 48` | heart_rate 72 bpm |
+| 心率 | `00 00` | 丢弃 |
+| 心率 | `01 2C 01` | heart_rate 300 bpm |
+| 心率 | `01 2D 01` | 丢弃（301 越界） |
+| 电池 | `64` | battery 100 % |
+| 电池 | `00` | battery 0 %（真实值，非缺测） |
+| 电池 | `65` | 丢弃（101 越界） |
+| 温度 | `2A 08` | temperature 20.90 ℃（sint16 × 0.01） |
+| 温度 | `70 FE` | temperature −4.00 ℃（sint16 × 0.01） |
+| 温度 | `00 4A` | binary16 `0x4A00` = **12.0 ℃**（见下方脚注） |
+| 温度 | `00 4D` | binary16 `0x4D00` = 20.0 ℃ |
+| 温度 | `00 00 C0 3F` | temperature 1.5 ℃（float32） |
+| 温度 | `FF FF` | temperature −0.01 ℃（sint16 −1，不得按 NaN 丢弃） |
+| NUS | `temperature=23.5` | temperature 23.5 ℃ |
+| NUS | `42` | other 42，单位空 |
+| NUS | `abc` | 丢弃 |
+| NUS | `temperature=23.5\nbattery=88\nxx` | 2 条（第 3 行丢弃，前两行保留） |
+| 任意特征 | 空字节 | 丢弃并记录原因，不崩溃 |
+
+口径说明：
+
+- 温度 2 字节：**先**按 sint16 × 0.01 ℃；结果不落在 −50…150 ℃ 时回退 IEEE-754 binary16；4 字节按 binary32；最终 NaN / Inf / 越界一律丢弃。
+- 心率 uint16 为**小端**；flags bit0 = 0 时取 uint8；有效范围 1…300 bpm。
+- 电池 0 % 与 100 % 都合法，只拒绝 >100。
+- NUS 按 `\n` 分行逐行解析，单行失败只丢该行；整帧 ≤256 字节、单行 ≤64 字符。
+
+> **脚注（v0.4.1 核对发现）**：原黄金表 `00 4A → 20.0` 与 IEEE-754 binary16 不符：位型 `0x4A00` = 1.5 × 2³ = **12.0**，20.0 对应位型 `0x4D00`（字节 `00 4D`）。
+> iOS 按规范解码，未对 `0x4A00` 做任何硬编码；两种位型都已固化为用例。Android 侧联调时请以本表两行为准修正期望值。
+
 
 ---
 

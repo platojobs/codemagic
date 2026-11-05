@@ -12,7 +12,7 @@
 
 | 项 | 结果 |
 | --- | --- |
-| 版本 | **v0.4.0**（`MARKETING_VERSION 0.4.0`，`CURRENT_PROJECT_VERSION 11`，tag `v0.4.0`，契约对齐 Go 读数链路 main，尚未打 v0.4.0 tag） |
+| 版本 | **v0.4.1**（`MARKETING_VERSION 0.4.1`，`CURRENT_PROJECT_VERSION 12`，tag `v0.4.1`，读数解析黄金用例两端对齐，契约对齐 Go 读数链路 main） |
 | 五模块（首页 / 设备 / 产品 / 市场 / 我的） | 已实现，纯代码 UIKit，真实数据路径 |
 | CoreBluetooth 扫描 + 连接 | 已实现（`CBCentralManager`，真实 RSSI） |
 | BLE 读数采集 | 已实现：连接后订阅心率 `0x2A37`、电量 `0x2A19`、温度 `0x2A6E`、Nordic UART TX `6E400003-…`；各特征独立解析器，失败静默丢弃并写本地日志 |
@@ -20,7 +20,7 @@
 | 网络层 | 已实现（URLSession + Codable；设备/型号对齐 openapi 0.3.3；读数查询与 summary 按冻结的 0.4.0 契约） |
 | 同步 | **已实现**：匿名登录、增量拉取、批量推送（设备 ≤100/批 + 读数 ≤200/批、幂等键含读数）、冲突提示、tombstone、Keychain token、前后台 / BGTask 触发、断网累积补传 |
 | 自绘 RSSI + 自绘折线图 + 代码组装空状态 | 已实现（读数图表纯 `draw(_:)`，无第三方图表库） |
-| 单元测试 | **122 个用例，0 失败**（`** TEST SUCCEEDED **`，2026-11-05，Xcode 27.2 / iPhone 17 模拟器） |
+| 单元测试 | **140 个用例，0 失败**（`** TEST SUCCEEDED **`，2026-11-05，Xcode 27.2 / iPhone 17 模拟器；含 18 条读数解析黄金用例） |
 | 模拟器构建 | **通过**（`xcodebuild ... build`，`** BUILD SUCCEEDED **`） |
 | CI | **GitHub Actions 已实际运行 success**：v0.4.0 run [41941929495](https://github.com/platojobs/codemagic/actions/runs/41941929495)（macos-15 + Xcode 16.4），并行 `build-test`（122 单测）与 `e2e-contract`（106 项，0 SKIP）；`codemagic.yaml` 作为可选替代保留但未验证 |
 | 真机 BLE / 签名 | **未验证**：本机无真机与 Apple 开发者账号；读数采集与图表需真机 / 可穿戴设备验证（见第 9 节） |
@@ -98,7 +98,7 @@ Config/
 scripts/
 ├── e2e-contract.sh         # 启动本地 fixture 服务 + 运行联调 runner（CI 的 e2e-contract job 复用）
 └── e2e-contract.swift      # 独立 Swift 可执行 runner，真实 URLSession 直连 localhost
-codemagicTests/             # 122 个 XCTest 用例
+codemagicTests/             # 140 个 XCTest 用例（含读数解析黄金用例）
 docs/
 ├── architecture.md
 ├── consistency.md
@@ -269,6 +269,7 @@ cd /path/to/codemagic
 - 汇总：`GET .../readings/summary?metric=&hours=24` → `{metric, unit, count, min, max, avg, last, windowStart, windowEnd}`。
 - 保留：服务端 90 天；客户端本地 7 天（启动与同步成功后清理已同步数据，未上传读数保留至补传）。
 - 采集：CoreBluetooth notify 订阅心率 `0x2A37`、电量 `0x2A19`、温度 `0x2A6E`、Nordic UART TX `6E400003-…`；解析规则见 `docs/consistency.md` 3.7。解析失败静默丢弃并写本地日志（分类「读数」），不崩溃、不写脏数据。
+- 黄金用例：两端共用 `docs/consistency.md` 3.8 的「读数解析黄金用例」表（输入 hex → 唯一期望）；iOS 固化在 `codemagicTests/ReadingsGoldenTests.swift`（18 个用例，含空字节与多行部分失败）。
 
 ---
 
@@ -334,6 +335,7 @@ cd /path/to/codemagic
 
 ## 10. 版本记录
 
+- `v0.4.1`：读数解析黄金用例两端对齐（`MARKETING_VERSION 0.4.1` / build 12，tag `v0.4.1`）。新增 `codemagicTests/ReadingsGoldenTests.swift` 18 个用例（心率 / 电池 / 温度 / NUS / 空字节）；`docs/consistency.md` 新增 3.8「读数解析黄金用例」章节，声明两端共用同一张表；单测 140 个。核对发现表中 `00 4A → 20.0` 与 IEEE-754 binary16 不符（`0x4A00` = 12.0，20.0 对应 `0x4D00`），实现未硬编码并在文档脚注标注。实现行为无变更。
 - `v0.4.0`：接入设备读数链路（`MARKETING_VERSION 0.4.0` / build 11，tag `v0.4.0`）。连接后订阅心率 `0x2A37` / 电量 `0x2A19` / 温度 `0x2A6E` / Nordic UART TX，四个独立解析器（失败静默丢弃 + 本地「读数」日志）；SQLite 迁移 **v5** 新增 `readings` 表并做 7 天保留清理；读数并入 `/sync/push`（≤200/批，按 `id` 幂等，幂等键含读数）；设备详情新增「数据」区（真实指标选择 + 最近 60 点自绘折线图 + 24h 汇总 + 最近记录 + 离线标注 + 三种真实空状态）；单测 122 个，E2E 106 项（新增 19 项读数断言）。后端 `PJGoIoT` 使用当前 main（尚未打 v0.4.0 tag）。
 - `v0.3.6`：对齐 `openapi.yaml` **0.3.3**（`MARKETING_VERSION 0.3.6` / build 10，tag `v0.3.6`）。`UserDevice` 新增 `advertisedName`，本地迁移 **v4** 区分用户别名与广播名；`alias` / `advertisedName` / `group` 采用 `Patch` 三态（未修改省略、`""` 显式清除、具体值上报），清空分组上报 `"group": ""` 且再次同步不复活；缺省字段不参与 LWW 与幂等哈希；冲突响应缺省字段按 absent 解析；单测 81 个，E2E 87 项（新增 3.7 的 16 项断言）。
 - `v0.3.5`：CI 与 Android 对齐（`MARKETING_VERSION 0.3.5` / build 9，tag `v0.3.5`）。`actions/checkout` / `upload-artifact` / `setup-go` 全部升到 **v7**，消除 Node 20 弃用告警；新增并行 `e2e-contract` job（checkout `PJGoIoT` + `setup-go` 读 go.mod + 运行 `scripts/e2e-contract.sh`，失败上传日志）；`concurrency` 改为按 `github.sha` 分组去重；真实 run 41906015761 两个 job 均 success（74 单测 + 71 项 E2E）。
