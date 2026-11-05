@@ -11,6 +11,8 @@ final class SettingsStore {
         static let deviceSort = "settings.deviceSort"
         static let backgroundCollection = "settings.backgroundCollection"
         static let ruleAlertsMutedUntil = "settings.ruleAlertsMutedUntil"
+        static let onboardingCompleted = "settings.onboardingCompleted"
+        static let onboardingStep = "settings.onboardingStep"
     }
 
     /// 告警节流窗口可选项，与「我的」页一致。
@@ -74,6 +76,29 @@ final class SettingsStore {
     var backgroundCollectionEnabled: Bool {
         get { defaults.object(forKey: Key.backgroundCollection) as? Bool ?? true }
         set { defaults.set(newValue, forKey: Key.backgroundCollection) }
+    }
+
+    /// 首启引导是否已走完（或已跳过）。true 时不再出现。
+    var onboardingCompleted: Bool {
+        get { defaults.bool(forKey: Key.onboardingCompleted) }
+        set { defaults.set(newValue, forKey: Key.onboardingCompleted) }
+    }
+
+    /// 首启引导停留的步骤（0 起）。中途退出下次从该步继续。
+    var onboardingStep: Int {
+        get {
+            let stored = defaults.object(forKey: Key.onboardingStep) as? Int ?? 0
+            return min(max(stored, 0), AppCopy.Onboarding.stepCount - 1)
+        }
+        set {
+            defaults.set(min(max(newValue, 0), AppCopy.Onboarding.stepCount - 1), forKey: Key.onboardingStep)
+        }
+    }
+
+    /// 走完或跳过引导：持久化完成标记并重置步骤。
+    func completeOnboarding() {
+        onboardingCompleted = true
+        onboardingStep = 0
     }
 
     /// 告警静音截止时间；由场景动作写入，重启后继续生效。

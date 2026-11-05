@@ -10,6 +10,9 @@ protocol BluetoothServicing: AnyObject {
     /// notify 特征原始数据回调；解析与存储由上层完成。
     var readingHandler: ((BluetoothReadingSample) -> Void)? { get set }
 
+    /// 显式激活：首次调用才会创建 `CBCentralManager` 并触发系统蓝牙授权框。
+    /// 用于首启引导「先说明后申请」；查看授权状态不需要激活。
+    func activate()
     func currentAuthorization() -> BluetoothAuthorization
     func startScanning()
     func stopScanning()
@@ -24,6 +27,11 @@ protocol BluetoothServicing: AnyObject {
     func isConnected(peripheralID: UUID) -> Bool
     /// 关闭后台采集或进入后台时断开全部连接，不再保持 BLE 链路。
     func disconnectAll()
+}
+
+extension BluetoothServicing {
+    /// 假实现与不支持激活的适配器默认不需要额外动作。
+    func activate() {}
 }
 
 /// CoreBluetooth 实现：真实扫描、连接与 RSSI 回调，回调统一在主线程投递。
@@ -44,10 +52,11 @@ final class CoreBluetoothService: NSObject, BluetoothServicing {
         }
     }
 
-    private var centralManager: CBCentralManager!
+    private var centralManager: CBCentralManager?
     private var discoveredPeripherals: [UUID: CBPeripheral] = [:]
     private var lastEmit: [UUID: (rssi: Int, date: Date)] = [:]
     private var wantsScanning = false
+    private var pendingConnectID: UUID?
     private var connectTimeoutWorkItem: DispatchWorkItem?
     /// 需要订阅读数的外设；连接成功或已连接时开始服务发现。
     private var readingPeripheralID: UUID?
@@ -57,14 +66,26 @@ final class CoreBluetoothService: NSObject, BluetoothServicing {
 
     override init() {
         super.init()
-        centralManager = CBCentralManager(
+    }
+
+    // MARK: - BluetoothServicing
+
+    func activate() {
+        _ = activatedManager()
+    }
+
+    /// 首次访问才创建系统蓝牙管理器：冷启动不弹授权框，由首启引导或真实扫描触发。
+    @discardableResult
+    private func activatedManager() -> CBCentralManager {
+        if let centralManager { return centralManager }
+        let manager = CBCentralManager(
             delegate: self,
             queue: .main,
             options: [CBCentralManagerOptionShowPowerAlertKey: false]
         )
+        centralManager = manager
+        return manager
     }
-
-    // MARK: - BluetoothServicing
 
     func currentAuthorization() -> BluetoothAuthorization {
         switch CBManager.authorization {
@@ -78,11 +99,12 @@ final class CoreBluetoothService: NSObject, BluetoothServicing {
 
     func startScanning() {
         wantsScanning = true
-        guard state == .poweredOn else {
+        let manager = activatedManager()
+        guard manager.state == .poweredOn else {
             stateChangeHandler?(state)
             return
         }
-        centralManager.scanForPeripherals(
+        manager.scanForPeripherals(
             withServices: nil,
             options: [CBCentralManagerScanOptionAllowDuplicatesKey: true]
         )
@@ -90,18 +112,28 @@ final class CoreBluetoothService: NSObject, BluetoothServicing {
 
     func stopScanning() {
         wantsScanning = false
-        if state == .poweredOn {
+        if let centralManager, centralManager.state == .poweredOn {
             centralManager.stopScan()
         }
     }
 
     func connect(peripheralID: UUID) {
-        guard state == .poweredOn else {
-            connectionHandler?(
-                .failed(peripheralID: peripheralID, errorMessage: state.title)
-            )
+        let manager = activatedManager()
+        guard manager.state == .poweredOn else {
+            if manager.state == .unknown || manager.state == .resetting {
+                // 管理器刚创建（授权框 / 蓝牙开关初始化中），等 poweredOn 后继续。
+                pendingConnectID = peripheralID
+            } else {
+                connectionHandler?(
+                    .failed(peripheralID: peripheralID, errorMessage: state.title)
+                )
+            }
             return
         }
+        connect(peripheralID: peripheralID, using: manager)
+    }
+
+    private func connect(peripheralID: UUID, using manager: CBCentralManager) {
         guard let peripheral = peripheral(for: peripheralID) else {
             connectionHandler?(
                 .failed(peripheralID: peripheralID, errorMessage: "未找到该蓝牙设备")
@@ -110,12 +142,12 @@ final class CoreBluetoothService: NSObject, BluetoothServicing {
         }
 
         peripheral.delegate = self
-        centralManager.connect(peripheral, options: nil)
+        manager.connect(peripheral, options: nil)
 
         connectTimeoutWorkItem?.cancel()
         let workItem = DispatchWorkItem { [weak self] in
             guard let self, peripheral.state != .connected else { return }
-            self.centralManager.cancelPeripheralConnection(peripheral)
+            self.centralManager?.cancelPeripheralConnection(peripheral)
             self.connectionHandler?(
                 .failed(peripheralID: peripheralID, errorMessage: "连接超时")
             )
@@ -126,7 +158,7 @@ final class CoreBluetoothService: NSObject, BluetoothServicing {
 
     func disconnect(peripheralID: UUID) {
         guard let peripheral = peripheral(for: peripheralID) else { return }
-        centralManager.cancelPeripheralConnection(peripheral)
+        centralManager?.cancelPeripheralConnection(peripheral)
     }
 
     var connectedPeripheralCount: Int {
@@ -146,13 +178,13 @@ final class CoreBluetoothService: NSObject, BluetoothServicing {
     func disconnectAll() {
         readingPeripheralID = nil
         var targets: [UUID: CBPeripheral] = discoveredPeripherals
-        if state == .poweredOn {
+        if let centralManager, centralManager.state == .poweredOn {
             for peripheral in centralManager.retrieveConnectedPeripherals(withServices: []) {
                 targets[peripheral.identifier] = peripheral
             }
         }
         for (_, peripheral) in targets where peripheral.state == .connected || peripheral.state == .connecting {
-            centralManager.cancelPeripheralConnection(peripheral)
+            centralManager?.cancelPeripheralConnection(peripheral)
         }
     }
 
@@ -186,6 +218,7 @@ final class CoreBluetoothService: NSObject, BluetoothServicing {
             return discovered
         }
         // 应用重启后扫描缓存为空，用已知标识符向系统取回外设。
+        guard let centralManager else { return nil }
         let retrieved = centralManager.retrievePeripherals(withIdentifiers: [peripheralID])
         if let first = retrieved.first {
             discoveredPeripherals[peripheralID] = first
@@ -216,15 +249,22 @@ extension CoreBluetoothService: CBCentralManagerDelegate {
         switch central.state {
         case .poweredOn:
             state = .poweredOn
+            if let pendingConnectID {
+                self.pendingConnectID = nil
+                connect(peripheralID: pendingConnectID, using: central)
+            }
             if wantsScanning {
                 startScanning()
             }
         case .poweredOff:
             state = .poweredOff
+            failPendingConnectIfNeeded()
         case .unauthorized:
             state = .unauthorized
+            failPendingConnectIfNeeded()
         case .unsupported:
             state = .unsupported
+            failPendingConnectIfNeeded()
         case .resetting:
             state = .resetting
         case .unknown:
@@ -232,6 +272,15 @@ extension CoreBluetoothService: CBCentralManagerDelegate {
         @unknown default:
             state = .unknown
         }
+    }
+
+    /// 管理器初始化期间排队的连接请求，在蓝牙不可用时给出明确失败，避免一直等待。
+    private func failPendingConnectIfNeeded() {
+        guard let pendingConnectID else { return }
+        self.pendingConnectID = nil
+        connectionHandler?(
+            .failed(peripheralID: pendingConnectID, errorMessage: state.title)
+        )
     }
 
     func centralManager(

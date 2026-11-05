@@ -76,6 +76,7 @@ final class HomeDashboardViewController: UIViewController {
             self?.collectionView.reloadData()
         }
         viewModel.reload()
+        LaunchMetrics.mark("home-data-ready")
     }
 
     override func viewWillAppear(_ animated: Bool) {
@@ -276,7 +277,29 @@ final class HomeDashboardViewController: UIViewController {
 
     // MARK: - Actions
 
+    private func presentBluetoothSettingsAlert() {
+        let alert = UIAlertController(
+            title: AppCopy.Permission.localOnlyTitle,
+            message: AppCopy.Permission.localOnlyMessage,
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "取消", style: .cancel))
+        alert.addAction(UIAlertAction(title: AppCopy.Permission.openSettings, style: .default) { [weak self] _ in
+            self?.openSystemSettings()
+        })
+        present(alert, animated: true)
+    }
+
+    private func openSystemSettings() {
+        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+        UIApplication.shared.open(url)
+    }
+
     @objc private func presentScanner() {
+        if viewModel.isBluetoothPermissionBlocked {
+            presentBluetoothSettingsAlert()
+            return
+        }
         let scanViewModel = HomeViewModel(
             bluetooth: environment.bluetooth,
             savedDeviceStore: environment.savedDeviceStore,
@@ -486,14 +509,21 @@ extension HomeDashboardViewController: UICollectionViewDataSource {
                 withReuseIdentifier: HomeEmptyCell.reuseIdentifier,
                 for: indexPath
             ) as? HomeEmptyCell else { return UICollectionViewCell() }
+            let permissionBlocked = viewModel.isBluetoothPermissionBlocked
             cell.configure(
-                symbol: viewModel.devices.isEmpty ? SymbolName.device : "line.3.horizontal.decrease.circle",
-                title: viewModel.devices.isEmpty ? "还没有设备" : "没有匹配的设备",
-                message: viewModel.emptyStateText,
-                actionTitle: viewModel.emptyActionTitle
+                symbol: permissionBlocked
+                    ? "lock.shield"
+                    : (viewModel.devices.isEmpty ? SymbolName.device : "line.3.horizontal.decrease.circle"),
+                title: permissionBlocked
+                    ? AppCopy.Permission.localOnlyTitle
+                    : (viewModel.devices.isEmpty ? AppCopy.Home.emptyTitle : AppCopy.Home.filteredTitle),
+                message: permissionBlocked ? AppCopy.Permission.localOnlyMessage : viewModel.emptyStateText,
+                actionTitle: permissionBlocked ? AppCopy.Permission.openSettings : viewModel.emptyActionTitle
             ) { [weak self] in
                 guard let self else { return }
-                if self.viewModel.devices.isEmpty {
+                if permissionBlocked {
+                    self.openSystemSettings()
+                } else if self.viewModel.devices.isEmpty {
                     self.presentScanner()
                 } else {
                     self.viewModel.resetFilters()

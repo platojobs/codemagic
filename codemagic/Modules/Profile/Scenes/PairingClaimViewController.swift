@@ -49,9 +49,9 @@ final class PairingClaimViewController: UIViewController {
     private func configureViews() {
         let description = AppTheme.makeLabel(style: .subheadline, color: AppTheme.Palette.secondaryText)
         description.numberOfLines = 0
-        description.text = "输入旧设备「迁移到新设备」页展示的 8 位配对码。接管后本机设备与读数会重新上传到旧设备账号。"
+        description.text = "输入旧设备「迁移到新设备」页展示的 8 位接管码。接管后本机设备与读数会重新同步到旧设备账号。"
 
-        textField.placeholder = "8 位配对码，如 K7M2QX9P"
+        textField.placeholder = "8 位接管码，如 K7M2QX9P"
         textField.font = .monospacedSystemFont(ofSize: 22, weight: .medium)
         textField.textColor = AppTheme.Palette.primaryText
         textField.tintColor = AppTheme.Palette.accent
@@ -127,7 +127,7 @@ final class PairingClaimViewController: UIViewController {
     private func presentSuccess(_ result: PairingClaimResult) {
         let alert = UIAlertController(
             title: "接管成功",
-            message: "已切换到账号 \(result.userID)。本机 \(result.deviceCount) 台设备、\(result.readingCount) 条读数已标记待上传，正在同步…",
+            message: "已切换到账号 \(result.userID)。本机 \(result.deviceCount) 台设备、\(result.readingCount) 条读数已标记待同步，正在同步…",
             preferredStyle: .alert
         )
         alert.addAction(UIAlertAction(title: "好", style: .default) { [weak self] _ in

@@ -12,7 +12,7 @@
 
 | 项 | 结果 |
 | --- | --- |
-| 版本 | **v0.8.0**（`MARKETING_VERSION 0.8.0`，`CURRENT_PROJECT_VERSION 16`，tag `v0.8.0`：设计令牌 + 米家信息架构 + 本地场景，契约对齐 `PJGoIoT` v0.7.0 / openapi 0.6.0） |
+| 版本 | **v0.9.0**（`MARKETING_VERSION 0.9.0`，`CURRENT_PROJECT_VERSION 17`，tag `v0.9.0`：首启引导 + 权限前置 + 启动打点 + 上架材料，契约对齐 `PJGoIoT` v0.7.0 / openapi 0.6.0） |
 | 五模块（首页 / 智能 / 产品 / 市场 / 我的） | 已实现，纯代码 UIKit，真实数据路径；设备管理并入首页，规则与场景集中在「智能」 |
 | CoreBluetooth 扫描 + 连接 | 已实现（`CBCentralManager`，真实 RSSI） |
 | BLE 读数采集 | 已实现：连接后订阅心率 `0x2A37`、电量 `0x2A19`、温度 `0x2A6E`、Nordic UART TX `6E400003-…`；各特征独立解析器，失败静默丢弃并写本地日志 |
@@ -22,11 +22,13 @@
 | 网络层 | 已实现（URLSession + Codable；设备/型号/同步/账号对齐 `PJGoIoT` v0.7.0 openapi 0.6.0；读数查询 / summary / series / metrics 对齐 v0.5.1 起；详情页远端刷新 800ms 去抖动 + 失败指数退避 ≤5 分钟，不可见/后台不请求） |
 | 同步 | **已实现**：匿名登录、增量拉取、批量推送（设备 ≤100/批 + 读数 ≤200/批、幂等键含读数）、冲突提示、tombstone、Keychain token、前后台 / BGTask 触发、断网累积补传；后台唤醒仅做受限推送（不拉增量、不建号、≥15 分钟间隔） |
 | 自绘 RSSI + 自绘折线图 + 代码组装空状态 | 已实现（读数图表纯 `draw(_:)`，无第三方图表库） |
-| 单元测试 | **221 个用例，0 失败**（`** TEST SUCCEEDED **`，2026-11-05，Xcode 27.2 / iPhone 17 模拟器；含 36 语义色与深浅变体、10 级字号、硬编码色值/字号审计、场景动作真实调用与失败汇总、迁移 v5→v6、刷新去抖/退避、通知节流、CSV 分页、配对码、注销、后台限流） |
+| 首启引导 | **已实现**：3 步（蓝牙 / 通知 / 后台采集），仅首次或未走完时出现，可跳过；步骤与完成标记持久化到 `UserDefaults` |
+| 单元测试 | **226 个用例，0 失败**（`** TEST SUCCEEDED **`，2026-11-05，Xcode 27.2 / iPhone 17 模拟器；含 36 语义色与深浅变体、10 级字号、硬编码色值/字号审计、场景动作真实调用与失败汇总、迁移 v5→v6、刷新去抖/退避、通知节流、CSV 分页、接管码、注销、后台限流、首启持久化与术语审计） |
 | 模拟器构建 | **通过**（`xcodebuild ... build`，`** BUILD SUCCEEDED **`） |
-| CI | **GitHub Actions 已实际运行 success**：v0.8.0 run [41967922243](https://github.com/platojobs/codemagic/actions/runs/41967922243)（macos-15 + Xcode 16.4，提交 `b817842`），并行 `build-test`（221 单测）与 `e2e-contract`（151 项，0 SKIP）；`codemagic.yaml` 作为可选替代保留但未验证 |
+| CI | **GitHub Actions 已实际运行 success**：v0.9.0 run 待回填（macos-15 + Xcode 16.4），并行 `build-test`（226 单测）与 `e2e-contract`（151 项，0 SKIP）；v0.8.0 run [41967922243](https://github.com/platojobs/codemagic/actions/runs/41967922243) 为上一基线；`codemagic.yaml` 作为可选替代保留但未验证 |
 | 真机 BLE / 签名 | **未验证**：本机无真机与 Apple 开发者账号；读数采集与图表需真机 / 可穿戴设备验证（见第 9 节） |
-| 真实后端同步 | **契约已联调**：`scripts/e2e-contract.sh` 对本地 `PJGoIoT` **v0.7.0**（`STORE=fixture`）跑 **151 项断言，全部 PASS**（含配对码生成/失效/一次性、导出分页、注销后 token 失效，以及既有读数/设备/series/metrics 契约）；App 内同步 UI 仍需真机手动验证 |
+| 真实后端同步 | **契约已联调**：`scripts/e2e-contract.sh` 对本地 `PJGoIoT` **v0.7.0**（`STORE=fixture`）跑 **151 项断言，全部 PASS**（含接管码生成/失效/一次性、导出分页、注销后 token 失效，以及既有读数/设备/series/metrics 契约）；App 内同步 UI 仍需真机手动验证 |
+| 上架材料 | **已补齐**：`docs/store-listing.md`、`docs/privacy-policy.md`、`docs/app-privacy.md` 与 `codemagic/Resources/PrivacyInfo.xcprivacy`（未使用能力不声明） |
 
 ---
 
@@ -74,10 +76,10 @@
 ### 我的 Profile（`Modules/Profile`）
 - 蓝牙授权与开关状态自检，跳转系统设置。
 - 本地扫描日志列表、计数与清空。
-- **同步状态**：上次同步时间、待上传条数、「立即同步」按钮、匿名账号；失败时展示错误码与降级说明，冲突时提示「另一台设备改过这条」。
-- **登录失效（401）**：token 过期时显示「登录已失效」，出现「重新登录」入口；确认弹窗说明旧账号云端数据不自动合并、本机设备会重新上传，确认后才换新匿名账号（游标重置为 0）。未确认前前后台自动同步不会静默建号，见 `docs/troubleshooting.md` 第 3.1 节。
+- **同步状态**：上次同步时间、待同步条数、「立即同步」按钮、匿名账号；失败时展示错误码与降级说明，冲突时提示「另一台设备改过这条」。
+- **登录失效（401）**：token 过期时显示「登录已失效」，出现「重新登录」入口；确认弹窗说明旧账号云端数据不自动合并、本机设备会重新同步，确认后才换新匿名账号（游标重置为 0）。未确认前前后台自动同步不会静默建号，见 `docs/troubleshooting.md` 第 3.1 节。
 - 基础设置：自动记录最近设备、启动自动扫描、**后台采集**（v0.7.0，默认开启并说明耗电；关闭后进入后台立即断开连接，状态实时显示）。
-- **账号与数据（v0.7.0）**：迁移到新设备（8 位一次性配对码、真实倒计时、复制/重新生成）、从旧设备接管（自动大写/过滤易混字符、404 统一提示、429 按 `Retry-After` 冷却）、导出我的数据（分页拉全 + 临时文件分享后删除 + 真实进度）、注销账号（二次确认永久删除；成功后清 Keychain / 全部业务表 / 同步元数据，401 与网络错误分别处理）。
+- **账号与数据（v0.7.0）**：迁移到新设备（8 位一次性接管码、真实倒计时、复制/重新生成）、从旧设备接管（自动大写/过滤易混字符、404 统一提示、429 按 `Retry-After` 冷却）、导出我的数据（分页拉全 + 临时文件分享后删除 + 真实进度）、注销账号（二次确认永久删除；成功后清 Keychain / 全部业务表 / 同步元数据，401 与网络错误分别处理）。
 - **阈值告警设置（v0.6.0）**：真实开关、节流窗口（1 / 5 / 30 分钟）与通知权限状态；拒绝时提示前往系统设置。
 - **外观（v0.6.0）**：跟随系统 / 浅色 / 深色三态，窗口级生效并持久化。
 - 版本与关于：读取 `CFBundleShortVersionString / CFBundleVersion` 与当前 `BASE_URL`。
@@ -123,11 +125,14 @@ Config/
 scripts/
 ├── e2e-contract.sh         # 启动本地 fixture 服务 + 运行联调 runner（CI 的 e2e-contract job 复用）
 └── e2e-contract.swift      # 独立 Swift 可执行 runner，真实 URLSession 直连 localhost
-codemagicTests/             # 221 个 XCTest 用例（设计令牌审计 / 场景执行 / 迁移 v6 / 黄金读数 / 图表几何 / 节流退避 / 通知 / 导出 / 配对码 / 注销 / 后台推送）
+codemagicTests/             # 226 个 XCTest 用例（设计令牌审计 / 场景执行 / 迁移 v6 / 黄金读数 / 图表几何 / 节流退避 / 通知 / 导出 / 接管码 / 注销 / 后台推送 / 首启持久化与术语审计）
 docs/
 ├── architecture.md
 ├── consistency.md
-├── acceptance.md           # 真机验收清单（五模块 / 首页卡片 / 智能 / 场景 / 三态 / 蓝牙 / 规则 / 降级 / 通知 / 导出 / 深色 / 配对码 / 注销 / 后台采集 / Release）
+├── acceptance.md           # 真机验收清单（首启引导 / 权限前置 / 五模块 / 首页卡片 / 智能 / 场景 / 三态 / 蓝牙 / 规则 / 降级 / 通知 / 导出 / 深色 / 接管码 / 注销 / 后台采集 / Release）
+├── store-listing.md        # 中 / 英文上架文案、关键词、分级与边界声明
+├── privacy-policy.md       # 逐项数据收集、保留期、注销删除与权限边界
+├── app-privacy.md          # PrivacyInfo.xcprivacy 与代码位置逐项对照
 ├── troubleshooting.md      # Xcode / 签名 / Keychain / BGTask / BASE_URL / Go 服务 / 端口
 └── releasenotes.md         # 按 tag 的真实发布说明
 ```
@@ -220,7 +225,7 @@ cd /path/to/codemagic
 [5. LWW 冲突：旧版本不静默覆盖新版本] 9/9 PASS
 [6. 无 token 401 / 跨用户 404] 9/9 PASS（含复合键越权）
 [7. 设备读数 readings（推送 / 倒序 / summary / 重复 id / NaN / series / metrics）] 36/36 PASS
-[8. 账号：配对码接管 / 数据导出 / 注销] 28/28 PASS
+[8. 账号：接管码 / 数据导出 / 注销] 28/28 PASS
 
 === E2E 合同联调结果 ===
 通过：151 项，跳过：0 项，失败：0 项
@@ -241,7 +246,34 @@ cd /path/to/codemagic
 - `NSBluetoothPeripheralUsageDescription`：兼容旧系统声明。
 - `NSAppTransportSecurity / NSAllowsLocalNetworking = true`：仅允许本地 HTTP（Debug 的 `127.0.0.1`）。
 
-授权流程：iOS 13+ 由 `CBCentralManager` 首次初始化 / 扫描时触发系统授权弹窗，不自建权限页。「我的」页展示 `CBManager.authorization` 与蓝牙开关状态，未授权 / 受限时提供跳转系统设置入口。
+授权流程（v0.9.0 起为「先说明后申请」）：冷启动不再创建 `CBCentralManager`，因此不会在启动时弹授权框。首启引导第 1 步说明「为什么需要蓝牙」，用户点「继续」才调用 `BluetoothServicing.activate()` 触发系统授权；被拒绝 / 受限时原地展示「仅本机可用」能力边界与「去系统设置」，可继续走完引导。首页无设备时主行动为「开始扫描」；若权限已拒绝，空态与右上角扫描统一改为「去系统设置」，不出现点了没反应的死路。
+
+### 5.1 首次使用（首启引导）
+
+- 触发条件：`settings.onboardingCompleted == false`（仅首次安装或引导未走完）。
+- 三步内容：① 蓝牙用于扫描 / 连接 / 读取读数；② 通知用于阈值告警，仅本机生成、不用于营销；③ 后台采集受 iOS `bluetooth-central` 限制，只在设备保持连接时继续，断连即停。
+- 跳过与持久化：右上角「跳过」直接写入完成标记；中途退出按 `settings.onboardingStep` 从原步骤继续；走完最后一步「开始使用」同样写入完成标记，后续冷启动不再出现。
+- 与首页衔接：引导结束后首页空态只有一套文案——标题「还没有设备」、说明「扫描附近的设备，添加后可查看读数、历史曲线与规则」、主按钮「开始扫描」。
+
+### 5.2 启动耗时（实测，Debug · iPhone 17 模拟器）
+
+打点方式：`App/LaunchMetrics.swift` 在 `didFinishLaunching` 第一行记起点，在根窗口首次布局提交后的主线程回合记终点；同时发 `os_signpost`（subsystem `com.platojobs.codemagic`，category `launch`，interval `AppLaunch`）并输出 `[LaunchMetrics] ...` 控制台日志。工程没有 UI Test target，因此未使用 `XCTApplicationLaunchMetric`；改用 `os_signpost` + 控制台采集，**不是估算**。
+
+| 场景 | 改动前（v0.8.0） | 改动后（v0.9.0） | 说明 |
+| --- | --- | --- | --- |
+| 首次安装后首次启动到首帧 | **1718.3 ms**（1 次） | **479.3 ms**（1 次） | 改动前在 `AppEnvironment` 装配时同步创建 `CBCentralManager`，首启还要等系统授权框；改动后授权由用户点「继续」触发 |
+| 稳态冷启动到首帧（杀进程后） | **302.5 ms**（5 次中位数：280.3 / 286.5 / 302.5 / 311.0 / 552.6） | **288.5 ms**（4 次中位数：278.4 / 286.0 / 291.0 / 309.7） | 稳态 −14.0 ms（约 −4.6%） |
+| `environment-ready`（装配 + 打开 SQLite + 迁移 + 注册同步） | **15.9 ms**（中位数） | **13.5 ms**（中位数） | SQLite 打开与迁移自身仅 **1.8 ms**（`database-ready`），未阻塞首帧 |
+| 阶段占比（改动后） | — | window-visible ≈147 ms，home-data-ready ≈201 ms，first-frame ≈289 ms | 主要成本是 Tab / 首页搭建与首次数据渲染，不在装配与迁移 |
+
+做了哪些改动：
+
+1. **蓝牙管理器延迟创建**：`CBCentralManager` 从 `AppEnvironment` 构造时移到 `activatedManager()`，由首启引导「继续」或真实扫描 / 连接触发；冷启动不再触发系统授权框，也不把蓝牙初始化放在主线程启动路径。
+2. **7 天清理移到后台**：`AppEnvironment` 中的 `readingsStore.prune` 改为 `DispatchQueue.global(qos: .utility)`，不再占用启动主线程。
+3. **保留同步协调器注册在主线程**：`BGTaskScheduler.register` 必须在 `didFinishLaunching` 返回前完成，未延后；其耗时包含在 `environment-init` 的 13 ms 内。
+4. **未做**：未把 SQLite 打开 / 迁移异步化，也未把首页数据加载改为后台加载；两者目前均未阻塞首帧到不可接受的程度，强行异步会引入空窗与骨架态复杂度，本版本不做。
+
+> 以上为模拟器 Debug 构建的真实采集值，不代表真机 Release 性能；真机尚未验证（无设备 / 签名账号）。README 不声称「已优化到某目标」，只记录实测前后对比。
 
 > iOS 不向 App 暴露蓝牙 MAC，因此设备唯一键使用 `platform="ios"` + `externalId=CBPeripheral.identifier`（大写），`mac` 允许为空；型号元数据走 `GET /api/v1/device-types/{type}`，不依赖 MAC。
 
@@ -375,13 +407,14 @@ cd /path/to/codemagic
 - 模拟器无真实蓝牙，状态为 `unsupported`；产品 / 市场 / 详情依赖网络，需运行包含 readings 链路的本地 Go 服务或已更新的 mock。
 - 已实现 GATT 服务发现与四个读数特征的 notify 订阅；**未实现特征写入 / OTA**，GATT 元数据仍来自 catalog。
 - 契约已用本地 fixture 服务端到端验证（151 项断言 PASS，后端 `PJGoIoT` v0.7.0 / 契约 0.6.0）；App 内的 Keychain token、BGTask 调度、后台 BLE 采集与真实网络环境仍需真机验证。
-- 后端 `PJGoIoT` 已打 tag **v0.7.0**（含配对码、账号导出与注销）；iOS 按该契约实现，CI 若 checkout 到旧后端，e2e 第 8 节会明确 SKIP。
+- 后端 `PJGoIoT` 已打 tag **v0.7.0**（含接管码、账号导出与注销）；iOS 按该契约实现，CI 若 checkout 到旧后端，e2e 第 8 节会明确 SKIP。
 - Release 签名与 App Store 上架未验证（无 Apple 开发者账号 / 证书）。
 
 ---
 
 ## 10. 版本记录
 
+- `v0.9.0`：首启引导 + 权限前置 + 启动打点 + 上架材料（`MARKETING_VERSION 0.9.0` / build 17，tag `v0.9.0`）。新增 3 步首启引导（蓝牙 / 通知 / `bluetooth-central` 后台限制），仅首次或未走完时出现，可跳过，`settings.onboardingCompleted` / `settings.onboardingStep` 持久化；蓝牙改为「先说明后申请」：`CBCentralManager` 延迟到用户点「继续」或真实扫描时创建，冷启动不再弹授权框；拒绝 / 受限时展示「仅本机可用」与「去系统设置」，首页空态主行动统一为「开始扫描」，权限被拒时改为「去系统设置」。新增 `App/LaunchMetrics.swift`（`os_signpost` + 控制台打点）与阶段日志：稳态冷启动 302.5 ms → 288.5 ms（4 次中位数，Debug 模拟器），首装首启 1718.3 ms → 479.3 ms；7 天读数清理移到后台队列，SQLite 打开 / 迁移仍同步（1.8 ms）。新增 `docs/store-listing.md`、`docs/privacy-policy.md`、`docs/app-privacy.md` 与 `PrivacyInfo.xcprivacy`（UserDefaults `CA92.1`、文件时间戳 `C617.1`、系统启动时间 `35F9.1`；无位置 / 广告 / 分析 / 账号密码）。术语统一：设备（不用装置）、同步（不用上传）、告警（事件）/ 通知（系统渠道）、接管码（不用配对码）；新增 `OnboardingTests` 5 个用例（含 13 条高频文案禁用词审计）。单测 **226** 个，E2E 151 项（无契约变更）。后端 `PJGoIoT` v0.7.0（契约 0.6.0）。
 - `v0.8.0`：设计令牌落地 + 米家信息架构 + 本地场景（`MARKETING_VERSION 0.8.0` / build 16，tag `v0.8.0`）。新增 `DesignSystem/DesignTokens.swift`：`Palette` 36 个语义色（浅/深各一套，`UIColor(dynamicProvider:)`）、`Layout` 4pt 阶梯 / 16 页边距 / 56·72·88 行高 / 12 圆角 / 1dp 描边、`AppText` 10 级字号与等宽数字、`Motion` / `Elevation`；窗口与导航栏跟随语义色，统一按压态（浅 6% / 深 8% 遮罩，卡片 0.98）与列表卡片 1dp 描边零阴影；自绘大标题 96→56 收缩（12pt 阈值、200ms 插值）。五 Tab 改为**首页 / 智能 / 产品 / 市场 / 我的**，原「设备」Tab 取消：首页为设备卡片网格（名称 / 连接状态 / 最近读数 / 信号条、分组分段、搜索排序、今日告警摘要、快捷场景），「智能」集中自动化规则与场景。新增 SQLite `scenarios` 表（迁移 **v6**，仅本机不同步）与场景执行器：连接 / 断开设备、开始 / 停止后台采集、静音告警 10/30/60 分钟、立即同步；逐动作执行、失败不阻断、汇总成功/失败与原因并显示进度。三态（骨架 300ms 延迟、空状态真实文案 + 主行动、错误可重试）覆盖五 Tab。单测 **221** 个（新增 14 个：令牌审计 / 场景执行 / 迁移 v6），E2E 151 项（无契约变更）。后端 `PJGoIoT` v0.7.0（契约 0.6.0）。
 - `v0.7.0`：配对码跨设备接管、账号数据导出与注销、后台采集（`MARKETING_VERSION 0.7.0` / build 15，tag `v0.7.0`）。「我的」新增 8 位一次性配对码（真实 `expiresAt` 倒计时、复制、重新生成使旧码失效）、从旧设备接管（token 替换 + 本机设备/读数全部重新标记 pending + 游标清零）、账号导出（`hasMore`/`nextCursor` 循环拉全、临时文件分享后删除、真实进度）、注销（二次确认永久删除，成功清 Keychain/SQLite 业务表/同步元数据，401 与网络错误分别处理）。声明 `bluetooth-central`，新增持久化后台采集开关（默认开启、说明耗电、关闭即断开）；后台唤醒仅受限推送（≤100 设备/≤200 读数、≥15 分钟间隔、不拉增量不建号）。单测 207 个（新增 19 个），E2E 151 项（新增 28 项）。后端 `PJGoIoT` v0.7.0（契约 0.6.0）。
 - `v0.6.0`：请求节流、本地降级与四项产品功能（`MARKETING_VERSION 0.6.0` / build 14，tag `v0.6.0`）。详情页读数 notify 只本地重绘，远端刷新 800ms 去抖合并，不可见/后台不请求，失败指数退避 ≤5 分钟；服务端指标为空且本地有待同步读数时用本地指标与 UTC 网格并标注「待同步：本地数据」。新增阈值告警本地通知（首次使用授权、1/5/30 分钟节流、恢复通知、点击进详情、「我的」真实开关与权限引导）、CSV 导出（7 天内本地 / 更长服务端分页 ≤5 万条、UTF-8 BOM、ISO8601 UTC、RFC 4180 转义、临时文件分享后删除、真实进度与重试）、设备列表搜索/持久化排序/分组筛选/双空状态、外观三态与动态语义色（AccentColor 增 dark 变体）。单测 188 个（新增 31 个），E2E 123 项（无契约变更）。后端 `PJGoIoT` v0.5.1。
@@ -397,3 +430,36 @@ cd /path/to/codemagic
 - `v0.3.0`：版本号对齐（`MARKETING_VERSION 0.3.0` / build 4，tag `v0.3.0`，保留 `v0.2.0`）；新增 `scripts/e2e-contract.sh` + 独立 Swift runner，对本地 `PJGoIoT`（`STORE=fixture`）完成 43 项契约联调（匿名登录、双平台推送、changes 形状、幂等重放、LWW 冲突、401/404）；跨平台 Android 设备在列表标注「来自 Android，本机不可连接」并禁用连接；按 `openapi.yaml` 修正 `docs/consistency.md` 的错误码与对齐状态；单测增至 63 个。
 - `v0.2.0`：落地同步层（匿名登录 / Keychain token / 增量拉取 / 批量推送幂等 / 冲突提示 / tombstone）、SQLite 迁移 v2（`platform` + `external_id`）、`BGAppRefreshTask` 与前后台触发、「我的」同步状态与手动同步、版本号对齐；新增同步相关单元测试并更新 `docs/consistency.md`。
 - `v0.1.0`：五模块（首页 / 设备 / 产品 / 市场 / 我的）、CoreBluetooth 扫描与连接、SQLite 持久化、URLSession + Codable 网络层、本地规则、设备详情缓存降级、自绘 RSSI、代码空状态、44 个单元测试、Codemagic CI。
+
+---
+
+## 11. 术语表（易混词）
+
+| 概念 | 统一用词 | 不使用 | 口径 |
+| --- | --- | --- | --- |
+| 被扫描 / 连接的硬件 | **设备** | 装置、机器、仪器 | 代码与 UI 统一 `SavedDevice` / 「设备」 |
+| 双向数据一致 | **同步** | 上传、下发 | 「待同步」「同步完成」「立即同步」；`upload` 仅存在于内部 API 命名 |
+| 规则越界事件 | **告警** | 提示、警告、报警 | 首页「今日告警摘要」、阈值告警；`Alert` 仅用于系统弹窗 |
+| 系统通知渠道 | **通知** | — | 「通知权限」「通知开关」；本地通知由 `UNUserNotificationCenter` 发出 |
+| 发现附近 BLE | **扫描** | 搜索 | 「开始扫描」「扫描附近设备」 |
+| 过滤已保存设备 | **搜索** | — | 首页搜索框仅过滤本机设备，不触发扫描 |
+| 设备上报的值 | **读数** | 数值、参数、数据点 | 心率 / 电量 / 温度均为读数；阈值是规则条件 |
+| 用户对设备的分类 | **分组** | 分类（用于市场 / 产品筛选时保留「分类」） | 首页分组筛选 |
+| 自动化条件 | **规则** | 策略、场景 | 「智能 → 自动化」 |
+| 本地动作组合 | **场景** | 快捷指令、自动化（与规则区分） | 「智能 → 场景」，仅本机 |
+| 8 位一次性跨设备迁移码 | **接管码** | 配对码（「配对」仅指系统蓝牙配对） | 「迁移到新设备 / 从旧设备接管」；接口与文档保留 `pairing code` 旧名 |
+
+测试：`codemagicTests/OnboardingTests.swift::testHighFrequencyCopyAvoidsBannedTerminology` 覆盖 13 条高频文案（≥5 条），禁用词含装置、机器、上传、数值、参数、策略、配对、感叹号与口语语气词、`暂无数据`。
+
+---
+
+## 12. 上架材料
+
+| 文件 | 内容 |
+| --- | --- |
+| [`docs/store-listing.md`](docs/store-listing.md) | 中 / 英文短描述（中文 ≤80 字、英文 ≤30 词）、长描述（仅已实现功能）、关键词、4+ 分级、明确「不含交易 / 广告 / 账号密码登录 / 位置权限 / 分析 SDK」、审核备注 |
+| [`docs/privacy-policy.md`](docs/privacy-policy.md) | 逐项收集清单（BLE 标识、广播名 / 别名、读数与时间戳、匿名账号 ID 与 Keychain token）、用途、服务端 90 天 / 本机 7 天保留、注销即删、无广告 / 分析 SDK、不上传位置 |
+| [`docs/app-privacy.md`](docs/app-privacy.md) | `PrivacyInfo.xcprivacy` 与代码位置逐项对照，含必需理由 API（UserDefaults `CA92.1`、文件时间戳 `C617.1`、系统启动时间 `35F9.1`） |
+| [`codemagic/Resources/PrivacyInfo.xcprivacy`](codemagic/Resources/PrivacyInfo.xcprivacy) | 实际打包进 App 的隐私清单：非追踪、5 类收集数据（Device ID / User ID / Other User Content / Health / Other Usage Data）、3 类必需理由 API |
+
+> 上架文案与版本说明一致：当前为 `v0.9.0`（build 17），详见 [`docs/releasenotes.md`](docs/releasenotes.md)。

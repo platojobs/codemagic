@@ -79,7 +79,7 @@ final class AboutViewController: UIViewController {
             "蓝牙用于扫描附近设备、读取信号强度并在设备详情页建立连接。iOS 13 及以上由系统弹窗询问权限，未授权时仅能看到历史本地数据。"
         ))
         contentStack.addArrangedSubview(makeBodyLabel(
-            "扫描结果与规则只保存在本机，暂未上传云端；市场页只展示配件与固件信息，不提供下单与支付。"
+            "扫描结果与规则只保存在本机，暂未同步到云端；市场页只展示配件与固件信息，不提供下单与支付。"
         ))
 
         contentStack.addArrangedSubview(makeSectionTitle("一致性文档"))

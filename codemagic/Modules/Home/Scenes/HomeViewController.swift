@@ -194,10 +194,10 @@ extension HomeViewController: UITableViewDelegate {
         tableView.deselectRow(at: indexPath, animated: true)
         let row = viewModel.rows[indexPath.row]
         if row.isSaved {
-            presentAlert(title: "已在设备页保存", message: "可在「设备」页修改备注名、分组或添加规则。")
+            presentAlert(title: "已在首页保存", message: "可在「首页」修改备注名、分组或添加规则。")
         } else {
             viewModel.saveDevice(row)
-            presentAlert(title: "已保存", message: "设备已加入「设备」页，可继续设置备注与规则。")
+            presentAlert(title: "已保存", message: "设备已加入「首页」，可继续设置备注与规则。")
         }
     }
 

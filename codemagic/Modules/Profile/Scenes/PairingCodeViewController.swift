@@ -49,7 +49,7 @@ final class PairingCodeViewController: UIViewController {
     private func configureViews() {
         let description = AppTheme.makeLabel(style: .subheadline, color: AppTheme.Palette.secondaryText)
         description.numberOfLines = 0
-        description.text = "在旧设备上打开「我的」→「从旧设备接管」，输入下方配对码。配对码仅可使用一次。"
+        description.text = "在旧设备上打开「我的」→「从旧设备接管」，输入下方接管码。接管码仅可使用一次。"
 
         codeLabel.font = AppText.numericXL.font()
         codeLabel.textColor = AppTheme.Palette.primaryText
@@ -71,7 +71,7 @@ final class PairingCodeViewController: UIViewController {
         feedbackLabel.numberOfLines = 0
 
         var copyConfiguration = UIButton.Configuration.filled()
-        copyConfiguration.title = "复制配对码"
+        copyConfiguration.title = "复制接管码"
         copyConfiguration.cornerStyle = .medium
         copyButton.configuration = copyConfiguration
         copyButton.addTarget(self, action: #selector(copyTapped), for: .touchUpInside)
@@ -134,12 +134,12 @@ final class PairingCodeViewController: UIViewController {
     @objc private func copyTapped() {
         guard let code = viewModel.rawCode else { return }
         UIPasteboard.general.string = code
-        feedbackLabel.text = "已复制配对码，请在旧设备上粘贴。"
+        feedbackLabel.text = "已复制接管码，请在旧设备上粘贴。"
     }
 
     @objc private func regenerateTapped() {
         let alert = UIAlertController(
-            title: "重新生成配对码？",
+            title: "重新生成接管码？",
             message: "新码生成后，旧码立即失效，已输入旧码的旧设备将无法接管。",
             preferredStyle: .alert
         )

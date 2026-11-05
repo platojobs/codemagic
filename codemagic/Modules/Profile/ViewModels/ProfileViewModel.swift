@@ -109,7 +109,7 @@ final class ProfileViewModel {
     }
 
     var pendingUploadText: String {
-        syncStatus.pendingCount == 0 ? "无待上传" : "\(syncStatus.pendingCount) 条"
+        syncStatus.pendingCount == 0 ? "无待同步" : "\(syncStatus.pendingCount) 条"
     }
 
     var accountText: String {
@@ -135,9 +135,9 @@ final class ProfileViewModel {
     var syncDegradationText: String {
         var lines: [String] = []
         if syncStatus.needsRelogin {
-            lines.append("重新登录会创建新的匿名账号，旧账号的云端数据不会自动合并；本机已有设备会重新上传到新账号。")
+            lines.append("重新登录会创建新的匿名账号，旧账号的云端数据不会自动合并；本机已有设备会重新同步到新账号。")
         }
-        lines.append("断网或后端不可用时同步会自动失败并保留待上传记录；恢复后前后台切换或后台任务会重试，本地功能不受影响。")
+        lines.append("断网或后端不可用时同步会自动失败并保留待同步记录；恢复后前后台切换或后台任务会重试，本地功能不受影响。")
         if let conflict = syncStatus.lastConflictMessages.first {
             lines.append(conflict)
         }

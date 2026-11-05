@@ -16,7 +16,7 @@ enum PairingError: Error, Equatable {
     var userMessage: String {
         switch self {
         case .invalidFormat:
-            return "请输入 8 位配对码（仅字母与数字，已自动过滤易混字符）。"
+            return "请输入 8 位接管码（仅字母与数字，已自动过滤易混字符）。"
         case .api(let error):
             return error.userMessage
         case .local(let message):
@@ -110,7 +110,7 @@ final class PairingService: PairingServicing {
                     let deviceCount = try self.deviceStore.markAllPendingForRelogin()
                     let readingCount = try self.readingsStore.markAllPending()
                     self.recordLog(
-                        "从旧设备接管成功：本机 \(deviceCount) 台设备、\(readingCount) 条读数已标记待上传（账号 \(session.userID)）"
+                        "从旧设备接管成功：本机 \(deviceCount) 台设备、\(readingCount) 条读数已标记待同步（账号 \(session.userID)）"
                     )
                     let claimResult = PairingClaimResult(
                         userID: session.userID,
@@ -119,7 +119,7 @@ final class PairingService: PairingServicing {
                     )
                     DispatchQueue.main.async { completion(.success(claimResult)) }
                 } catch {
-                    completion(.failure(.local("配对成功，但本地待上传标记失败：\(error.localizedDescription)")))
+                    completion(.failure(.local("接管成功，但本地待同步标记失败：\(error.localizedDescription)")))
                 }
             }
         }

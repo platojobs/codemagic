@@ -7,8 +7,10 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
     ) -> Bool {
+        LaunchMetrics.markLaunchStart()
         // 后台任务必须在 didFinishLaunching 返回前注册。
         SyncCoordinator.shared.configure(engine: AppEnvironment.shared.syncEngine)
+        LaunchMetrics.mark("environment-ready")
         return true
     }
 

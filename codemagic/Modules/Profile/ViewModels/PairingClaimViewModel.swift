@@ -48,12 +48,12 @@ final class PairingClaimViewModel {
     }
 
     var statusText: String {
-        if isClaiming { return "正在校验配对码…" }
+        if isClaiming { return "正在校验接管码…" }
         if let errorMessage { return errorMessage }
         if let cooldownText { return cooldownText }
-        if input.isEmpty { return "请输入旧设备展示的 8 位配对码" }
+        if input.isEmpty { return "请输入旧设备展示的 8 位接管码" }
         if !isComplete { return "还需 \(PairingCodeFormatter.codeLength - input.count) 位" }
-        return "配对码仅可使用一次；接管后本机设备与读数会重新上传到旧设备账号。"
+        return "接管码仅可使用一次；接管后本机设备与读数会重新同步到旧设备账号。"
     }
 
     func claim() {

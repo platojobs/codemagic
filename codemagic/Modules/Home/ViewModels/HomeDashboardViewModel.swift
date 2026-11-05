@@ -158,13 +158,17 @@ final class HomeDashboardViewModel {
     }
 
     var emptyStateText: String {
-        devices.isEmpty
-            ? "还没有设备。点击右上角扫描，把身边的设备添加进来。"
-            : "没有匹配的设备，试试修改搜索词或切换分组。"
+        devices.isEmpty ? AppCopy.Home.emptyMessage : AppCopy.Home.filteredMessage
     }
 
     var emptyActionTitle: String? {
-        devices.isEmpty ? "扫描附近设备" : "清除筛选"
+        devices.isEmpty ? AppCopy.Home.emptyAction : AppCopy.Home.filteredAction
+    }
+
+    /// 蓝牙被拒绝或受限：首页主行动改为「去系统设置」，并说明仅本机可用的能力边界。
+    var isBluetoothPermissionBlocked: Bool {
+        let authorization = bluetooth.currentAuthorization()
+        return authorization == .denied || authorization == .restricted
     }
 
     // MARK: - Mutations

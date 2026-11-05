@@ -17,7 +17,7 @@ enum AccountAPIError: Error, Equatable {
     var userMessage: String {
         switch self {
         case .invalidCode:
-            return "配对码无效或已过期，请重新生成后再试。"
+            return "接管码无效或已过期，请重新生成后再试。"
         case .unauthorized:
             return "登录已失效，请先重新登录后再操作。"
         case .rateLimited(let seconds):

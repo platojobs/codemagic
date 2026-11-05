@@ -64,11 +64,11 @@ final class PairingCodeViewModel {
     }
 
     var statusText: String {
-        if isGenerating { return "正在生成配对码…" }
+        if isGenerating { return "正在生成接管码…" }
         if let errorMessage { return errorMessage }
-        if code == nil { return "点击下方按钮生成一次性配对码" }
-        if isExpired { return "旧配对码已失效，请重新生成。" }
-        return "配对码 10 分钟内有效，仅可使用一次；重新生成后旧码立即失效。"
+        if code == nil { return "点击下方按钮生成一次性接管码" }
+        if isExpired { return "旧接管码已失效，请重新生成。" }
+        return "接管码 10 分钟内有效，仅可使用一次；重新生成后旧码立即失效。"
     }
 
     var canCopy: Bool {

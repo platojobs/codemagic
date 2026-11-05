@@ -49,6 +49,7 @@ final class AppEnvironment {
         }
         self.database = resolved.database
         self.startupWarning = resolved.warning
+        LaunchMetrics.mark("database-ready")
 
         savedDeviceStore = SavedDeviceStore(database: resolved.database)
         ruleStore = DeviceRuleStore(database: resolved.database)
@@ -148,9 +149,14 @@ final class AppEnvironment {
             )
         )
 
-        // 启动即执行 7 天保留清理；同步成功后引擎会再次清理。
+        LaunchMetrics.mark("environment-init")
+
+        // 7 天保留清理与首帧无关，放到后台队列，避免占用启动时的主线程。
         let cutoff = Date().addingTimeInterval(-7 * 24 * 60 * 60)
-        try? readingsStore.prune(olderThan: cutoff)
+        let store = readingsStore
+        DispatchQueue.global(qos: .utility).async {
+            _ = try? store.prune(olderThan: cutoff)
+        }
     }
 
     // MARK: - Database

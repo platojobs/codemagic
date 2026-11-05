@@ -25,6 +25,14 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         AppAppearance.apply(environment.settingsStore.appearance, to: window)
         window.makeKeyAndVisible()
         self.window = window
+        LaunchMetrics.mark("window-visible")
+
+        // 首帧布局提交发生在本次主线程回合结束时，下一回合记录终点。
+        // 首启引导在首帧之后再呈现，不把引导搭建计入冷启动耗时。
+        DispatchQueue.main.async { [weak self] in
+            LaunchMetrics.markFirstFrame()
+            self?.presentOnboardingIfNeeded()
+        }
 
         UNUserNotificationCenter.current().delegate = self
     }
@@ -32,6 +40,16 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     func sceneDidBecomeActive(_ scene: UIScene) {
         // 回到前台时补一次增量同步（120 秒内不重复）。
         SyncCoordinator.shared.syncOnForeground()
+    }
+
+    /// 首启引导：仅首次或未走完时出现；走完 / 跳过由引导页持久化。
+    private func presentOnboardingIfNeeded() {
+        guard !environment.settingsStore.onboardingCompleted,
+              let tabBarController,
+              tabBarController.presentedViewController == nil
+        else { return }
+        let onboarding = FirstRunOnboardingViewController(environment: environment)
+        tabBarController.present(onboarding, animated: false)
     }
 
     func sceneDidEnterBackground(_ scene: UIScene) {

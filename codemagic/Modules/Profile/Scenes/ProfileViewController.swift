@@ -112,7 +112,7 @@ final class ProfileViewController: UIViewController {
     private func confirmRelogin() {
         let alert = UIAlertController(
             title: "重新登录？",
-            message: "将创建新的匿名账号，旧账号的云端数据不会自动合并到新账号；本机已有设备会重新上传到新账号。",
+            message: "将创建新的匿名账号，旧账号的云端数据不会自动合并到新账号；本机已有设备会重新同步到新账号。",
             preferredStyle: .alert
         )
         alert.addAction(UIAlertAction(title: "取消", style: .cancel))
@@ -345,7 +345,7 @@ extension ProfileViewController: UITableViewDataSource {
         case .sync:
             return "\(viewModel.syncStatusText)\n\(viewModel.syncDegradationText)"
         case .account:
-            return "配对码一次性有效，10 分钟内失效；导出文件在分享完成后自动删除；注销不可恢复。"
+            return "接管码一次性有效，10 分钟内失效；导出文件在分享完成后自动删除；注销不可恢复。"
         case .alerts:
             return viewModel.notificationGuidance
         case .appearance:
@@ -391,7 +391,7 @@ extension ProfileViewController: UITableViewDataSource {
             case 0:
                 return makeValueCell(title: "上次同步时间", value: viewModel.lastSyncText)
             case 1:
-                return makeValueCell(title: "待上传", value: viewModel.pendingUploadText)
+                return makeValueCell(title: "待同步", value: viewModel.pendingUploadText)
             case 2:
                 return makeActionCell(
                     title: viewModel.isSyncing ? "同步中…" : "立即同步",
@@ -409,9 +409,9 @@ extension ProfileViewController: UITableViewDataSource {
         case .account:
             switch indexPath.row {
             case 0:
-                return makeValueCell(title: "迁移到新设备", value: "生成配对码", showsDisclosure: true)
+                return makeValueCell(title: "迁移到新设备", value: "生成接管码", showsDisclosure: true)
             case 1:
-                return makeValueCell(title: "从旧设备接管", value: "输入 8 位配对码", showsDisclosure: true)
+                return makeValueCell(title: "从旧设备接管", value: "输入 8 位接管码", showsDisclosure: true)
             case 2:
                 return makeActionCell(title: "导出我的数据", color: AppTheme.Palette.accent)
             default:

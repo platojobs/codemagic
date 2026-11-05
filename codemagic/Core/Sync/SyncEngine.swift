@@ -604,7 +604,7 @@ final class SyncEngine {
             status.lastError = nil
             metadataStore.reloginRequired = false
             status.needsRelogin = false
-            let base = "同步完成：拉取 \(summary.pulled) 条，上传 \(summary.pushed) 条"
+            let base = "同步完成：拉取 \(summary.pulled) 条，同步 \(summary.pushed) 条"
             var message = summary.conflicts > 0
                 ? "\(base)，冲突 \(summary.conflicts) 条（已采用云端版本）"
                 : base
