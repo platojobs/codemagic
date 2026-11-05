@@ -37,7 +37,7 @@ final class DevicesViewModelTests: XCTestCase {
             peripheralID: alphaID,
             externalID: alphaID.uuidString,
             advertisedName: "Alpha Sensor",
-            remark: "客厅温湿度",
+            remark: "Alpha Room",
             groupName: "客厅",
             deviceType: "TH-01",
             lastSeenAt: now.addingTimeInterval(-600),
@@ -79,7 +79,7 @@ final class DevicesViewModelTests: XCTestCase {
 
         viewModel.updateSort(.name)
         XCTAssertEqual(viewModel.sort, .name)
-        XCTAssertEqual(viewModel.filteredDevices.map(\.advertisedName), ["Alpha Sensor", "Beta Plug", "Gamma Light"])
+        XCTAssertEqual(viewModel.filteredDevices.map(\.displayName), ["Alpha Room", "Beta Plug", "Gamma Light"])
         XCTAssertEqual(settings.deviceSort, .name, "排序方式持久化")
     }
 
@@ -90,7 +90,7 @@ final class DevicesViewModelTests: XCTestCase {
         viewModel.updateSearch("TH-01")
         XCTAssertEqual(viewModel.filteredDevices.map(\.peripheralID), [alphaID])
 
-        viewModel.updateSearch("客厅温湿")
+        viewModel.updateSearch("alpha room")
         XCTAssertEqual(viewModel.filteredDevices.map(\.peripheralID), [alphaID])
 
         viewModel.updateSearch(betaID.uuidString.uppercased())
