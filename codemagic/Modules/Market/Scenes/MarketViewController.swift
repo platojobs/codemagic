@@ -4,7 +4,8 @@ import UIKit
 final class MarketViewController: UIViewController {
     private let tableView = UITableView(frame: .zero, style: .plain)
     private let emptyStateView = EmptyStateView()
-    private let loadingView = LoadingStateView()
+    private let errorStateView = ErrorStateView(height: 240)
+    private lazy var skeletonController = SkeletonController(host: view)
     private let filterBar = UIStackView()
     private let vendorButton = UIButton(type: .system)
     private let compatibilityButton = UIButton(type: .system)
@@ -53,14 +54,14 @@ final class MarketViewController: UIViewController {
         vendorConfig.cornerStyle = .capsule
         vendorConfig.contentInsets = NSDirectionalEdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12)
         vendorButton.configuration = vendorConfig
-        vendorButton.titleLabel?.font = UIFont.preferredFont(forTextStyle: .subheadline)
+        vendorButton.titleLabel?.font = AppText.callout.font()
         vendorButton.addTarget(self, action: #selector(handleVendorFilter), for: .touchUpInside)
 
         var compatibilityConfig = UIButton.Configuration.gray()
         compatibilityConfig.cornerStyle = .capsule
         compatibilityConfig.contentInsets = NSDirectionalEdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12)
         compatibilityButton.configuration = compatibilityConfig
-        compatibilityButton.titleLabel?.font = UIFont.preferredFont(forTextStyle: .subheadline)
+        compatibilityButton.titleLabel?.font = AppText.callout.font()
         compatibilityButton.addTarget(
             self,
             action: #selector(handleCompatibilityFilter),
@@ -68,7 +69,7 @@ final class MarketViewController: UIViewController {
         )
 
         resetFilterButton.setTitle("清除", for: .normal)
-        resetFilterButton.titleLabel?.font = UIFont.preferredFont(forTextStyle: .subheadline)
+        resetFilterButton.titleLabel?.font = AppText.callout.font()
         resetFilterButton.addTarget(self, action: #selector(handleResetFilters), for: .touchUpInside)
 
         filterBar.addArrangedSubview(vendorButton)
@@ -87,6 +88,8 @@ final class MarketViewController: UIViewController {
 
     private func configureTableView() {
         tableView.translatesAutoresizingMaskIntoConstraints = false
+        tableView.backgroundColor = Palette.canvas
+        tableView.separatorStyle = .none
         tableView.register(MarketItemCell.self, forCellReuseIdentifier: MarketItemCell.reuseIdentifier)
         tableView.dataSource = self
         tableView.rowHeight = UITableView.automaticDimension
@@ -125,20 +128,23 @@ final class MarketViewController: UIViewController {
 
         switch viewModel.state {
         case .idle, .loading:
-            loadingView.configure(message: "正在拉取配件与固件信息…")
-            tableView.backgroundView = loadingView
+            tableView.backgroundView = nil
+            skeletonController.begin {
+                SkeletonView.list(rows: 5, rowHeight: 100)
+            }
 
         case .failed(let error):
-            emptyStateView.configure(
-                symbolName: SymbolName.warning,
+            skeletonController.end()
+            errorStateView.configure(
                 title: "市场数据加载失败",
-                message: "\(error.localizedDescriptionText)。请检查网络或 BASE_URL 配置。",
-                actionTitle: "重试",
-                action: { [weak self] in self?.viewModel.reload() }
-            )
-            tableView.backgroundView = emptyStateView
+                message: "\(error.localizedDescriptionText)。请检查网络或 BASE_URL 配置。"
+            ) { [weak self] in
+                self?.viewModel.reload()
+            }
+            tableView.backgroundView = errorStateView
 
         case .loaded(_) where viewModel.items.isEmpty && viewModel.hasActiveFilter:
+            skeletonController.end()
             emptyStateView.configure(
                 symbolName: SymbolName.marketTab,
                 title: "没有符合筛选条件的条目",
@@ -149,6 +155,7 @@ final class MarketViewController: UIViewController {
             tableView.backgroundView = emptyStateView
 
         case .loaded(_) where viewModel.items.isEmpty:
+            skeletonController.end()
             emptyStateView.configure(
                 symbolName: SymbolName.marketTab,
                 title: "暂无市场信息",
@@ -159,6 +166,7 @@ final class MarketViewController: UIViewController {
             tableView.backgroundView = emptyStateView
 
         case .loaded:
+            skeletonController.end()
             tableView.backgroundView = nil
         }
 

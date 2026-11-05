@@ -20,9 +20,23 @@ final class RuleAlertCoordinator {
 
     func handle(_ events: [RuleTriggerEvent], now: Date = Date()) {
         guard settingsStore.ruleAlertsEnabled else { return }
+        guard !settingsStore.isRuleAlertsMuted(at: now) else { return }
         for event in events {
             handle(event, now: now)
         }
+    }
+
+    /// 场景动作「静音告警 N 分钟」：写入持久化时间点，重启后仍然生效。
+    @discardableResult
+    func mute(minutes: Int, now: Date = Date()) -> Date {
+        let until = now.addingTimeInterval(TimeInterval(minutes * 60))
+        settingsStore.ruleAlertsMutedUntil = until
+        resetThrottle()
+        return until
+    }
+
+    func unmute() {
+        settingsStore.ruleAlertsMutedUntil = nil
     }
 
     /// 打开告警开关时提前请求授权，便于在「我的」页即时展示被拒绝的引导。

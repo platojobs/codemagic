@@ -12,16 +12,17 @@
 
 | 项 | 结果 |
 | --- | --- |
-| 版本 | **v0.7.0**（`MARKETING_VERSION 0.7.0`，`CURRENT_PROJECT_VERSION 15`，tag `v0.7.0`：配对码跨设备接管 + 账号导出/注销 + 后台采集，契约对齐 `PJGoIoT` v0.7.0 / openapi 0.6.0） |
-| 五模块（首页 / 设备 / 产品 / 市场 / 我的） | 已实现，纯代码 UIKit，真实数据路径 |
+| 版本 | **v0.8.0**（`MARKETING_VERSION 0.8.0`，`CURRENT_PROJECT_VERSION 16`，tag `v0.8.0`：设计令牌 + 米家信息架构 + 本地场景，契约对齐 `PJGoIoT` v0.7.0 / openapi 0.6.0） |
+| 五模块（首页 / 智能 / 产品 / 市场 / 我的） | 已实现，纯代码 UIKit，真实数据路径；设备管理并入首页，规则与场景集中在「智能」 |
 | CoreBluetooth 扫描 + 连接 | 已实现（`CBCentralManager`，真实 RSSI） |
 | BLE 读数采集 | 已实现：连接后订阅心率 `0x2A37`、电量 `0x2A19`、温度 `0x2A6E`、Nordic UART TX `6E400003-…`；各特征独立解析器，失败静默丢弃并写本地日志 |
 | 长周期读数图表 | 已实现：1 小时 / 24 小时 / 7 天 / 30 天区间切换（映射 `1m` / `1h` / `1h` / `1d`），X 轴按桶 `start` 真实时间比例定位，缺口断线，`avg` 折线 + `min`–`max` 区间带，Y 轴自适应并带单位 |
-| 本地持久化 | 已实现（SQLite3，含同步字段；迁移 **v5** 新增 `readings` 表，本地保留 7 天；v4 区分 `advertised_name` 与用户别名并记录三态 patch） |
+| 本地持久化 | 已实现（SQLite3，含同步字段；迁移 **v6** 新增仅本机的 `scenarios` 表；v5 新增 `readings` 表，本地保留 7 天；v4 区分 `advertised_name` 与用户别名并记录三态 patch） |
+| 设计系统（v0.8.0） | **已落地**：`Palette` 36 个语义色（浅/深 `UIColor(dynamicProvider:)`）、`Layout` 4pt 阶梯 / 16 页边距 / 56·72·88 行高 / 12 圆角 / 1dp 描边、`AppText` 10 级字号与等宽数字；代码内无硬编码色值与字号（单测强制扫描） |
 | 网络层 | 已实现（URLSession + Codable；设备/型号/同步/账号对齐 `PJGoIoT` v0.7.0 openapi 0.6.0；读数查询 / summary / series / metrics 对齐 v0.5.1 起；详情页远端刷新 800ms 去抖动 + 失败指数退避 ≤5 分钟，不可见/后台不请求） |
 | 同步 | **已实现**：匿名登录、增量拉取、批量推送（设备 ≤100/批 + 读数 ≤200/批、幂等键含读数）、冲突提示、tombstone、Keychain token、前后台 / BGTask 触发、断网累积补传；后台唤醒仅做受限推送（不拉增量、不建号、≥15 分钟间隔） |
 | 自绘 RSSI + 自绘折线图 + 代码组装空状态 | 已实现（读数图表纯 `draw(_:)`，无第三方图表库） |
-| 单元测试 | **207 个用例，0 失败**（`** TEST SUCCEEDED **`，2026-11-05，Xcode 27.2 / iPhone 17 模拟器；含刷新去抖/退避、待同步降级、通知节流与恢复、CSV 分页/转义、设备搜索排序筛选、深色语义色扫描、配对码校验与 429、导出分页、注销清理顺序、后台限流推送与保留） |
+| 单元测试 | **221 个用例，0 失败**（`** TEST SUCCEEDED **`，2026-11-05，Xcode 27.2 / iPhone 17 模拟器；含 36 语义色与深浅变体、10 级字号、硬编码色值/字号审计、场景动作真实调用与失败汇总、迁移 v5→v6、刷新去抖/退避、通知节流、CSV 分页、配对码、注销、后台限流） |
 | 模拟器构建 | **通过**（`xcodebuild ... build`，`** BUILD SUCCEEDED **`） |
 | CI | **GitHub Actions 已实际运行 success**：v0.7.0 run [41961761756](https://github.com/platojobs/codemagic/actions/runs/41961761756)（macos-15 + Xcode 16.4，提交 `bf6a9f2`），并行 `build-test`（207 单测）与 `e2e-contract`（151 项，0 SKIP）；`codemagic.yaml` 作为可选替代保留但未验证 |
 | 真机 BLE / 签名 | **未验证**：本机无真机与 Apple 开发者账号；读数采集与图表需真机 / 可穿戴设备验证（见第 9 节） |
@@ -31,20 +32,33 @@
 
 ## 2. 五模块能力
 
-### 首页 Home（`Modules/Home`）
-- `CBCentralManager` 真实扫描，展示名称 / 标识符 / RSSI，并用自绘 `RSISignalView` 显示信号格数。
-- 扫描结果按 RSSI 排序；「最近设备」持久化到 SQLite，重启后仍可查看。
-- 空状态：未扫描 / 扫描中 / 蓝牙关闭 / 未授权 / 模拟器不支持，各有明确文案与操作。
-- 支持保存设备到「设备」模块；扫描会话写本地日志。
+### 信息架构（v0.8.0，对齐米家）
+- 五个 Tab：**首页 / 智能 / 产品 / 市场 / 我的**。原「设备」Tab 取消，设备管理（搜索 / 排序 / 分组）并入首页；规则与场景入口统一放在「智能」，不留重复入口。
+- **首页**：设备卡片网格（名称、连接状态、最近一条读数、信号条），按分组分段；顶部搜索与排序、分组筛选；顶部一行「今日告警摘要」（真实触发条数，点击进入「智能」）；下方「快捷场景」横向卡（前 3 个场景，点击执行并提示结果）。点卡片进设备详情。
+- **智能**：分段控件切换「自动化」与「场景」。自动化 = 现有规则增删启停 + 最近触发记录；场景见下节。
+- **产品 / 市场 / 我的**：保留 v0.7.0 全部能力，仅做设计令牌与几何收口，不新增功能。
 
-### 设备 Devices（`Modules/Devices`）
-- 已保存设备：备注名、分组、最后出现时间、厂商与固件（详情页回写）。
-- **列表可用性（v0.6.0）**：搜索别名 / 广播名 / 型号 / 标识符（大小写不敏感）；排序最近出现 / 名称 / 信号 / 添加时间（默认最近出现并持久化）；按真实分组（含「未分组」）筛选；两种空状态（无设备 vs 筛选无结果）。
-- 本地规则：**断开**、**RSSI 低于阈值**；可新增 / 启停 / 删除，规则持久化。
-- 规则触发写扫描日志并在首页提示；规则可绑定单台设备或全部已保存设备。
-- **阈值告警通知（v0.6.0）**：首次命中请求通知授权，命中发本地通知、恢复发「已恢复」；节流窗口 1 / 5 / 30 分钟（默认 5，同一设备同一规则只报一次）；点击通知进入设备详情。
-- **读数 CSV 导出（v0.6.0）**：当前设备 + 指标 + 区间；7 天内读本地、更长走服务端分页（上限 5 万条）；UTF-8 BOM / ISO8601 UTC / RFC 4180 转义；临时文件分享后删除，进度真实可重试。
+### 首页 Home（`Modules/Home`）
+- `CBCentralManager` 真实扫描，展示名称 / 标识符 / RSSI；扫描页仍由右上角入口进入，扫描会话写本地日志。
+- 已保存设备以卡片网格展示：备注名、连接状态、最近一条读数（等宽数字 + 单位）、`RSISignalView` 信号条、最后出现时间；按真实分组分段（含「未分组」，排在最后）。
+- 搜索别名 / 广播名 / 型号 / 标识符（大小写不敏感）；排序最近出现 / 名称 / 信号 / 添加时间（默认最近出现并持久化）；分组筛选与搜索可叠加。
+- 「今日告警摘要」读取本地扫描日志中当天 `rule` + `warning` 的真实条数，点击切到「智能」Tab。
+- 空状态 / 错误状态 / 骨架屏齐全；设备卡片支持长按编辑与删除，点击进入详情。
+
+### 智能 Smart（`Modules/Smart`）
+- **自动化**：本地规则（**断开**、**RSSI 低于阈值**）新增 / 启停 / 删除，规则持久化；可绑定单台设备或全部已保存设备；列表下方展示最近 5 条真实触发记录（摘自本地扫描日志）。
+- **阈值告警通知（v0.6.0 起）**：首次命中请求通知授权，命中发本地通知、恢复发「已恢复」；节流窗口 1 / 5 / 30 分钟（默认 5，同一设备同一规则只报一次）；点击通知进入设备详情。
+- **场景（v0.8.0，仅本机）**：见「场景」小节。
+
+### 场景（v0.8.0，仅本机）
+- 场景是**真实可执行动作**的组合，只允许：连接指定设备、断开指定设备、开始后台采集、停止后台采集、静音告警 10 / 30 / 60 分钟、立即同步。
+- CRUD 存于 SQLite `scenarios` 表（迁移 v6），**不参与云同步**，界面明确标注「仅本机」；编辑页说明「场景仅保存在本机，不随账号同步」。
+- 一键执行按顺序逐个动作，任一动作失败**不阻断后续**，结束后汇总「成功 N / 失败 M」并逐条给出原因；执行中显示进度浮层（当前动作 + 已完成状态）。
+- 动作语义：连接前校验蓝牙权限与设备存在、已连接则返回失败原因；断开要求当前已连接；后台采集重复开启 / 未开启即停止均给出明确提示；静音校验 10/30/60 且告警未被关闭、未处于静音；同步复用现有 `SyncEngine` 并返回真实推送/拉取条数。
+
+### 设备详情（`Modules/Devices`）
 - 设备详情：连接蓝牙 → `GET /api/v1/my/devices/ios/{externalId}` 拉取云端设备记录，**优先展示云端 `deviceType` / `vendor` / `firmwareVersion` / `compatibility`**；云端字段为 `null` 时显示「型号未知」/「—」/「暂无兼容性说明」，绝不出 `"null"`；未注册型号仍展示别名、分组与最近出现时间，并在「云端记录」区展示同步信息；网络失败才降级本地缓存并标注缓存时间，无缓存显示失败空状态与重试。
+- **读数 CSV 导出（v0.6.0）**：当前设备 + 指标 + 区间；7 天内读本地、更长走服务端分页（上限 5 万条）；UTF-8 BOM / ISO8601 UTC / RFC 4180 转义；临时文件分享后删除，进度真实可重试。
 - 跨平台设备：服务端拉回的 `platform = android` 设备标注「来自 Android，本机不可连接」，无展开箭头、禁用点击与连接，不进入详情。
 
 ### 产品 Products（`Modules/Products`）
@@ -87,17 +101,18 @@ codemagic/
 ├── Core/
 │   ├── Models/             # ScannedDevice、SavedDevice、DeviceRule、ProductModel、MarketItem、DeviceCatalog…
 │   ├── Networking/         # APIConfiguration、HTTPClient、ProductAPIClient、AppError
-│   ├── Persistence/        # SQLiteDatabase + 5 个 Store
+│   ├── Persistence/        # SQLiteDatabase + SavedDevice/DeviceRule/Readings/RecentDevice/ScanLog/Scenario/同步元数据 Store
 │   ├── Sync/               # SyncEngine、SyncAPIClient、SyncModels、KeychainTokenStore、SyncMetadataStore
 │   ├── Bluetooth/          # CoreBluetoothService
-│   ├── Rules/              # RuleEvaluator、RuleAlertCoordinator
+│   ├── Rules/              # RuleEvaluator、RuleAlertCoordinator、ScenarioExecutor
 │   ├── Export/             # ReadingsCSV、ReadingsExportService
 │   ├── Notifications/      # LocalNotificationServing、UserNotificationService
 │   └── Formatting/         # AppDateFormat
-├── DesignSystem/           # AppTheme、AppAppearance、RSISignalView（自绘）、EmptyStateView（代码组装）、LoadingStateView
+├── DesignSystem/           # DesignTokens（Palette/Layout/AppText）、AppTheme、AppComponents、SkeletonView、ErrorStateView、ToastView、LargeTitleHeaderView、RSISignalView（自绘）、EmptyStateView
 ├── Modules/
-│   ├── Home/               # Scenes / ViewModels / Views
-│   ├── Devices/
+│   ├── Home/               # 首页：设备卡片网格 + 快捷场景 + 告警摘要
+│   ├── Smart/              # 智能：自动化 + 场景（编辑/执行）
+│   ├── Devices/            # 设备详情、规则编辑、读数图表
 │   ├── Products/
 │   ├── Market/
 │   └── Profile/
@@ -108,11 +123,11 @@ Config/
 scripts/
 ├── e2e-contract.sh         # 启动本地 fixture 服务 + 运行联调 runner（CI 的 e2e-contract job 复用）
 └── e2e-contract.swift      # 独立 Swift 可执行 runner，真实 URLSession 直连 localhost
-codemagicTests/             # 207 个 XCTest 用例（黄金读数 / 图表几何 / 节流退避 / 通知 / 导出 / 设备筛选 / 深色扫描 / 配对码 / 注销 / 后台推送）
+codemagicTests/             # 221 个 XCTest 用例（设计令牌审计 / 场景执行 / 迁移 v6 / 黄金读数 / 图表几何 / 节流退避 / 通知 / 导出 / 配对码 / 注销 / 后台推送）
 docs/
 ├── architecture.md
 ├── consistency.md
-├── acceptance.md           # 真机验收清单（五模块 / 蓝牙 / 规则 / 降级 / BGTask / 通知 / 导出 / 深色 / 配对码 / 注销 / 后台采集 / Release）
+├── acceptance.md           # 真机验收清单（五模块 / 首页卡片 / 智能 / 场景 / 三态 / 蓝牙 / 规则 / 降级 / 通知 / 导出 / 深色 / 配对码 / 注销 / 后台采集 / Release）
 ├── troubleshooting.md      # Xcode / 签名 / Keychain / BGTask / BASE_URL / Go 服务 / 端口
 └── releasenotes.md         # 按 tag 的真实发布说明
 ```
@@ -243,7 +258,7 @@ cd /path/to/codemagic
 
 数据库位置：`Application Support/com.platojobs.codemagic/codemagic.sqlite`。磁盘库失败时回退内存库，并在「我的」页提示。
 
-迁移：`PRAGMA user_version` 线性递增。v1 建五张表；**v2（v0.2.0）** 为 `saved_devices` 增加 `platform`（默认 `ios`）与 `external_id`，由 `peripheral_id` 大写回填，并建立 `(platform, external_id) WHERE deleted_at IS NULL` 唯一索引；**v3（v0.3.3）** 增加 `device_type TEXT`（可空，旧库升级后为 `NULL`，由云端详情回填）；**v4（v0.3.6）** 增加 `advertised_name TEXT`（由历史 `name` 回填广播名）与 `alias_patch` / `advertised_name_patch` / `group_patch`（`absent` / `clear` / `set` 三态）；**v5（v0.4.0）** 新增 `readings` 表（`id` 主键、`device_id`、`metric`、`value`、`unit`、`recorded_at`、`sync_state`），并按 `(device_id, metric, recorded_at DESC)` 建索引，支撑最近 60 点查询与 7 天清理。旧库升级后无需重装或清数据。
+迁移：`PRAGMA user_version` 线性递增。v1 建五张表；**v2（v0.2.0）** 为 `saved_devices` 增加 `platform`（默认 `ios`）与 `external_id`，由 `peripheral_id` 大写回填，并建立 `(platform, external_id) WHERE deleted_at IS NULL` 唯一索引；**v3（v0.3.3）** 增加 `device_type TEXT`（可空，旧库升级后为 `NULL`，由云端详情回填）；**v4（v0.3.6）** 增加 `advertised_name TEXT`（由历史 `name` 回填广播名）与 `alias_patch` / `advertised_name_patch` / `group_patch`（`absent` / `clear` / `set` 三态）；**v5（v0.4.0）** 新增 `readings` 表（`id` 主键、`device_id`、`metric`、`value`、`unit`、`recorded_at`、`sync_state`），并按 `(device_id, metric, recorded_at DESC)` 建索引，支撑最近 60 点查询与 7 天清理；**v6（v0.8.0）** 新增本地 `scenarios` 表（`id` / `name` / `actions` JSON / `created_at` / `updated_at`），**不含 `sync_state` / `deleted_at` / `platform` / `external_id`，不参与同步**。旧库升级后无需重装或清数据。
 
 ---
 
@@ -367,6 +382,7 @@ cd /path/to/codemagic
 
 ## 10. 版本记录
 
+- `v0.8.0`：设计令牌落地 + 米家信息架构 + 本地场景（`MARKETING_VERSION 0.8.0` / build 16，tag `v0.8.0`）。新增 `DesignSystem/DesignTokens.swift`：`Palette` 36 个语义色（浅/深各一套，`UIColor(dynamicProvider:)`）、`Layout` 4pt 阶梯 / 16 页边距 / 56·72·88 行高 / 12 圆角 / 1dp 描边、`AppText` 10 级字号与等宽数字、`Motion` / `Elevation`；窗口与导航栏跟随语义色，统一按压态（浅 6% / 深 8% 遮罩，卡片 0.98）与列表卡片 1dp 描边零阴影；自绘大标题 96→56 收缩（12pt 阈值、200ms 插值）。五 Tab 改为**首页 / 智能 / 产品 / 市场 / 我的**，原「设备」Tab 取消：首页为设备卡片网格（名称 / 连接状态 / 最近读数 / 信号条、分组分段、搜索排序、今日告警摘要、快捷场景），「智能」集中自动化规则与场景。新增 SQLite `scenarios` 表（迁移 **v6**，仅本机不同步）与场景执行器：连接 / 断开设备、开始 / 停止后台采集、静音告警 10/30/60 分钟、立即同步；逐动作执行、失败不阻断、汇总成功/失败与原因并显示进度。三态（骨架 300ms 延迟、空状态真实文案 + 主行动、错误可重试）覆盖五 Tab。单测 **221** 个（新增 14 个：令牌审计 / 场景执行 / 迁移 v6），E2E 151 项（无契约变更）。后端 `PJGoIoT` v0.7.0（契约 0.6.0）。
 - `v0.7.0`：配对码跨设备接管、账号数据导出与注销、后台采集（`MARKETING_VERSION 0.7.0` / build 15，tag `v0.7.0`）。「我的」新增 8 位一次性配对码（真实 `expiresAt` 倒计时、复制、重新生成使旧码失效）、从旧设备接管（token 替换 + 本机设备/读数全部重新标记 pending + 游标清零）、账号导出（`hasMore`/`nextCursor` 循环拉全、临时文件分享后删除、真实进度）、注销（二次确认永久删除，成功清 Keychain/SQLite 业务表/同步元数据，401 与网络错误分别处理）。声明 `bluetooth-central`，新增持久化后台采集开关（默认开启、说明耗电、关闭即断开）；后台唤醒仅受限推送（≤100 设备/≤200 读数、≥15 分钟间隔、不拉增量不建号）。单测 207 个（新增 19 个），E2E 151 项（新增 28 项）。后端 `PJGoIoT` v0.7.0（契约 0.6.0）。
 - `v0.6.0`：请求节流、本地降级与四项产品功能（`MARKETING_VERSION 0.6.0` / build 14，tag `v0.6.0`）。详情页读数 notify 只本地重绘，远端刷新 800ms 去抖合并，不可见/后台不请求，失败指数退避 ≤5 分钟；服务端指标为空且本地有待同步读数时用本地指标与 UTC 网格并标注「待同步：本地数据」。新增阈值告警本地通知（首次使用授权、1/5/30 分钟节流、恢复通知、点击进详情、「我的」真实开关与权限引导）、CSV 导出（7 天内本地 / 更长服务端分页 ≤5 万条、UTF-8 BOM、ISO8601 UTC、RFC 4180 转义、临时文件分享后删除、真实进度与重试）、设备列表搜索/持久化排序/分组筛选/双空状态、外观三态与动态语义色（AccentColor 增 dark 变体）。单测 188 个（新增 31 个），E2E 123 项（无契约变更）。后端 `PJGoIoT` v0.5.1。
 - `v0.5.0`：设备详情「数据」区升级为长周期可切换图表（`MARKETING_VERSION 0.5.0` / build 13，tag `v0.5.0`）。新增 `ReadingsRange`（1 小时 / 24 小时 / 7 天 / 30 天，默认 24 小时）映射 `1m` / `1h` / `1h` / `1d`，切换即时重绘并重新查询 `readings/series`（`from` / `to` 为 UTC RFC3339）；X 轴按桶 `start` 真实时间比例定位，缺口处折线断开（不跨缺口连线），`avg` 折线叠加 `min`–`max` 区间带，Y 轴按区间 min/max 自适应并带单位；几何独立在 `ReadingsChartGeometry`。指标清单改用 `readings/metrics`（`count` / `lastAt` / `unit`），展示「指标名 · N 条」，单位随指标同步；离线按同一 UTC 网格聚合本地数据，30 天区间标注「离线：仅本地 7 天数据」。单测 157 个（新增 16 个），E2E 123 项（新增 17 项：series/metrics/空区间/非法 bucket）。后端 `PJGoIoT` v0.5.1。

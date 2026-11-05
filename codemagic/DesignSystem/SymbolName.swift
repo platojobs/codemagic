@@ -7,6 +7,7 @@ enum SymbolName {
 
     static let homeTab = "house"
     static let homeTabSelected = "house.fill"
+    static let smartTab = "sparkles"
     static let devicesTab = "dot.radiowaves.left.and.right"
     static let productsTab = "square.grid.2x2"
     static let productsTabSelected = "square.grid.2x2.fill"

@@ -10,16 +10,16 @@ final class AppCardView: UIView {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        AppTheme.styleAsCard(self)
+        styleAsCardSurface()
 
         contentView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(contentView)
 
         NSLayoutConstraint.activate([
-            contentView.topAnchor.constraint(equalTo: topAnchor, constant: AppTheme.Spacing.large),
-            contentView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: AppTheme.Spacing.large),
-            contentView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -AppTheme.Spacing.large),
-            contentView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -AppTheme.Spacing.large),
+            contentView.topAnchor.constraint(equalTo: topAnchor, constant: Layout.cardPadding),
+            contentView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Layout.cardPadding),
+            contentView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Layout.cardPadding),
+            contentView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Layout.cardPadding),
         ])
     }
 

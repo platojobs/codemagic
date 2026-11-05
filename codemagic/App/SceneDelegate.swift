@@ -19,7 +19,9 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 
         let window = UIWindow(windowScene: windowScene)
         window.rootViewController = tabBarController
-        // 外观偏好（跟随系统 / 浅色 / 深色）在窗口级别生效，语义色随 trait 自动切换。
+        window.backgroundColor = Palette.canvas
+        // 外观偏好（跟随系统 / 浅色 / 深色）在窗口级别生效，语义色随 trait 自动切换；
+        // 导航栏 / 状态栏均跟随窗口的 userInterfaceStyle，不写死颜色。
         AppAppearance.apply(environment.settingsStore.appearance, to: window)
         window.makeKeyAndVisible()
         self.window = window

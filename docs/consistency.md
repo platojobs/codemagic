@@ -5,20 +5,23 @@
 - Android 侧口径以 `PKotlinApp/README.md` 与 `PJGoIoT/api/openapi.yaml` 为准。
 - iOS 侧以本仓库 `README.md`、`docs/architecture.md` 为准。
 - 后端 `PJGoIoT/api/openapi.yaml` 在 **v0.5.1** 起包含读数链路（v0.4.0 首次引入，v0.5.0 新增 `readings/series` 与 `readings/metrics`）。`v0.5.1` 修正 4 处契约表述：`/readings/metrics` 补 400 响应、`PushReading.unit` 允许空串（0–16）、9 个公共端点补 `security: []`、`compatibility` 的 nullable 写法；这些均不影响客户端逻辑。iOS v0.5.0（`MARKETING_VERSION 0.5.0`，build 13）在此基础上实现：推送 `readings`（≤500/批、按 `id` 幂等）、查询 `readings`（倒序、cursor）、`readings/summary`（24h min/max/avg/last）、**`readings/series`（1m/1h/1d 分桶）与 `readings/metrics`（指标清单）**；服务端保留 90 天，客户端本地保留 7 天。v0.4.1 起两端读数解析以 **3.8 黄金用例表**为唯一口径；v0.5.0 的长周期图表口径见 **3.9**。
+- **v0.8.0（iOS）** 无后端契约变更：新增设计令牌（`Palette` / `Layout` / `AppText`）与米家信息架构，新增仅本机的 `scenarios` 表（迁移 v6，不同步）；口径见 **3.12**。
 
 ---
 
 ## 1. 五模块命名与顺序
 
-两端底部导航必须严格保持以下名称与顺序，不得增删或调换：
+两端底部导航以本表为目标口径；**iOS v0.8.0 已落地，Android 端尚未跟进**（见下方变更说明），不得在单端随意增删或调换。
 
 | 序号 | 名称 | Android | iOS |
 | --- | --- | --- | --- |
-| 1 | 首页 | `ui/home/HomeFragment` | `Modules/Home` |
-| 2 | 设备 | `ui/devices/DevicesFragment` | `Modules/Devices` |
+| 1 | 首页 | `ui/home/HomeFragment` | `Modules/Home`（设备卡片网格 + 快捷场景 + 告警摘要） |
+| 2 | 智能 | —（尚未跟进） | `Modules/Smart`（自动化 + 场景） |
 | 3 | 产品 | `ui/products/ProductsFragment` | `Modules/Products` |
 | 4 | 市场 | `ui/market/MarketFragment` | `Modules/Market` |
 | 5 | 我的 | `ui/profile/ProfileFragment` | `Modules/Profile` |
+
+> **v0.8.0 变更（iOS 先行）**：iOS 已按米家信息架构重组为 **首页 / 智能 / 产品 / 市场 / 我的**，取消原「设备」Tab，设备管理（搜索 / 排序 / 分组）并入首页，规则与场景集中到「智能」；Android 端尚未跟进，本轮不强制对齐。`Modules/Devices` 保留设备详情、规则编辑与读数图表，不再作为底部 Tab。
 
 iOS 设备详情页独立于底部导航：`Modules/Devices/Scenes/DeviceDetailViewController`（Android 为 `ui/detail/DeviceDetailActivity`）。
 
@@ -28,8 +31,8 @@ iOS 设备详情页独立于底部导航：`Modules/Devices/Scenes/DeviceDetailV
 
 | 模块 | 数据来源 | Android 实现 | iOS 实现 |
 | --- | --- | --- | --- |
-| 首页 | CoreBluetooth / BLE 真实扫描 + 本地最近设备 | `BluetoothLeScanner` + `ScanCallback` → Room | `CBCentralManager` → `CoreBluetoothService` → `RecentDeviceStore`（SQLite） |
-| 设备 | 本地已保存设备 + 本地规则 | Room `devices` / `rules` | SQLite `saved_devices` / `rules` |
+| 首页 | CoreBluetooth / BLE 真实扫描 + 本地最近设备 + 本地已保存设备 + 本地场景 | `BluetoothLeScanner` + `ScanCallback` → Room | `CBCentralManager` → `CoreBluetoothService`；卡片读 `SavedDeviceStore` / `ReadingsStore` / `RecentDeviceStore`，告警数读 `ScanLogStore`，场景读 `ScenarioStore` |
+| 智能 | 本地规则 + 本地触发日志 + 本地场景 | Room `rules` / `scan_logs` | SQLite `rules` / `scan_logs` / `scenarios`（场景仅本机） |
 | 产品 | 网络型号库 | Retrofit `GET api/products` | `GET /api/v1/device-types` + `GET /api/v1/device-types/{type}/catalog` |
 | 市场 | 网络配件与固件信息 | Retrofit `GET api/market` | `GET /api/v1/device-types/{type}/catalog` 聚合 firmware + accessories |
 | 我的 | 系统权限状态 + 本地扫描日志 + 版本信息 + 同步状态 | 系统 API + Room `scan_logs` + 同步引擎 | `CBManager.authorization` + SQLite `scan_logs` + `SyncEngine` 状态 |
@@ -379,6 +382,20 @@ iOS 用例固化在 `codemagicTests/ReadingsGoldenTests.swift`；新增特征或
 - 后台唤醒只做**受限推送**：不拉取增量、不创建匿名账号；单次最多 **100 台设备 / 200 条读数**；与上次后台推送间隔 **≥15 分钟**，失败同样记录时间以避免唤醒风暴。前台去抖 800ms 与指数退避 ≤300s 策略不变。
 - 7 天保留清理只删除 `synced` 且超期的读数，`pending` / `failed` 在后台路径同样受保护。
 
+### 3.12 设计令牌与本地场景（v0.8.0）
+
+**设计令牌**
+- 所有颜色、字号、间距、圆角、描边、动效与阴影来自 `DesignSystem/DesignTokens.swift`，**源码禁止硬编码色值与字号**；单测扫描 `codemagic/`（除 `DesignTokens.swift`）中的 `UIColor(...)`、`.white/.black`、`.systemGray`、`systemFont(ofSize: 数字)`、裸 `font = UIFont.` 赋值。
+- `Palette` 36 个语义色，浅 / 深各一套（`UIColor(dynamicProvider:)`）；`Layout` 使用 4pt 阶梯、16 页边距、56 / 72 / 88 行高、12 圆角、1dp 描边；`AppText` 10 级字号，数值统一等宽数字。
+- 按压态：浅色 6% / 深色 8% 遮罩（不使用整体 alpha）；按钮只变色不缩放，卡片按下 0.98；列表卡片 1dp 描边零阴影，仅浮层用 2 / 4 / 8dp 阴影。
+- 自绘大标题：展开 96、收起 56，滚动阈值 12pt，200ms 插值。
+
+**场景（仅本机）**
+- SQLite 迁移 **v6** 新增 `scenarios`（`id` / `name` / `actions` JSON / `created_at` / `updated_at`），**不含同步字段，不参与 push / changes**；注销账号的业务表清理同样包含 `scenarios`。
+- 动作集合固定 6 类：`connectDevice(uuid)`、`disconnectDevice(uuid)`、`startBackgroundCollection`、`stopBackgroundCollection`、`muteAlerts(10|30|60)`、`syncNow`；不接受任意脚本或网络自定义动作。
+- 执行：严格按数组顺序逐个调用真实服务；单个动作失败**不阻断后续**；返回逐动作 `{action, succeeded, message}` 与汇总（成功 / 失败数）。重复执行校验（已连接 / 已开启 / 已静音）视为失败并给出原因，而非静默成功。
+- 连接动作前置校验蓝牙授权与设备存在；静音写入 `SettingsStore.ruleAlertsMutedUntil` 并让 `RuleAlertCoordinator` 停止告警；同步复用 `SyncEngine` 返回真实推送 / 拉取条数。
+- UI：场景列表与编辑页标注「仅本机」；首页快捷场景只展示前 3 个，点击执行并显示进度浮层与结果 Toast。
 
 ---
 

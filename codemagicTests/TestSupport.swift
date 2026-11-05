@@ -67,6 +67,7 @@ final class FakeBluetoothService: BluetoothServicing {
 
     func disconnect(peripheralID: UUID) {
         disconnectedPeripheralIDs.append(peripheralID)
+        connectedPeripheralIDs.removeAll { $0 == peripheralID }
     }
 
     func startReading(peripheralID: UUID) {
@@ -81,11 +82,16 @@ final class FakeBluetoothService: BluetoothServicing {
         connectedPeripheralIDs.count
     }
 
+    func isConnected(peripheralID: UUID) -> Bool {
+        connectedPeripheralIDs.contains(peripheralID)
+    }
+
     func disconnectAll() {
         disconnectAllCount += 1
         for id in connectedPeripheralIDs {
             disconnectedPeripheralIDs.append(id)
         }
+        connectedPeripheralIDs.removeAll()
     }
 
     // MARK: - Test Helpers
@@ -93,6 +99,11 @@ final class FakeBluetoothService: BluetoothServicing {
     func emitState(_ newState: BluetoothState) {
         state = newState
         stateChangeHandler?(newState)
+    }
+
+    /// 测试辅助：模拟外设已连接，无需经过 connect 调用。
+    func markConnected(_ peripheralID: UUID) {
+        connectedPeripheralIDs.append(peripheralID)
     }
 
     func emitDiscovery(_ device: ScannedDevice) {

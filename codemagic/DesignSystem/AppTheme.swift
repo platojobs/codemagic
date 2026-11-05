@@ -1,69 +1,85 @@
 import UIKit
 
-/// 设计系统：颜色、间距、圆角、字体与常用控件的统一入口。
-///
-/// 业务代码只引用这里的语义常量，不写十六进制颜色、不写魔法数字，
-/// 从而同时适配深色模式与 Dynamic Type。
+/// 兼容入口：旧代码通过 `AppTheme` 引用语义常量，实际取值全部来自
+/// `DesignTokens.swift` 中的 `Palette` / `Layout` / `Radius` / `AppText`。
+/// 新代码请直接使用令牌，避免再新增中转名。
 enum AppTheme {
     // MARK: - Spacing
 
     enum Spacing {
-        static let xSmall: CGFloat = 4
-        static let small: CGFloat = 8
-        static let medium: CGFloat = 12
-        static let large: CGFloat = 16
-        static let xLarge: CGFloat = 24
+        static let xSmall: CGFloat = Layout.space4
+        static let small: CGFloat = Layout.space8
+        static let medium: CGFloat = Layout.space12
+        static let large: CGFloat = Layout.space16
+        static let xLarge: CGFloat = Layout.space24
     }
 
     // MARK: - Metrics
 
     enum Metrics {
-        static let estimatedRowHeight: CGFloat = 64
-        static let avatarSize: CGFloat = 56
-        static let thumbnailSize: CGFloat = 88
+        static let estimatedRowHeight: CGFloat = Layout.row2
+        static let avatarSize: CGFloat = Layout.avatar56
+        static let thumbnailSize: CGFloat = Layout.row3
         static let detailImageHeight: CGFloat = 220
         static let badgeHeight: CGFloat = 22
-        static let contentMargins: CGFloat = 20
+        static let contentMargins: CGFloat = Layout.pageMargin
     }
 
     // MARK: - Corner Radius
 
     enum CornerRadius {
-        static let card: CGFloat = 16
-        static let control: CGFloat = 10
-        static let badge: CGFloat = 11
+        static let card: CGFloat = Radius.card
+        static let control: CGFloat = Radius.input
+        static let badge: CGFloat = Radius.pill
     }
 
-    // MARK: - Palette（全部为语义色）
+    // MARK: - Palette（全部映射到语义令牌）
 
     enum Palette {
-        static let background = UIColor.systemGroupedBackground
-        static let cardBackground = UIColor.secondarySystemGroupedBackground
-        static let primaryText = UIColor.label
-        static let secondaryText = UIColor.secondaryLabel
-        static let tertiaryText = UIColor.tertiaryLabel
-        static let accent = UIColor.tintColor
-        static let separator = UIColor.separator
-        static let success = UIColor.systemGreen
-        static let highlight = UIColor.systemOrange
-        static let promotion = UIColor.systemRed
-        static let favorite = UIColor.systemPink
-        static let fill = UIColor.tertiarySystemFill
+        static let background = DesignPalette.canvas
+        static let cardBackground = DesignPalette.surface
+        static let primaryText = DesignPalette.textPrimary
+        static let secondaryText = DesignPalette.textSecondary
+        static let tertiaryText = DesignPalette.textTertiary
+        static let accent = DesignPalette.primary
+        static let separator = DesignPalette.divider
+        static let success = DesignPalette.success
+        static let highlight = DesignPalette.warning
+        static let promotion = DesignPalette.danger
+        static let favorite = DesignPalette.primary
+        static let fill = DesignPalette.surfaceSunken
     }
 
     // MARK: - Typography
 
     enum Typography {
+        /// 旧调用点使用 `UIFont.TextStyle`，这里映射到 10 级 `AppText`。
         static func font(_ style: UIFont.TextStyle) -> UIFont {
-            .preferredFont(forTextStyle: style)
+            appText(for: style).font()
+        }
+
+        static func appText(for style: UIFont.TextStyle) -> AppText {
+            switch style {
+            case .largeTitle: return .display
+            case .title1, .title2: return .title
+            case .title3, .headline: return .headline
+            case .body: return .body
+            case .callout, .subheadline: return .callout
+            case .caption1: return .caption
+            default: return .footnote
+            }
         }
     }
 
     // MARK: - Factories
 
     static func makeLabel(style: UIFont.TextStyle, color: UIColor) -> UILabel {
+        makeLabel(text: Typography.appText(for: style), color: color)
+    }
+
+    static func makeLabel(text: AppText, color: UIColor) -> UILabel {
         let label = UILabel()
-        label.font = Typography.font(style)
+        label.font = text.font()
         label.adjustsFontForContentSizeCategory = true
         label.textColor = color
         label.numberOfLines = 0
@@ -71,63 +87,25 @@ enum AppTheme {
     }
 
     static func makePrimaryButton(title: String, symbolName: String? = nil) -> UIButton {
-        var configuration = UIButton.Configuration.filled()
-        configuration.title = title
-        configuration.cornerStyle = .medium
-        configuration.baseBackgroundColor = Palette.accent
-        configuration.contentInsets = NSDirectionalEdgeInsets(
-            top: Spacing.medium,
-            leading: Spacing.large,
-            bottom: Spacing.medium,
-            trailing: Spacing.large
-        )
-        if let symbolName {
-            configuration.image = UIImage(
-                systemName: symbolName,
-                withConfiguration: UIImage.SymbolConfiguration(textStyle: .body)
-            )
-            configuration.imagePadding = Spacing.small
-        }
-        let button = UIButton(configuration: configuration)
-        button.titleLabel?.adjustsFontForContentSizeCategory = true
-        return button
+        AppButton(style: .primary, title: title, symbolName: symbolName)
     }
 
     static func makePillButton(title: String, symbolName: String) -> UIButton {
-        let image = UIImage(
-            systemName: symbolName,
-            withConfiguration: UIImage.SymbolConfiguration(textStyle: .caption1)
-        )
-        var configuration = UIButton.Configuration.tinted()
-        configuration.title = title
-        configuration.image = image
-        configuration.imagePadding = Spacing.xSmall
-        configuration.cornerStyle = .capsule
-        configuration.contentInsets = NSDirectionalEdgeInsets(
-            top: Spacing.small,
-            leading: Spacing.medium,
-            bottom: Spacing.small,
-            trailing: Spacing.medium
-        )
-        let button = UIButton(configuration: configuration)
-        button.titleLabel?.adjustsFontForContentSizeCategory = true
-        return button
+        AppButton(style: .filterChip, title: title, symbolName: symbolName)
     }
 
     static func makeBadgeLabel(text: String, color: UIColor) -> UILabel {
-        let label = makeLabel(style: .caption2, color: color)
+        let label = makeLabel(text: .caption, color: color)
         label.text = text
         label.textAlignment = .center
-        label.backgroundColor = color.withAlphaComponent(0.15)
-        label.layer.cornerRadius = CornerRadius.badge
+        label.backgroundColor = color.withAlphaComponent(0.12)
+        label.layer.cornerRadius = Radius.sm
         label.layer.masksToBounds = true
         return label
     }
 
     static func styleAsCard(_ view: UIView) {
-        view.backgroundColor = Palette.cardBackground
-        view.layer.cornerRadius = CornerRadius.card
-        view.layer.cornerCurve = .continuous
+        view.styleAsCardSurface()
     }
 
     static func symbolImage(_ name: String, textStyle: UIFont.TextStyle = .body) -> UIImage? {

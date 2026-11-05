@@ -51,7 +51,7 @@ final class PairingCodeViewController: UIViewController {
         description.numberOfLines = 0
         description.text = "在旧设备上打开「我的」→「从旧设备接管」，输入下方配对码。配对码仅可使用一次。"
 
-        codeLabel.font = .monospacedDigitSystemFont(ofSize: 34, weight: .semibold)
+        codeLabel.font = AppText.numericXL.font()
         codeLabel.textColor = AppTheme.Palette.primaryText
         codeLabel.textAlignment = .center
         codeLabel.adjustsFontSizeToFitWidth = true

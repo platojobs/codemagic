@@ -1,7 +1,7 @@
 import UIKit
 
-/// 五模块入口：首页 / 设备 / 产品 / 市场 / 我的。
-/// 命名与顺序与 Android 端 `PKotlinApp` 保持一致。
+/// 五模块入口：首页 / 智能 / 产品 / 市场 / 我的。
+/// 首页承接原「设备」页的设备管理；规则入口只保留在「智能」页。
 final class MainTabBarController: UITabBarController {
     private let environment: AppEnvironment
 
@@ -22,36 +22,38 @@ final class MainTabBarController: UITabBarController {
 
     private func configureTabs() {
         let home = makeNavigationController(
-            root: HomeViewController(
-                viewModel: HomeViewModel(
+            root: HomeDashboardViewController(
+                viewModel: HomeDashboardViewModel(
                     bluetooth: environment.bluetooth,
                     savedDeviceStore: environment.savedDeviceStore,
                     recentDeviceStore: environment.recentDeviceStore,
-                    scanLogStore: environment.scanLogStore,
-                    ruleStore: environment.ruleStore,
                     settingsStore: environment.settingsStore,
-                    ruleEvaluator: RuleEvaluator(),
-                    ruleAlertCoordinator: environment.ruleAlertCoordinator
-                )
+                    scanLogStore: environment.scanLogStore,
+                    readingsStore: environment.readingsStore,
+                    scenarioStore: environment.scenarioStore,
+                    executor: environment.scenarioExecutor
+                ),
+                environment: environment
             ),
             title: "首页",
             imageName: SymbolName.homeTab,
             selectedImageName: SymbolName.homeTabSelected
         )
 
-        let devices = makeNavigationController(
-            root: DevicesViewController(
-                viewModel: DevicesViewModel(
-                    savedDeviceStore: environment.savedDeviceStore,
+        let smart = makeNavigationController(
+            root: SmartViewController(
+                viewModel: SmartViewModel(
                     ruleStore: environment.ruleStore,
-                    recentDeviceStore: environment.recentDeviceStore,
-                    settingsStore: environment.settingsStore
+                    savedDeviceStore: environment.savedDeviceStore,
+                    scanLogStore: environment.scanLogStore,
+                    scenarioStore: environment.scenarioStore,
+                    executor: environment.scenarioExecutor
                 ),
                 environment: environment
             ),
-            title: "设备",
-            imageName: SymbolName.devicesTab,
-            selectedImageName: SymbolName.devicesTab
+            title: "智能",
+            imageName: SymbolName.smartTab,
+            selectedImageName: SymbolName.smartTab
         )
 
         let products = makeNavigationController(
@@ -93,17 +95,45 @@ final class MainTabBarController: UITabBarController {
             selectedImageName: SymbolName.profileTabSelected
         )
 
-        viewControllers = [home, devices, products, market, profile]
+        viewControllers = [home, smart, products, market, profile]
+        configureBarAppearance()
     }
 
-    /// 通知点击路由：切到设备 Tab 并打开对应设备详情。
+    /// 通知点击路由：切到首页并打开对应设备详情。
     func openDeviceDetail(deviceID: UUID) {
-        selectedIndex = 1
-        guard let navigation = viewControllers?[1] as? UINavigationController,
-              let devices = navigation.viewControllers.first as? DevicesViewController
+        selectedIndex = 0
+        guard let navigation = viewControllers?[0] as? UINavigationController,
+              let home = navigation.viewControllers.first as? HomeDashboardViewController
         else { return }
         navigation.popToRootViewController(animated: false)
-        devices.openDetail(deviceID: deviceID)
+        home.openDeviceDetail(deviceID: deviceID)
+    }
+
+    private func configureBarAppearance() {
+        let tabAppearance = UITabBarAppearance()
+        tabAppearance.configureWithOpaqueBackground()
+        tabAppearance.backgroundColor = Palette.canvas
+        tabAppearance.shadowColor = Palette.divider
+        tabBar.standardAppearance = tabAppearance
+        tabBar.scrollEdgeAppearance = tabAppearance
+        tabBar.tintColor = Palette.primaryText
+        tabBar.unselectedItemTintColor = Palette.textTertiary
+
+        let navigationAppearance = UINavigationBarAppearance()
+        navigationAppearance.configureWithTransparentBackground()
+        navigationAppearance.backgroundColor = Palette.canvas
+        navigationAppearance.shadowColor = .clear
+        navigationAppearance.titleTextAttributes = [
+            .foregroundColor: Palette.textPrimary,
+            .font: AppText.callout.font(weight: .semibold),
+        ]
+        navigationAppearance.largeTitleTextAttributes = [
+            .foregroundColor: Palette.textPrimary,
+            .font: AppText.display.font(),
+        ]
+        UINavigationBar.appearance().standardAppearance = navigationAppearance
+        UINavigationBar.appearance().compactAppearance = navigationAppearance
+        UINavigationBar.appearance().scrollEdgeAppearance = navigationAppearance
     }
 
     private func makeNavigationController(
@@ -113,7 +143,7 @@ final class MainTabBarController: UITabBarController {
         selectedImageName: String
     ) -> UINavigationController {
         let navigationController = UINavigationController(rootViewController: root)
-        navigationController.navigationBar.prefersLargeTitles = true
+        navigationController.navigationBar.prefersLargeTitles = false
         navigationController.tabBarItem = UITabBarItem(
             title: title,
             image: UIImage(systemName: imageName),

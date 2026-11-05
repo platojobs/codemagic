@@ -28,6 +28,8 @@ final class AppEnvironment {
     let pairingService: PairingServicing
     let accountExportService: AccountExportService
     let accountDeletionService: AccountDeletionService
+    let scenarioStore: ScenarioStore
+    let scenarioExecutor: ScenarioExecutor
 
     /// 启动期降级说明，非空时在「我的」页展示。
     private(set) var startupWarning: String?
@@ -123,6 +125,28 @@ final class AppEnvironment {
         self.bluetooth.readingHandler = { sample in
             ingestor.ingest(sample)
         }
+
+        scenarioStore = ScenarioStore(database: resolved.database)
+        let engine = syncEngine
+        scenarioExecutor = ScenarioExecutor(
+            dependencies: ScenarioExecutor.Dependencies(
+                bluetooth: self.bluetooth,
+                savedDeviceStore: savedDeviceStore,
+                settingsStore: settingsStore,
+                alertCoordinator: ruleAlertCoordinator,
+                syncAction: { completion in
+                    engine.sync { result in
+                        switch result {
+                        case .success(let summary):
+                            completion(.success("同步完成：推送 \(summary.pushed)，拉取 \(summary.pulled)"))
+                        case .failure(let error):
+                            completion(.failure(error))
+                        }
+                    }
+                },
+                now: { Date() }
+            )
+        )
 
         // 启动即执行 7 天保留清理；同步成功后引擎会再次清理。
         let cutoff = Date().addingTimeInterval(-7 * 24 * 60 * 60)

@@ -10,6 +10,7 @@ final class SettingsStore {
         static let appearance = "settings.appearance"
         static let deviceSort = "settings.deviceSort"
         static let backgroundCollection = "settings.backgroundCollection"
+        static let ruleAlertsMutedUntil = "settings.ruleAlertsMutedUntil"
     }
 
     /// 告警节流窗口可选项，与「我的」页一致。
@@ -73,6 +74,32 @@ final class SettingsStore {
     var backgroundCollectionEnabled: Bool {
         get { defaults.object(forKey: Key.backgroundCollection) as? Bool ?? true }
         set { defaults.set(newValue, forKey: Key.backgroundCollection) }
+    }
+
+    /// 告警静音截止时间；由场景动作写入，重启后继续生效。
+    var ruleAlertsMutedUntil: Date? {
+        get {
+            let value = defaults.double(forKey: Key.ruleAlertsMutedUntil)
+            guard value > 0 else { return nil }
+            return Date(timeIntervalSince1970: value)
+        }
+        set {
+            if let newValue {
+                defaults.set(newValue.timeIntervalSince1970, forKey: Key.ruleAlertsMutedUntil)
+            } else {
+                defaults.removeObject(forKey: Key.ruleAlertsMutedUntil)
+            }
+        }
+    }
+
+    func isRuleAlertsMuted(at date: Date = Date()) -> Bool {
+        guard let until = ruleAlertsMutedUntil else { return false }
+        return until > date
+    }
+
+    func remainingMuteMinutes(at date: Date = Date()) -> Int {
+        guard let until = ruleAlertsMutedUntil, until > date else { return 0 }
+        return max(1, Int(ceil(until.timeIntervalSince(date) / 60)))
     }
 
     /// 「我的」页展示的后台采集状态说明。

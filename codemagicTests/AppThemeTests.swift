@@ -66,36 +66,85 @@ final class AppThemeTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(colors.count, 2)
     }
 
-    /// 几何 / 配色类不得出现硬编码黑白或十六进制颜色。
-    func testChartAndThemeSourcesContainNoHardcodedColors() throws {
-        let directories = [
-            "codemagic/DesignSystem",
-            "codemagic/Modules/Devices/Views",
-        ]
-        let forbidden = [
-            ".white",
-            ".black",
+    func testPaletteExposes36SemanticColorsWithDarkVariants() {
+        XCTAssertEqual(Palette.all.count, 36, "语义色必须是 36 个")
+        let light = UITraitCollection(userInterfaceStyle: .light)
+        let dark = UITraitCollection(userInterfaceStyle: .dark)
+        var identical: [String] = []
+        for (name, color) in Palette.all {
+            let l = color.resolvedColor(with: light)
+            let d = color.resolvedColor(with: dark)
+            if l == d { identical.append(name) }
+        }
+        // onPrimary 是唯一在深浅色下都为纯白的语义色。
+        XCTAssertEqual(identical, ["onPrimary"], "除 onPrimary 外的语义色都必须有深色变体")
+    }
+
+    func testLayoutAndTypographyTokens() {
+        XCTAssertEqual(Layout.space4, 4)
+        XCTAssertEqual(Layout.pageMargin, 16)
+        XCTAssertEqual(Layout.row1, 56)
+        XCTAssertEqual(Layout.row2, 72)
+        XCTAssertEqual(Layout.row3, 88)
+        XCTAssertEqual(Radius.card, 12)
+        XCTAssertEqual(Stroke.one, 1)
+        XCTAssertEqual(Layout.headerExpanded, 96)
+        XCTAssertEqual(Layout.navBarH, 56)
+        XCTAssertEqual(AppText.allCases.count, 10, "字号阶梯必须为 10 级")
+        XCTAssertEqual(AppText.display.size, 34)
+        XCTAssertEqual(AppText.numericXL.size, 40)
+        XCTAssertTrue(AppText.numericM.isNumeric, "数值文本必须使用等宽数字令牌")
+        XCTAssertTrue(AppText.numericXL.isNumeric)
+        XCTAssertTrue(AppText.numericL.isNumeric)
+        XCTAssertEqual(Motion.d200, 0.2)
+    }
+
+    /// 全量源码不得出现硬编码颜色与字号；令牌文件本身除外。
+    func testChartAndThemeSourcesContainNoHardcodedColorsOrFontSizes() throws {
+        let rootURL = repoRoot.appendingPathComponent("codemagic")
+        let excluded: Set<String> = ["DesignTokens.swift"]
+        let forbiddenColorTokens = [
             "UIColor(white:",
             "UIColor(red:",
             "UIColor(displayP3Red:",
             "#colorLiteral",
-            "0x",
         ]
-        for directory in directories {
-            let directoryURL = repoRoot.appendingPathComponent(directory)
-            let files = try FileManager.default.contentsOfDirectory(
-                at: directoryURL,
-                includingPropertiesForKeys: nil
-            ).filter { $0.pathExtension == "swift" }
+        let forbiddenColorPatterns = [
+            #"\.white\b"#,
+            #"\.black\b"#,
+            #"UIColor\.system[A-Z]"#,
+            #"\.systemGray[0-9]?"#,
+        ]
+        let fontLiteralPatterns = [
+            #"systemFont\(ofSize:\s*[0-9]"#,
+            #"monospacedDigitSystemFont\(ofSize:\s*[0-9]"#,
+            #"\.font\s*=\s*UIFont\."#,
+            #"UIFont\.boldSystemFont"#,
+        ]
 
-            for file in files {
-                let source = try String(contentsOf: file, encoding: .utf8)
-                for token in forbidden {
-                    XCTAssertFalse(
-                        source.contains(token),
-                        "\(file.lastPathComponent) 出现硬编码颜色 \(token)"
-                    )
-                }
+        let files = try FileManager.default.subpathsOfDirectory(atPath: rootURL.path)
+            .filter { $0.hasSuffix(".swift") }
+            .map { rootURL.appendingPathComponent($0) }
+
+        for file in files where !excluded.contains(file.lastPathComponent) {
+            // 只审计表现层；Core 中 `0x` 是 GATT/协议常量，不是颜色。
+            guard ["DesignSystem", "Modules", "App"].contains(where: {
+                file.path.contains("/codemagic/\($0)/")
+            }) else { continue }
+            let source = try String(contentsOf: file, encoding: .utf8)
+            for token in forbiddenColorTokens {
+                XCTAssertFalse(
+                    source.contains(token),
+                    "\(file.lastPathComponent) 出现硬编码颜色 \(token)"
+                )
+            }
+            for pattern in forbiddenColorPatterns + fontLiteralPatterns {
+                let regex = try NSRegularExpression(pattern: pattern)
+                let range = NSRange(source.startIndex..., in: source)
+                XCTAssertNil(
+                    regex.firstMatch(in: source, range: range),
+                    "\(file.lastPathComponent) 出现硬编码颜色/字号（\(pattern)）"
+                )
             }
         }
     }

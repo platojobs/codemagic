@@ -40,7 +40,7 @@ final class RSISignalView: UIView {
     }
 
     override var intrinsicContentSize: CGSize {
-        CGSize(width: 34, height: 24)
+        CGSize(width: Layout.space32, height: Layout.icon24)
     }
 
     // MARK: - Drawing
@@ -66,7 +66,7 @@ final class RSISignalView: UIView {
             )
             let path = UIBezierPath(roundedRect: barRect, cornerRadius: barWidth / 2)
             let active = index < level
-            let color = active ? activeColor(for: level) : UIColor.systemGray4
+            let color = active ? activeColor(for: level) : Palette.border
             color.setFill()
             context.addPath(path.cgPath)
             context.fillPath()
@@ -88,10 +88,10 @@ final class RSISignalView: UIView {
 
     private func activeColor(for level: Int) -> UIColor {
         switch level {
-        case 4, 3: return AppTheme.Palette.success
-        case 2: return AppTheme.Palette.highlight
-        case 1: return AppTheme.Palette.promotion
-        default: return UIColor.systemGray4
+        case 4, 3: return Palette.success
+        case 2: return Palette.warning
+        case 1: return Palette.danger
+        default: return Palette.border
         }
     }
 

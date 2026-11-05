@@ -4,7 +4,8 @@ import UIKit
 final class ProductsViewController: UIViewController {
     private let tableView = UITableView(frame: .zero, style: .plain)
     private let emptyStateView = EmptyStateView()
-    private let loadingView = LoadingStateView()
+    private let errorStateView = ErrorStateView(height: 240)
+    private lazy var skeletonController = SkeletonController(host: view)
 
     private let viewModel: ProductsViewModel
 
@@ -38,6 +39,8 @@ final class ProductsViewController: UIViewController {
 
     private func configureTableView() {
         tableView.translatesAutoresizingMaskIntoConstraints = false
+        tableView.backgroundColor = Palette.canvas
+        tableView.separatorStyle = .none
         tableView.register(ProductCell.self, forCellReuseIdentifier: ProductCell.reuseIdentifier)
         tableView.dataSource = self
         tableView.delegate = self
@@ -58,20 +61,24 @@ final class ProductsViewController: UIViewController {
 
         switch viewModel.state {
         case .idle, .loading:
-            loadingView.configure(message: "正在拉取产品型号…")
-            tableView.backgroundView = loadingView
+            tableView.backgroundView = nil
+            // 300ms 后才出现骨架，行高与真实产品行一致（72）。
+            skeletonController.begin {
+                SkeletonView.list(rows: 6, rowHeight: Layout.row2)
+            }
 
         case .failed(let error):
-            emptyStateView.configure(
-                symbolName: SymbolName.warning,
+            skeletonController.end()
+            errorStateView.configure(
                 title: "产品数据加载失败",
-                message: "\(error.localizedDescriptionText)。Debug 请先启动本地 Go 服务，或检查 BASE_URL 配置。",
-                actionTitle: "重试",
-                action: { [weak self] in self?.viewModel.reload() }
-            )
-            tableView.backgroundView = emptyStateView
+                message: "\(error.localizedDescriptionText)。请检查网络或 BASE_URL 配置。"
+            ) { [weak self] in
+                self?.viewModel.reload()
+            }
+            tableView.backgroundView = errorStateView
 
         case .loaded(let products) where products.isEmpty:
+            skeletonController.end()
             emptyStateView.configure(
                 symbolName: SymbolName.product,
                 title: "暂无产品型号",
@@ -82,6 +89,7 @@ final class ProductsViewController: UIViewController {
             tableView.backgroundView = emptyStateView
 
         case .loaded:
+            skeletonController.end()
             tableView.backgroundView = nil
         }
 

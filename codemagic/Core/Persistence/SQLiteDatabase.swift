@@ -106,7 +106,8 @@ final class SQLiteDatabase {
                 "rules",
                 "scan_logs",
                 "recent_devices",
-                "device_info_cache"
+                "device_info_cache",
+                "scenarios"
             ]
             try performExecute("BEGIN IMMEDIATE;", [])
             do {
@@ -139,6 +140,9 @@ final class SQLiteDatabase {
         }
         if version < 5 {
             try migrateToVersion5()
+        }
+        if version < 6 {
+            try migrateToVersion6()
         }
     }
 
@@ -268,6 +272,21 @@ final class SQLiteDatabase {
         CREATE INDEX IF NOT EXISTS idx_readings_sync_state
             ON readings(sync_state, recorded_at);
         PRAGMA user_version = 5;
+        """)
+    }
+
+    /// v6：场景表。仅本机数据，刻意不建 `sync_state / updated_at` 之外的同步字段，
+    /// 也不参与 `SyncEngine` 的推拉，避免误把本机动作组合同步到云端。
+    private func migrateToVersion6() throws {
+        try executeScript("""
+        CREATE TABLE IF NOT EXISTS scenarios (
+            id TEXT PRIMARY KEY NOT NULL,
+            name TEXT NOT NULL,
+            actions TEXT NOT NULL,
+            created_at REAL NOT NULL,
+            updated_at REAL NOT NULL
+        );
+        PRAGMA user_version = 6;
         """)
     }
 

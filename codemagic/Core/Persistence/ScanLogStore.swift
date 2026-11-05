@@ -20,6 +20,18 @@ final class ScanLogStore {
         return rows.compactMap(Self.makeEntry)
     }
 
+    /// 今日真实触发的告警条数（规则 + warning），用于首页汇总行。
+    func countRuleAlerts(since startOfDay: Date) throws -> Int {
+        let rows = try database.query(
+            """
+            SELECT COUNT(*) AS total FROM scan_logs
+            WHERE deleted_at IS NULL AND category = ? AND level = ? AND occurred_at >= ?;
+            """,
+            [.text(ScanLogCategory.rule.rawValue), .text(ScanLogLevel.warning.rawValue), .double(startOfDay.timeIntervalSince1970)]
+        )
+        return Int(rows.first?.integer("total") ?? 0)
+    }
+
     func count() throws -> Int {
         let rows = try database.query(
             "SELECT COUNT(*) AS total FROM scan_logs WHERE deleted_at IS NULL;"

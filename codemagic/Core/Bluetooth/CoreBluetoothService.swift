@@ -20,6 +20,8 @@ protocol BluetoothServicing: AnyObject {
     func stopReading(peripheralID: UUID)
     /// 当前已连接外设数量，用于「我的」页展示后台采集状态。
     var connectedPeripheralCount: Int { get }
+    /// 指定外设是否已连接；场景执行前用于判断「重复连接 / 未连接」。
+    func isConnected(peripheralID: UUID) -> Bool
     /// 关闭后台采集或进入后台时断开全部连接，不再保持 BLE 链路。
     func disconnectAll()
 }
@@ -133,6 +135,10 @@ final class CoreBluetoothService: NSObject, BluetoothServicing {
             count += 1
         }
         return count
+    }
+
+    func isConnected(peripheralID: UUID) -> Bool {
+        peripheral(for: peripheralID)?.state == .connected
     }
 
     /// 后台采集关闭/进入后台：断开所有已知连接并停止读取。

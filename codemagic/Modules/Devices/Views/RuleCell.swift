@@ -7,6 +7,7 @@ final class RuleCell: UITableViewCell {
     private let nameLabel = AppTheme.makeLabel(style: .body, color: AppTheme.Palette.primaryText)
     private let descriptionLabel = AppTheme.makeLabel(style: .caption1, color: AppTheme.Palette.secondaryText)
     private let textStack = UIStackView()
+    private let container = UIView()
     private let toggle = UISwitch()
 
     private var onToggle: (() -> Void)?
@@ -14,6 +15,7 @@ final class RuleCell: UITableViewCell {
     override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
         super.init(style: style, reuseIdentifier: reuseIdentifier)
         selectionStyle = .none
+        backgroundColor = .clear
         configureHierarchy()
     }
 
@@ -44,29 +46,34 @@ final class RuleCell: UITableViewCell {
         toggle.translatesAutoresizingMaskIntoConstraints = false
         toggle.addTarget(self, action: #selector(handleToggle), for: .valueChanged)
 
-        contentView.addSubview(textStack)
-        contentView.addSubview(toggle)
+        container.styleAsCardSurface()
+        container.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(container)
+        container.addSubview(textStack)
+        container.addSubview(toggle)
 
         NSLayoutConstraint.activate([
-            textStack.leadingAnchor.constraint(
-                equalTo: contentView.leadingAnchor,
-                constant: AppTheme.Metrics.contentMargins
-            ),
-            textStack.topAnchor.constraint(equalTo: contentView.topAnchor, constant: AppTheme.Spacing.medium),
-            textStack.bottomAnchor.constraint(
-                equalTo: contentView.bottomAnchor,
-                constant: -AppTheme.Spacing.medium
-            ),
+            container.topAnchor.constraint(equalTo: contentView.topAnchor, constant: Layout.space4),
+            container.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: Layout.pageMargin),
+            container.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -Layout.pageMargin),
+            container.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -Layout.space4),
+            textStack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: Layout.cardPadding),
+            textStack.topAnchor.constraint(equalTo: container.topAnchor, constant: Layout.space12),
+            textStack.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -Layout.space12),
             textStack.trailingAnchor.constraint(
                 lessThanOrEqualTo: toggle.leadingAnchor,
-                constant: -AppTheme.Spacing.small
+                constant: -Layout.space12
             ),
-
             toggle.trailingAnchor.constraint(
-                equalTo: contentView.trailingAnchor,
-                constant: -AppTheme.Metrics.contentMargins
+                equalTo: container.trailingAnchor,
+                constant: -Layout.cardPadding
             ),
-            toggle.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
+            toggle.centerYAnchor.constraint(equalTo: container.centerYAnchor),
         ])
+    }
+
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        container.refreshDynamicLayerColors()
     }
 }
