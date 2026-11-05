@@ -22,7 +22,7 @@
 | 自绘 RSSI + 自绘折线图 + 代码组装空状态 | 已实现（读数图表纯 `draw(_:)`，无第三方图表库） |
 | 单元测试 | **122 个用例，0 失败**（`** TEST SUCCEEDED **`，2026-11-05，Xcode 27.2 / iPhone 17 模拟器） |
 | 模拟器构建 | **通过**（`xcodebuild ... build`，`** BUILD SUCCEEDED **`） |
-| CI | **GitHub Actions**：macOS runner 上并行 `build-test`（122 单测）与 `e2e-contract`（106 项）；v0.4.0 的 run 链接在发布后补充（v0.3.6 运行 [41913477079](https://github.com/platojobs/codemagic/actions/runs/41913477079)）；`codemagic.yaml` 作为可选替代保留但未验证 |
+| CI | **GitHub Actions 已实际运行 success**：v0.4.0 run [41941929495](https://github.com/platojobs/codemagic/actions/runs/41941929495)（macos-15 + Xcode 16.4），并行 `build-test`（122 单测）与 `e2e-contract`（106 项，0 SKIP）；`codemagic.yaml` 作为可选替代保留但未验证 |
 | 真机 BLE / 签名 | **未验证**：本机无真机与 Apple 开发者账号；读数采集与图表需真机 / 可穿戴设备验证（见第 9 节） |
 | 真实后端同步 | **契约已联调**：`scripts/e2e-contract.sh` 对本地 `PJGoIoT` main `7acab36`（`STORE=fixture`）跑 **106 项断言，全部 PASS**（含读数推送/倒序/summary/重复 id/NaN 400）；App 内同步 UI 仍需真机手动验证 |
 
@@ -283,12 +283,13 @@ cd /path/to/codemagic
 - Job `build-test`：`actions/checkout@v7` → 选择 Xcode（优先 `Xcode_16.4`）并打印 `xcodebuild -version` / 可用模拟器 → `xcodebuild build`（`generic/platform=iOS Simulator`）→ `xcodebuild test`（从 `xcrun simctl list devices available` 动态取首个 iPhone 模拟器 UDID）→ `actions/upload-artifact@v7` 上传 `*.xcresult`（`if: always()`）。
 - Job `e2e-contract`（与 build 并行）：`actions/checkout@v7` 拉本仓库 + `platojobs/PJGoIoT`（`repository` + `path: PJGoIoT`）→ `actions/setup-go@v7`（`go-version-file: PJGoIoT/go.mod`）→ `PJGOIOT_DIR=${{ github.workspace }}/PJGoIoT bash scripts/e2e-contract.sh`；失败时 `actions/upload-artifact@v7` 上传 `.build/e2e/` 日志。失败即红，无 `|| true`。
 - 两个 job 均使用 `CODE_SIGNING_ALLOWED=NO`，不需要证书与描述文件。
-- 当前真实运行：[run 41913477079](https://github.com/platojobs/codemagic/actions/runs/41913477079)（tag `v0.3.6`，commit `2e555f5`），**success**（Xcode 16.4）：
-  - `Build & Test (iOS Simulator)` 249s，`** BUILD SUCCEEDED **` / `Executed 81 tests, with 0 failures` / `** TEST SUCCEEDED **`，`xcresult-41913477079.zip` 已上传；
-  - `E2E contract (PJGoIoT fixture)` 43s，`通过：87 项，失败：0 项` / `结论：PASS`；
-  - 同一提交同时推 `main` 与 `tag` 时，`concurrency: ios-${sha}` 让后到的 tag 运行取消 main 运行，只保留一轮真实结果。
+- 当前真实运行：[run 41941929495](https://github.com/platojobs/codemagic/actions/runs/41941929495)（`v0.4.0` 代码提交 `4926edb`，push `main`），**success**（Xcode 16.4）：
+  - `Build & Test (iOS Simulator)` 3m47s，`** BUILD SUCCEEDED **` / `Executed 122 tests, with 0 failures` / `** TEST SUCCEEDED **`，`xcresult-41941929495.zip` 已上传；
+  - `E2E contract (PJGoIoT fixture)` 56s，`通过：106 项，跳过：0 项，失败：0 项` / `结论：PASS`（第 7 节 readings 19 项全部真实执行，无 SKIP）；
+  - 同 sha 的 main 与 tag 运行按 `concurrency: ios-${sha}` 去重，只保留一轮真实结果。
   - 全部 action 已升到 `checkout@v7` / `upload-artifact@v7` / `setup-go@v7`，**Node 20 弃用告警已消除**（仅剩 macOS arm64 队列容量提示）。
-- 失败与修复：首次 workflow 因 `run: |` 块内嵌的多行 Python 未随块缩进，YAML 解析失败（run 无任何 job 直接 failure）；改为单行 `simctl + grep/sed` 提取模拟器 UDID 后通过。
+- 上一轮记录：[run 41913477079](https://github.com/platojobs/codemagic/actions/runs/41913477079)（tag `v0.3.6`，81 单测 / 87 项 E2E，success）。
+- 失败与修复：首次 workflow 因 `run: |` 块内嵌的多行 Python 未随块缩进，YAML 解析失败（run 无任何 job 直接 failure）；改为单行 `simctl + grep/sed` 提取模拟器 UDID 后通过。本轮新增读数断言后，本地 e2e 因 ~100 次请求触发服务端限流（429），改为 fixture 启动时 `RATE_LIMIT_PER_MINUTE=0` 后稳定通过。
 - **计费**：macOS runner 按分钟计费且显著高于 Linux，因此该 workflow 只在 `main` 与 tag 触发、不跑 PR，并用 `concurrency` 按 sha 去重；单个提交一次运行约消耗 5–6 个 macOS 分钟。
 
 ### 8.2 Codemagic（可选替代，未验证）

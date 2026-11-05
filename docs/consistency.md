@@ -212,7 +212,7 @@ iOS 端不再存在“历史端点”调用；唯一保留的旧路径 `/api/v1/
 
 当前共 **106 项断言全部通过**（v0.4.0 联调记录，后端 `PJGoIoT` main `7acab36`，尚未打 v0.4.0 tag）。
 
-运行记录见 `README.md` 第 4.2 节；该脚本已接入 GitHub Actions `ios.yml` 的 `e2e-contract` job（macOS runner，与 build 并行）。若 CI checkout 到的后端尚未包含 readings，第 7 节会输出 `[SKIP]`（能力门控，不计通过、不伪造 PASS），其余断言照常执行。
+运行记录见 `README.md` 第 4.2 节；该脚本已接入 GitHub Actions `ios.yml` 的 `e2e-contract` job（macOS runner，与 build 并行）。v0.4.0 实际 CI 运行 [41941929495](https://github.com/platojobs/codemagic/actions/runs/41941929495) 中 `e2e-contract` 56s、106 项全 PASS（0 SKIP），`build-test` 3m47s、122 单测全绿。若 CI checkout 到的后端尚未包含 readings，第 7 节会输出 `[SKIP]`（能力门控，不计通过、不伪造 PASS），其余断言照常执行。
 
 ### 3.6 市场筛选维度（真实字段，不造假分类）
 
