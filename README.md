@@ -25,7 +25,7 @@
 | 首启引导 | **已实现**：3 步（蓝牙 / 通知 / 后台采集），仅首次或未走完时出现，可跳过；步骤与完成标记持久化到 `UserDefaults` |
 | 单元测试 | **236 个用例，0 失败**（`** TEST SUCCEEDED **`，2026-11-05，Xcode 27.2 / iPhone 17 模拟器；含 410 全量重同步 / pending 保留 / 二次从 0 / HTTP fake transport、503 TIMEOUT 退避、错误码映射表、changes/readings/export 分页上限、36 语义色与深浅变体、硬编码色值/字号审计、场景动作、迁移、刷新退避、通知节流、CSV 分页、接管码、注销、后台限流、首启与术语审计） |
 | 模拟器构建 | **通过**（`xcodebuild ... build`，`** BUILD SUCCEEDED **`） |
-| CI | **GitHub Actions 已实际运行 success**：v0.9.0 run [41973731269](https://github.com/platojobs/codemagic/actions/runs/41973731269)（success，macos-15 + Xcode 16.4，提交 `08f88d6`），并行 `Build & Test`（226 单测）与 `E2E contract`（151 项，0 SKIP）；v0.8.0 run [41967922243](https://github.com/platojobs/codemagic/actions/runs/41967922243) 为上一基线；`codemagic.yaml` 作为可选替代保留但未验证 |
+| CI | **GitHub Actions 已实际运行 success**：v0.10.0 tag run [41979289081](https://github.com/platojobs/codemagic/actions/runs/41979289081)（success，提交 `74f14c4`），并行 `Build & Test`（**236 单测**）与 `E2E contract`（**151 项，0 SKIP**）；同 sha 的 `main` run [41979270921](https://github.com/platojobs/codemagic/actions/runs/41979270921) 经重跑同样 success；v0.9.0 run [41973731269](https://github.com/platojobs/codemagic/actions/runs/41973731269) 为上一基线；`codemagic.yaml` 作为可选替代保留但未验证 |
 | 真机 BLE / 签名 | **未验证**：本机无真机与 Apple 开发者账号；读数采集与图表需真机 / 可穿戴设备验证（见第 9 节） |
 | 真实后端同步 | **契约已联调**：`scripts/e2e-contract.sh` 对本地 `PJGoIoT` **v0.9.0**（`STORE=fixture`）跑 **151 项断言，全部 PASS**；另用 `scripts/e2e-postgres.sh` 对真实 Postgres 跑通 410 分支 / series / metrics / export / 注销（输出见 [docs/e2e-postgres.md](docs/e2e-postgres.md)）；App 内同步 UI 仍需真机手动验证 |
 | 上架材料 | **已补齐**：`docs/store-listing.md`、`docs/privacy-policy.md`、`docs/app-privacy.md` 与 `codemagic/Resources/PrivacyInfo.xcprivacy`（未使用能力不声明） |
@@ -384,12 +384,13 @@ HTTP/1.1 410 Gone
 - Job `build-test`：`actions/checkout@v7` → 选择 Xcode（优先 `Xcode_16.4`）并打印 `xcodebuild -version` / 可用模拟器 → `xcodebuild build`（`generic/platform=iOS Simulator`）→ `xcodebuild test`（从 `xcrun simctl list devices available` 动态取首个 iPhone 模拟器 UDID）→ `actions/upload-artifact@v7` 上传 `*.xcresult`（`if: always()`）。
 - Job `e2e-contract`（与 build 并行）：`actions/checkout@v7` 拉本仓库 + `platojobs/PJGoIoT`（`repository` + `path: PJGoIoT`）→ `actions/setup-go@v7`（`go-version-file: PJGoIoT/go.mod`）→ `PJGOIOT_DIR=${{ github.workspace }}/PJGoIoT bash scripts/e2e-contract.sh`；失败时 `actions/upload-artifact@v7` 上传 `.build/e2e/` 日志。失败即红，无 `|| true`。
 - 两个 job 均使用 `CODE_SIGNING_ALLOWED=NO`，不需要证书与描述文件。
-- 当前真实运行：[run 41967922243](https://github.com/platojobs/codemagic/actions/runs/41967922243)（`v0.8.0` 代码提交 `b817842`，push `main`），**success**（Xcode 16.4）：
-  - `Build & Test (iOS Simulator)` **success**，`** BUILD SUCCEEDED **` / `Executed 221 tests, with 0 failures` / `** TEST SUCCEEDED **`，`xcresult-41967922243.zip` 已上传；
-  - `E2E contract (PJGoIoT fixture)` **success**，`通过：151 项，跳过：0 项，失败：0 项` / `结论：PASS`（本轮无后端契约变更）；
-  - 同 sha 的 main 与 tag 运行按 `concurrency: ios-${sha}` 去重，只保留一轮真实结果。
+- 当前真实运行：[run 41979289081](https://github.com/platojobs/codemagic/actions/runs/41979289081)（`v0.10.0` 提交 `74f14c4`，tag push），**success**（Xcode 16.4）：
+  - `Build & Test (iOS Simulator)` **success**，`** BUILD SUCCEEDED **` / `Executed 236 tests, with 0 failures` / `** TEST SUCCEEDED **`，`xcresult-41979289081.zip` 已上传；
+  - `E2E contract (PJGoIoT fixture)` **success**，`通过：151 项，跳过：0 项，失败：0 项` / `结论：PASS`（后端 `PJGoIoT` v0.9.0 / openapi 0.7.0）；
+  - 同 sha 的 `main` 运行先被 tag 运行按 `concurrency: ios-${sha}` 取消，随后 **重跑** [run 41979270921](https://github.com/platojobs/codemagic/actions/runs/41979270921) 同样 **success**；两个 job 均绿。
+  - 真实 Postgres e2e（`scripts/e2e-postgres.sh`）**不进 CI**：GitHub Actions 的 macOS runner 无 Docker；本机运行 PASS，输出见 `docs/e2e-postgres.md`。
   - 全部 action 已升到 `checkout@v7` / `upload-artifact@v7` / `setup-go@v7`，**Node 20 弃用告警已消除**（仅剩 macOS arm64 队列容量提示）。
-- 上一轮记录：[run 41961761756](https://github.com/platojobs/codemagic/actions/runs/41961761756)（`v0.7.0` 提交 `bf6a9f2`，207 单测 / 151 项 E2E，success）；更早：[run 41956298244](https://github.com/platojobs/codemagic/actions/runs/41956298244)（`v0.6.0`，188 单测 / 123 项 E2E，success）。
+- 上一轮记录：[run 41973731269](https://github.com/platojobs/codemagic/actions/runs/41973731269)（`v0.9.0` 提交 `08f88d6`，226 单测 / 151 项 E2E，success）；更早：[run 41967922243](https://github.com/platojobs/codemagic/actions/runs/41967922243)（`v0.8.0`，221 单测 / 151 项 E2E，success）。
 - locale 修复记录：v0.6.0 首次 run 41955082837 在英文 CI locale 下因测试用中文别名参与 `localizedCaseInsensitiveCompare` 产生乱序；v0.7.0 新增的倒计时 / 排序断言全部显式 `Locale(identifier: "en_US_POSIX")` 或 ASCII 别名，run 41961761756 一次通过。
 - 失败与修复：首次 workflow 因 `run: |` 块内嵌的多行 Python 未随块缩进，YAML 解析失败（run 无任何 job 直接 failure）；改为单行 `simctl + grep/sed` 提取模拟器 UDID 后通过。v0.4.0 新增读数断言后，本地 e2e 因 ~100 次请求触发服务端限流（429），改为 fixture 启动时 `RATE_LIMIT_PER_MINUTE=0` 后稳定通过。
 - **计费**：macOS runner 按分钟计费且显著高于 Linux，因此该 workflow 只在 `main` 与 tag 触发、不跑 PR，并用 `concurrency` 按 sha 去重；单个提交一次运行约消耗 5–6 个 macOS 分钟。
