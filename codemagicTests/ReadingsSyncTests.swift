@@ -263,6 +263,7 @@ final class ReadingsSyncTests: XCTestCase {
             readingsService: UnavailableReadingsAPI()
         )
         viewModel.start()
+        viewModel.setVisible(true)
 
         XCTAssertEqual(
             viewModel.readings.metrics,

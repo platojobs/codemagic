@@ -11,6 +11,11 @@ final class DevicesViewController: UIViewController {
 
     private let tableView = UITableView(frame: .zero, style: .insetGrouped)
     private let addRuleButton = UIBarButtonItem()
+    private let filterBar = UIStackView()
+    private let sortButton = AppTheme.makePillButton(title: "排序", symbolName: "arrow.up.arrow.down")
+    private let groupButton = AppTheme.makePillButton(title: "分组", symbolName: "line.3.horizontal.decrease.circle")
+    private let searchController = UISearchController(searchResultsController: nil)
+    private var filterHeaderHeight: CGFloat = 0
 
     // MARK: - Dependencies
 
@@ -37,6 +42,7 @@ final class DevicesViewController: UIViewController {
         title = "设备"
         view.backgroundColor = AppTheme.Palette.background
         configureTableView()
+        configureSearchAndFilter()
 
         addRuleButton.target = self
         addRuleButton.action = #selector(handleAddRule)
@@ -44,9 +50,15 @@ final class DevicesViewController: UIViewController {
         navigationItem.rightBarButtonItem = addRuleButton
 
         viewModel.onChange = { [weak self] in
+            self?.refreshFilterBar()
             self?.tableView.reloadData()
         }
         viewModel.reload()
+    }
+
+    override func viewWillLayoutSubviews() {
+        super.viewWillLayoutSubviews()
+        updateFilterHeaderHeight()
     }
 
     override func viewWillAppear(_ animated: Bool) {
@@ -73,6 +85,113 @@ final class DevicesViewController: UIViewController {
             tableView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             tableView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
+    }
+
+    private func configureSearchAndFilter() {
+        searchController.searchResultsUpdater = self
+        searchController.obscuresBackgroundDuringPresentation = false
+        searchController.searchBar.placeholder = "搜索别名、广播名、型号或标识符"
+        searchController.searchBar.autocapitalizationType = .none
+        navigationItem.searchController = searchController
+        navigationItem.hidesSearchBarWhenScrolling = false
+        definesPresentationContext = true
+
+        filterBar.axis = .horizontal
+        filterBar.spacing = AppTheme.Spacing.small
+        filterBar.alignment = .center
+        filterBar.distribution = .fill
+        filterBar.isLayoutMarginsRelativeArrangement = true
+        filterBar.layoutMargins = UIEdgeInsets(
+            top: AppTheme.Spacing.small,
+            left: AppTheme.Spacing.large,
+            bottom: AppTheme.Spacing.small,
+            right: AppTheme.Spacing.large
+        )
+        sortButton.addTarget(self, action: #selector(handleSort), for: .touchUpInside)
+        groupButton.addTarget(self, action: #selector(handleGroup), for: .touchUpInside)
+        filterBar.addArrangedSubview(sortButton)
+        filterBar.addArrangedSubview(groupButton)
+        filterBar.addArrangedSubview(UIView())
+
+        let wrapper = UIView()
+        wrapper.addSubview(filterBar)
+        filterBar.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            filterBar.topAnchor.constraint(equalTo: wrapper.topAnchor),
+            filterBar.leadingAnchor.constraint(equalTo: wrapper.leadingAnchor),
+            filterBar.trailingAnchor.constraint(equalTo: wrapper.trailingAnchor),
+            filterBar.bottomAnchor.constraint(equalTo: wrapper.bottomAnchor),
+        ])
+        wrapper.frame = CGRect(x: 0, y: 0, width: 1, height: 44)
+        tableView.tableHeaderView = wrapper
+        refreshFilterBar()
+    }
+
+    private func refreshFilterBar() {
+        sortButton.configuration?.title = "排序：\(viewModel.sort.title)"
+        groupButton.configuration?.title = "分组：\(viewModel.groupFilter ?? "全部")"
+        groupButton.isHidden = viewModel.availableGroups.isEmpty
+        updateFilterHeaderHeight()
+    }
+
+    private func updateFilterHeaderHeight() {
+        guard let header = tableView.tableHeaderView else { return }
+        let width = max(tableView.bounds.width, view.bounds.width, 1)
+        header.frame = CGRect(x: 0, y: 0, width: width, height: 0)
+        let size = header.systemLayoutSizeFitting(
+            CGSize(width: width, height: UIView.layoutFittingCompressedSize.height),
+            withHorizontalFittingPriority: .required,
+            verticalFittingPriority: .fittingSizeLevel
+        )
+        let height = max(size.height, 44)
+        header.frame.size.height = height
+        guard abs(height - filterHeaderHeight) > 0.5 else { return }
+        filterHeaderHeight = height
+        tableView.tableHeaderView = header
+    }
+
+    @objc private func handleSort() {
+        let sheet = UIAlertController(title: "排序方式", message: nil, preferredStyle: .actionSheet)
+        for option in DeviceSort.allCases {
+            let selected = option == viewModel.sort
+            sheet.addAction(UIAlertAction(
+                title: selected ? "✓ \(option.title)" : option.title,
+                style: .default
+            ) { [weak self] _ in
+                self?.viewModel.updateSort(option)
+            })
+        }
+        sheet.addAction(UIAlertAction(title: "取消", style: .cancel))
+        presentSheet(sheet, source: sortButton)
+    }
+
+    @objc private func handleGroup() {
+        let sheet = UIAlertController(title: "按分组筛选", message: nil, preferredStyle: .actionSheet)
+        sheet.addAction(UIAlertAction(
+            title: viewModel.groupFilter == nil ? "✓ 全部" : "全部",
+            style: .default
+        ) { [weak self] _ in
+            self?.viewModel.updateGroupFilter(nil)
+        })
+        for group in viewModel.availableGroups {
+            let selected = group == viewModel.groupFilter
+            sheet.addAction(UIAlertAction(
+                title: selected ? "✓ \(group)" : group,
+                style: .default
+            ) { [weak self] _ in
+                self?.viewModel.updateGroupFilter(group)
+            })
+        }
+        sheet.addAction(UIAlertAction(title: "取消", style: .cancel))
+        presentSheet(sheet, source: groupButton)
+    }
+
+    private func presentSheet(_ sheet: UIAlertController, source: UIView) {
+        if let popover = sheet.popoverPresentationController {
+            popover.sourceView = source
+            popover.sourceRect = source.bounds
+        }
+        present(sheet, animated: true)
     }
 
     // MARK: - Actions
@@ -121,6 +240,15 @@ final class DevicesViewController: UIViewController {
         present(alert, animated: true)
     }
 
+    /// 通知点击入口：按设备 ID 打开详情；不存在时静默返回列表。
+    func openDetail(deviceID: UUID) {
+        viewModel.reload()
+        let device = viewModel.device(id: deviceID)
+            ?? (try? environment.savedDeviceStore.fetchAll())?.first { $0.id == deviceID }
+        guard let device else { return }
+        openDetail(for: device)
+    }
+
     private func openDetail(for device: SavedDevice) {
         let detailViewModel = DeviceDetailViewModel(
             device: device,
@@ -148,7 +276,7 @@ extension DevicesViewController: UITableViewDataSource {
         guard let section = Section(rawValue: section) else { return 0 }
         switch section {
         case .devices:
-            return max(viewModel.devices.count, 1)
+            return max(viewModel.filteredDevices.count, 1)
         case .rules:
             return max(viewModel.rules.count, 1)
         }
@@ -158,6 +286,9 @@ extension DevicesViewController: UITableViewDataSource {
         guard let section = Section(rawValue: section) else { return nil }
         switch section {
         case .devices:
+            if viewModel.hasActiveFilter {
+                return "已保存设备（\(viewModel.filteredDevices.count) / \(viewModel.devices.count)）"
+            }
             return "已保存设备（\(viewModel.devices.count)）"
         case .rules:
             return "本地规则（\(viewModel.rules.count)）"
@@ -169,10 +300,11 @@ extension DevicesViewController: UITableViewDataSource {
 
         switch section {
         case .devices:
-            guard !viewModel.devices.isEmpty else {
+            let devices = viewModel.filteredDevices
+            guard !devices.isEmpty else {
                 return makePlaceholderCell(
-                    text: "还没有保存的设备，可在首页扫描后保存。",
-                    symbol: SymbolName.device
+                    text: viewModel.emptyStateText,
+                    symbol: viewModel.emptyStateSymbol
                 )
             }
             guard let cell = tableView.dequeueReusableCell(
@@ -181,7 +313,7 @@ extension DevicesViewController: UITableViewDataSource {
             ) as? SavedDeviceCell else {
                 return UITableViewCell()
             }
-            cell.configure(device: viewModel.devices[indexPath.row])
+            cell.configure(device: devices[indexPath.row])
             return cell
 
         case .rules:
@@ -219,14 +351,23 @@ extension DevicesViewController: UITableViewDataSource {
     }
 }
 
+// MARK: - UISearchResultsUpdating
+
+extension DevicesViewController: UISearchResultsUpdating {
+    func updateSearchResults(for searchController: UISearchController) {
+        viewModel.updateSearch(searchController.searchBar.text ?? "")
+    }
+}
+
 // MARK: - UITableViewDelegate
 
 extension DevicesViewController: UITableViewDelegate {
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
+        let devices = viewModel.filteredDevices
         guard indexPath.section == Section.devices.rawValue,
-              !viewModel.devices.isEmpty else { return }
-        let device = viewModel.devices[indexPath.row]
+              devices.indices.contains(indexPath.row) else { return }
+        let device = devices[indexPath.row]
         // 跨平台拉回的设备没有本机 CoreBluetooth 标识，禁用连接入口。
         guard device.isConnectable else { return }
         openDetail(for: device)
@@ -238,11 +379,12 @@ extension DevicesViewController: UITableViewDelegate {
     ) -> UISwipeActionsConfiguration? {
         guard let section = Section(rawValue: indexPath.section) else { return nil }
 
+        let devices = viewModel.filteredDevices
         let deleteAction = UIContextualAction(style: .destructive, title: "删除") { [weak self] _, _, completion in
             guard let self else { return }
             switch section {
-            case .devices where !self.viewModel.devices.isEmpty:
-                self.confirmDeleteDevice(self.viewModel.devices[indexPath.row])
+            case .devices where devices.indices.contains(indexPath.row):
+                self.confirmDeleteDevice(devices[indexPath.row])
             case .rules where !self.viewModel.rules.isEmpty:
                 self.viewModel.deleteRule(id: self.viewModel.rules[indexPath.row].id)
             default:
@@ -252,16 +394,16 @@ extension DevicesViewController: UITableViewDelegate {
         }
 
         let editAction = UIContextualAction(style: .normal, title: "编辑") { [weak self] _, _, completion in
-            guard let self, section == .devices, !self.viewModel.devices.isEmpty else {
+            guard let self, section == .devices, devices.indices.contains(indexPath.row) else {
                 completion(false)
                 return
             }
-            self.presentEditAlert(for: self.viewModel.devices[indexPath.row])
+            self.presentEditAlert(for: devices[indexPath.row])
             completion(true)
         }
 
         switch section {
-        case .devices where !viewModel.devices.isEmpty:
+        case .devices where !devices.isEmpty:
             return UISwipeActionsConfiguration(actions: [deleteAction, editAction])
         case .rules where !viewModel.rules.isEmpty:
             return UISwipeActionsConfiguration(actions: [deleteAction])

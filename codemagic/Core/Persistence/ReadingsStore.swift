@@ -131,6 +131,15 @@ final class ReadingsStore {
         return Int(rows.first?.integer("total") ?? 0)
     }
 
+    /// 该设备尚未同步（pending / failed）的读数条数；用于判断服务端清单为空是否只是还没上传。
+    func pendingCount(deviceID: UUID) throws -> Int {
+        let total = try database.query(
+            "SELECT COUNT(*) AS total FROM readings WHERE device_id = ? AND sync_state != ?;",
+            [.text(deviceID.uuidString), .text(SyncState.synced.rawValue)]
+        ).first?.integer("total") ?? 0
+        return Int(total)
+    }
+
     /// 待上传读数，按记录时间升序；`limit` 为 nil 时取全部，由同步引擎分批。
     func fetchPending(limit: Int? = nil) throws -> [DeviceReading] {
         let sql = limit == nil

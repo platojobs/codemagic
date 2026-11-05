@@ -1,11 +1,13 @@
 import Foundation
+import UserNotifications
 
-/// 「我的」视图模型：蓝牙权限自检、本地扫描日志、基础设置与同步状态。
+/// 「我的」视图模型：蓝牙权限自检、本地扫描日志、基础设置、通知授权与同步状态。
 final class ProfileViewModel {
     private(set) var authorization: BluetoothAuthorization = .unknown
     private(set) var bluetoothState: BluetoothState = .unknown
     private(set) var logCount: Int = 0
     private(set) var syncStatus = SyncEngine.Status()
+    private(set) var notificationAuthorization: UNAuthorizationStatus = .notDetermined
 
     let startupWarning: String?
     let baseURLText: String
@@ -16,6 +18,7 @@ final class ProfileViewModel {
     private let scanLogStore: ScanLogStore
     private let settingsStore: SettingsStore
     private let syncEngine: SyncEngine
+    private let notifications: LocalNotificationServing
 
     init(
         bluetooth: BluetoothServicing,
@@ -23,12 +26,14 @@ final class ProfileViewModel {
         settingsStore: SettingsStore,
         syncEngine: SyncEngine,
         baseURLText: String,
-        startupWarning: String?
+        startupWarning: String?,
+        notifications: LocalNotificationServing = UserNotificationService.shared
     ) {
         self.bluetooth = bluetooth
         self.scanLogStore = scanLogStore
         self.settingsStore = settingsStore
         self.syncEngine = syncEngine
+        self.notifications = notifications
         self.baseURLText = baseURLText
         self.startupWarning = startupWarning
     }
@@ -58,6 +63,11 @@ final class ProfileViewModel {
         bluetoothState = bluetooth.state
         logCount = (try? scanLogStore.count()) ?? 0
         syncStatus = syncEngine.status
+        notifications.authorizationStatus { [weak self] status in
+            guard let self else { return }
+            self.notificationAuthorization = status
+            self.onChange?()
+        }
         onChange?()
     }
 
@@ -142,6 +152,82 @@ final class ProfileViewModel {
             onChange?()
         }
     }
+
+    // MARK: - Alerts
+
+    /// 真实开关：关闭后规则命中只写扫描日志，不再请求授权或发通知。
+    var ruleAlertsEnabled: Bool {
+        get { settingsStore.ruleAlertsEnabled }
+        set {
+            settingsStore.ruleAlertsEnabled = newValue
+            if newValue {
+                notifications.requestAuthorizationIfNeeded { [weak self] granted in
+                    guard let self else { return }
+                    self.notifications.authorizationStatus { status in
+                        self.notificationAuthorization = status
+                        self.onChange?()
+                    }
+                    if !granted {
+                        self.notificationAuthorization = .denied
+                        self.onChange?()
+                    }
+                }
+            }
+            onChange?()
+        }
+    }
+
+    var ruleAlertThrottleOptions: [Int] { SettingsStore.ruleAlertThrottleOptions }
+
+    var ruleAlertThrottleMinutes: Int {
+        get { settingsStore.ruleAlertThrottleMinutes }
+        set {
+            settingsStore.ruleAlertThrottleMinutes = newValue
+            onChange?()
+        }
+    }
+
+    var ruleAlertThrottleText: String { "\(ruleAlertThrottleMinutes) 分钟" }
+
+    var notificationAuthorizationText: String {
+        switch notificationAuthorization {
+        case .authorized: return "已允许"
+        case .denied: return "已拒绝"
+        case .provisional: return "临时允许"
+        case .ephemeral: return "临时授权"
+        case .notDetermined: return "尚未询问"
+        @unknown default: return "未知"
+        }
+    }
+
+    /// 拒绝后给出系统设置入口提示；未询问时说明首次命中才会弹窗。
+    var notificationGuidance: String {
+        if !ruleAlertsEnabled { return "阈值告警通知已关闭，规则命中仍会写入本地扫描日志。" }
+        switch notificationAuthorization {
+        case .denied:
+            return "通知权限被拒绝，阈值告警不会弹出。请前往系统设置开启通知后返回本页。"
+        case .notDetermined:
+            return "首次触发规则命中时会请求通知权限。"
+        default:
+            return "规则命中时发送本地通知；同一设备同一规则在节流窗口内只提醒一次，恢复时发送「已恢复」。"
+        }
+    }
+
+    var needsNotificationSettings: Bool {
+        ruleAlertsEnabled && notificationAuthorization == .denied
+    }
+
+    // MARK: - Appearance
+
+    var appearance: AppAppearance {
+        get { settingsStore.appearance }
+        set {
+            settingsStore.appearance = newValue
+            onChange?()
+        }
+    }
+
+    var appearanceText: String { settingsStore.appearance.title }
 
     // MARK: - Logs
 

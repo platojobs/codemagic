@@ -12,6 +12,7 @@ final class DeviceDetailViewController: UIViewController {
             rangeTitle: String
         )
         case metricPicker
+        case export
         case emptyState
     }
 
@@ -44,6 +45,7 @@ final class DeviceDetailViewController: UIViewController {
     // MARK: - Dependencies
 
     private let viewModel: DeviceDetailViewModel
+    private var exportProgressAlert: UIAlertController?
 
     // MARK: - Init
 
@@ -72,11 +74,41 @@ final class DeviceDetailViewController: UIViewController {
         }
         reloadContent()
         viewModel.start()
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleForeground),
+            name: UIApplication.willEnterForegroundNotification,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleBackground),
+            name: UIApplication.didEnterBackgroundNotification,
+            object: nil
+        )
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        // 详情页可见才允许远端合并刷新；不可见时只做本地重绘。
+        viewModel.setVisible(true)
     }
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
+        viewModel.setVisible(false)
         viewModel.teardown()
+    }
+
+    @objc private func handleForeground() {
+        guard view.window != nil else { return }
+        viewModel.setVisible(true)
+    }
+
+    /// 进入后台时停止远端刷新，避免在后台继续打接口；回到前台再补一次。
+    @objc private func handleBackground() {
+        viewModel.setVisible(false)
     }
 
     // MARK: - Configuration
@@ -247,6 +279,16 @@ final class DeviceDetailViewController: UIViewController {
 
         rows.append(Row(title: "数据来源", value: state.sourceText))
 
+        if let metric = state.selectedMetric {
+            rows.append(
+                Row(
+                    title: "导出 CSV",
+                    value: "\(metric.displayName) · \(state.selectedRange.title) · 当前设备",
+                    kind: .export
+                )
+            )
+        }
+
         if state.recent.isEmpty {
             rows.append(Row(title: "最近记录", value: "暂无记录"))
         } else {
@@ -375,6 +417,12 @@ extension DeviceDetailViewController: UITableViewDataSource {
             cell.selectionStyle = .default
             return cell
 
+        case .export:
+            let cell = makeDetailCell(row: row, secondaryText: row.value)
+            cell.accessoryType = .disclosureIndicator
+            cell.selectionStyle = .default
+            return cell
+
         case .emptyState:
             return makeDetailCell(row: row, secondaryText: nil)
 
@@ -405,8 +453,83 @@ extension DeviceDetailViewController: UITableViewDelegate {
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
         let row = sections[indexPath.section].rows[indexPath.row]
-        guard row.kind == .metricPicker else { return }
-        presentMetricPicker()
+        switch row.kind {
+        case .metricPicker:
+            presentMetricPicker()
+        case .export:
+            guard let metric = viewModel.readings.selectedMetric else { return }
+            startExport(range: viewModel.readings.selectedRange, metric: metric)
+        default:
+            break
+        }
+    }
+
+    // MARK: - Export
+
+    /// 导出当前设备 + 指标 + 区间；进度显示真实已读取条数，失败可直接重试。
+    private func startExport(range: ReadingsRange, metric: ReadingMetric) {
+        guard exportProgressAlert == nil else { return }
+
+        let alert = UIAlertController(
+            title: "正在导出 CSV",
+            message: "已读取 0 条…",
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "取消", style: .cancel) { [weak self] _ in
+            self?.exportProgressAlert = nil
+        })
+        present(alert, animated: true)
+        exportProgressAlert = alert
+
+        viewModel.exportReadings(
+            range: range,
+            metric: metric,
+            progress: { [weak self] count in
+                self?.exportProgressAlert?.message = "已读取 \(count) 条…"
+            },
+            completion: { [weak self] result in
+                guard let self, self.exportProgressAlert != nil else { return }
+                self.exportProgressAlert?.dismiss(animated: true) { [weak self] in
+                    guard let self else { return }
+                    self.exportProgressAlert = nil
+                    switch result {
+                    case .success(let url):
+                        self.shareCSV(at: url)
+                    case .failure(let error):
+                        self.presentExportError(error, range: range, metric: metric)
+                    }
+                }
+            }
+        )
+    }
+
+    private func shareCSV(at url: URL) {
+        let controller = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+        controller.completionWithItemsHandler = { [weak self] _, _, _, _ in
+            self?.viewModel.removeExportedFile(at: url)
+        }
+        if let popover = controller.popoverPresentationController {
+            popover.sourceView = tableView
+            popover.sourceRect = tableView.bounds
+        }
+        present(controller, animated: true)
+    }
+
+    private func presentExportError(
+        _ error: ReadingsExportError,
+        range: ReadingsRange,
+        metric: ReadingMetric
+    ) {
+        let alert = UIAlertController(
+            title: "导出失败",
+            message: error.errorDescription ?? "未知错误",
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "取消", style: .cancel))
+        alert.addAction(UIAlertAction(title: "重试", style: .default) { [weak self] _ in
+            self?.startExport(range: range, metric: metric)
+        })
+        present(alert, animated: true)
     }
 
     private func presentMetricPicker() {

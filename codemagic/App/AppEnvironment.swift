@@ -13,6 +13,8 @@ final class AppEnvironment {
     let recentDeviceStore: RecentDeviceStore
     let deviceInfoCacheStore: DeviceInfoCacheStore
     let settingsStore: SettingsStore
+    let notificationService: LocalNotificationServing
+    let ruleAlertCoordinator: RuleAlertCoordinator
     let productService: ProductServicing
     let apiConfiguration: APIConfiguration?
     let bluetooth: BluetoothServicing
@@ -48,6 +50,12 @@ final class AppEnvironment {
         recentDeviceStore = RecentDeviceStore(database: resolved.database)
         deviceInfoCacheStore = DeviceInfoCacheStore(database: resolved.database)
         self.settingsStore = settingsStore
+        let notifications: LocalNotificationServing = UserNotificationService.shared
+        notificationService = notifications
+        ruleAlertCoordinator = RuleAlertCoordinator(
+            settingsStore: settingsStore,
+            notifications: notifications
+        )
 
         if let configuration = try? APIConfiguration.fromBundle() {
             apiConfiguration = configuration

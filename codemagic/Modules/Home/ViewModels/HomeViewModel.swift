@@ -42,6 +42,7 @@ final class HomeViewModel {
     private let ruleStore: DeviceRuleStore
     private let settingsStore: SettingsStore
     private let ruleEvaluator: RuleEvaluator
+    private let ruleAlertCoordinator: RuleAlertCoordinator?
     /// 超过该时长未再次出现的设备视为已离开扫描范围，用于触发「断开」规则。
     private let staleInterval: TimeInterval
 
@@ -62,6 +63,7 @@ final class HomeViewModel {
         ruleStore: DeviceRuleStore,
         settingsStore: SettingsStore,
         ruleEvaluator: RuleEvaluator,
+        ruleAlertCoordinator: RuleAlertCoordinator? = nil,
         staleInterval: TimeInterval = 10
     ) {
         self.bluetooth = bluetooth
@@ -71,6 +73,7 @@ final class HomeViewModel {
         self.ruleStore = ruleStore
         self.settingsStore = settingsStore
         self.ruleEvaluator = ruleEvaluator
+        self.ruleAlertCoordinator = ruleAlertCoordinator
         self.staleInterval = staleInterval
     }
 
@@ -290,6 +293,8 @@ final class HomeViewModel {
         for event in events {
             recordLog(category: .rule, level: .warning, message: event.message)
         }
+        // 扫描日志之外再发本地通知；通知开关 / 节流 / 授权都由协调器统一处理。
+        ruleAlertCoordinator?.handle(events)
     }
 
     // MARK: - Local Data

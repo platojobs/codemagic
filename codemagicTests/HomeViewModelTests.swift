@@ -200,9 +200,10 @@ final class HomeViewModelTests: XCTestCase {
         XCTAssertEqual(try scanLogStore.fetchRecent().count, 1)
 
         emit(-60, offset: 1)
-        XCTAssertEqual(try scanLogStore.fetchRecent().count, 1)
+        XCTAssertEqual(try scanLogStore.fetchRecent().count, 2, "恢复也写一条扫描日志")
+        XCTAssertEqual(viewModel.lastRuleEvent?.kind, .recovered)
 
         emit(-88, offset: 2)
-        XCTAssertEqual(try scanLogStore.fetchRecent().count, 2)
+        XCTAssertEqual(try scanLogStore.fetchRecent().count, 3, "恢复后重新武装，可再次告警")
     }
 }

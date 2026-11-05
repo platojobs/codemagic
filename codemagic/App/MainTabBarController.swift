@@ -30,7 +30,8 @@ final class MainTabBarController: UITabBarController {
                     scanLogStore: environment.scanLogStore,
                     ruleStore: environment.ruleStore,
                     settingsStore: environment.settingsStore,
-                    ruleEvaluator: RuleEvaluator()
+                    ruleEvaluator: RuleEvaluator(),
+                    ruleAlertCoordinator: environment.ruleAlertCoordinator
                 )
             ),
             title: "首页",
@@ -42,7 +43,9 @@ final class MainTabBarController: UITabBarController {
             root: DevicesViewController(
                 viewModel: DevicesViewModel(
                     savedDeviceStore: environment.savedDeviceStore,
-                    ruleStore: environment.ruleStore
+                    ruleStore: environment.ruleStore,
+                    recentDeviceStore: environment.recentDeviceStore,
+                    settingsStore: environment.settingsStore
                 ),
                 environment: environment
             ),
@@ -77,7 +80,8 @@ final class MainTabBarController: UITabBarController {
                     settingsStore: environment.settingsStore,
                     syncEngine: environment.syncEngine,
                     baseURLText: environment.apiConfiguration?.displayString ?? "未配置",
-                    startupWarning: environment.startupWarning
+                    startupWarning: environment.startupWarning,
+                    notifications: environment.notificationService
                 ),
                 scanLogStore: environment.scanLogStore
             ),
@@ -87,6 +91,16 @@ final class MainTabBarController: UITabBarController {
         )
 
         viewControllers = [home, devices, products, market, profile]
+    }
+
+    /// 通知点击路由：切到设备 Tab 并打开对应设备详情。
+    func openDeviceDetail(deviceID: UUID) {
+        selectedIndex = 1
+        guard let navigation = viewControllers?[1] as? UINavigationController,
+              let devices = navigation.viewControllers.first as? DevicesViewController
+        else { return }
+        navigation.popToRootViewController(animated: false)
+        devices.openDetail(deviceID: deviceID)
     }
 
     private func makeNavigationController(

@@ -25,6 +25,7 @@ final class DeviceDetailViewModel {
         var isSummaryFromCloud = false
         var isSeriesFromCloud = false
         var isOfflineLocalData = false
+        var isPendingLocalData = false
         var isLoading = false
 
         var metrics: [ReadingMetric] { metricInfos.map(\.readingMetric) }
@@ -34,6 +35,7 @@ final class DeviceDetailViewModel {
         /// 数据来源说明；30 天区间离线时明确标注本地只有 7 天。
         var sourceText: String {
             if isLoading { return "读取中…" }
+            if isPendingLocalData { return "待同步：本地数据" }
             if isOfflineLocalData {
                 return selectedRange == .day30 ? "离线：仅本地 7 天数据" : "离线：本地数据"
             }
@@ -63,6 +65,11 @@ final class DeviceDetailViewModel {
     private let readingsStore: ReadingsStore
     private let readingsService: ReadingsAPIServicing
     private let readingsIngestor: ReadingsIngestor?
+    private let exportService: ReadingsExportService
+    private var refreshPolicy: ReadingsRefreshPolicy
+    private var remoteRefreshWorkItem: DispatchWorkItem?
+    /// 详情页是否可见；不可见时不发任何远端读数请求。
+    private var isVisibleForReadings = false
     private var hasStarted = false
     private var isObservingReadings = false
 
@@ -74,7 +81,9 @@ final class DeviceDetailViewModel {
         savedDeviceStore: SavedDeviceStore,
         readingsStore: ReadingsStore,
         readingsService: ReadingsAPIServicing = UnavailableReadingsAPI(),
-        readingsIngestor: ReadingsIngestor? = nil
+        readingsIngestor: ReadingsIngestor? = nil,
+        exportService: ReadingsExportService? = nil,
+        refreshPolicy: ReadingsRefreshPolicy = ReadingsRefreshPolicy()
     ) {
         self.device = device
         self.bluetooth = bluetooth
@@ -84,6 +93,15 @@ final class DeviceDetailViewModel {
         self.readingsStore = readingsStore
         self.readingsService = readingsService
         self.readingsIngestor = readingsIngestor
+        self.exportService = exportService ?? ReadingsExportService(
+            readingsStore: readingsStore,
+            readingsService: readingsService
+        )
+        self.refreshPolicy = refreshPolicy
+    }
+
+    deinit {
+        remoteRefreshWorkItem?.cancel()
     }
 
     // MARK: - Lifecycle
@@ -115,6 +133,9 @@ final class DeviceDetailViewModel {
     }
 
     func teardown() {
+        remoteRefreshWorkItem?.cancel()
+        remoteRefreshWorkItem = nil
+        isVisibleForReadings = false
         bluetooth.connectionHandler = nil
         if isObservingReadings {
             readingsIngestor?.onSaved = nil
@@ -231,10 +252,50 @@ final class DeviceDetailViewModel {
         isObservingReadings = true
     }
 
-    /// 先本地渲染（保证离线/冷启动也有数据），再拉服务端指标清单与分桶序列。
+    /// 详情页可见性：不可见时取消排队中的远端刷新、不发请求；回到前台/页面再刷新一次。
+    func setVisible(_ visible: Bool) {
+        let wasVisible = isVisibleForReadings
+        isVisibleForReadings = visible
+        guard visible else {
+            remoteRefreshWorkItem?.cancel()
+            remoteRefreshWorkItem = nil
+            return
+        }
+        if wasVisible {
+            // 已在可见状态（回到前台）合并成一次刷新，避免前后台切换时请求风暴。
+            scheduleRemoteRefresh(delay: 0)
+        } else {
+            performRemoteRefresh()
+        }
+    }
+
+    /// 读数入库不直接联网：只做本地增量重绘，远端查询按 800ms 去抖动合并。
     private func loadReadings() {
         applyLocalMetricInfos()
         reloadReadingsLocally()
+        scheduleRemoteRefresh()
+    }
+
+    private func scheduleRemoteRefresh(delay: TimeInterval? = nil) {
+        guard isVisibleForReadings else { return }
+        remoteRefreshWorkItem?.cancel()
+        let wait = delay ?? refreshPolicy.nextDelay
+        let item = DispatchWorkItem { [weak self] in
+            guard let self, self.isVisibleForReadings else { return }
+            self.performRemoteRefresh()
+        }
+        remoteRefreshWorkItem = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + wait, execute: item)
+    }
+
+    /// 一次合并刷新：metrics、series、summary 并发发出，且共享同一次区间计算（同一 from/to）。
+    private func performRemoteRefresh() {
+        let anchor = Date()
+        let interval = readings.selectedRange.interval(now: anchor)
+        // 先发序列 / 汇总（已有默认指标时各一次），最后刷清单；
+        // 清单为空时由它的完成回调补发一次序列 / 汇总，避免重复请求。
+        refreshSeriesFromCloud(interval: interval)
+        refreshSummaryFromCloud(anchor: anchor)
         refreshMetricsFromCloud()
     }
 
@@ -305,15 +366,25 @@ final class DeviceDetailViewModel {
             self.readings.isLoading = false
             switch result {
             case .success(let metrics):
+                self.refreshPolicy.recordSuccess()
                 let remote = ReadingMetricInfo.sortedByLastAt(metrics.items)
                 let local = (try? self.readingsStore.metricInfos(deviceID: self.device.id)) ?? []
-                self.readings.metricInfos = remote.isEmpty ? local : remote
-                let available = self.readings.metricInfos.map(\.readingMetric)
-                if let selected = self.readings.selectedMetric, available.contains(selected) {
-                    // 保留用户选择
-                } else {
-                    self.readings.selectedMetric = available.first
+                let pending = (try? self.readingsStore.pendingCount(deviceID: self.device.id)) ?? 0
+
+                // 服务端还没有这些读数（本地待同步）时，清单与序列都走本地，不能让图表空着。
+                if remote.isEmpty && (!local.isEmpty || pending > 0) {
+                    self.readings.metricInfos = local
+                    self.selectAvailableMetricIfNeeded()
+                    self.readings.isPendingLocalData = true
+                    self.readings.isOfflineLocalData = false
+                    self.reloadReadingsLocally()
+                    return
                 }
+
+                self.readings.isPendingLocalData = false
+                let previousSelection = self.readings.selectedMetric
+                self.readings.metricInfos = remote.isEmpty ? local : remote
+                self.selectAvailableMetricIfNeeded()
                 if let selected = self.readings.selectedMetric {
                     let info = self.readings.metricInfos.first { $0.readingMetric == selected }
                     if let unit = info?.unit, !unit.isEmpty {
@@ -321,27 +392,41 @@ final class DeviceDetailViewModel {
                     }
                 }
                 self.reloadReadingsLocally()
-                self.refreshSeriesFromCloud()
-                self.refreshSummaryFromCloud()
+                // 只有默认指标刚确定时才补发序列/汇总；否则本轮已由 performRemoteRefresh 并发发出。
+                if previousSelection != self.readings.selectedMetric {
+                    self.refreshSeriesFromCloud()
+                    self.refreshSummaryFromCloud()
+                }
 
             case .failure:
-                // 离线兜底：本地指标清单与本地分桶，明确标注离线。
+                // 离线兜底：本地指标清单与本地分桶，明确标注离线，并按指数退避重试。
+                self.refreshPolicy.recordFailure()
                 self.applyLocalMetricInfos()
                 self.reloadReadingsLocally()
                 self.readings.isSeriesFromCloud = false
                 self.readings.isOfflineLocalData = true
+                self.scheduleRemoteRefresh()
             }
         }
     }
 
+    private func selectAvailableMetricIfNeeded() {
+        let available = readings.metricInfos.map(\.readingMetric)
+        if let selected = readings.selectedMetric, available.contains(selected) {
+            return
+        }
+        readings.selectedMetric = available.first
+    }
+
     /// 分桶序列：区间切换后重新查询；失败回退本地（30 天区间只覆盖本地 7 天）。
-    private func refreshSeriesFromCloud() {
+    private func refreshSeriesFromCloud(interval requestedInterval: DateInterval? = nil) {
+        guard isVisibleForReadings else { return }
         guard let metric = readings.selectedMetric else {
             readings.buckets = []
             return
         }
         let range = readings.selectedRange
-        let interval = range.interval()
+        let interval = requestedInterval ?? range.interval()
         readingsService.fetchSeries(
             platform: device.platform,
             externalID: device.externalID,
@@ -352,7 +437,8 @@ final class DeviceDetailViewModel {
         ) { [weak self] result in
             guard let self,
                   self.readings.selectedMetric == metric,
-                  self.readings.selectedRange == range
+                  self.readings.selectedRange == range,
+                  !self.readings.isPendingLocalData
             else { return }
             switch result {
             case .success(let series):
@@ -367,15 +453,18 @@ final class DeviceDetailViewModel {
                 self.readings.isOfflineLocalData = false
 
             case .failure:
+                self.refreshPolicy.recordFailure()
                 self.applyLocalSeries()
                 self.readings.isSeriesFromCloud = false
                 self.readings.isOfflineLocalData = true
+                self.scheduleRemoteRefresh()
             }
         }
     }
 
     /// 24 小时汇总固定展示；失败时回退本地汇总，并标注「离线：本地数据」。
-    private func refreshSummaryFromCloud() {
+    private func refreshSummaryFromCloud(anchor: Date? = nil) {
+        guard isVisibleForReadings else { return }
         guard let metric = readings.selectedMetric else { return }
         readingsService.fetchSummary(
             platform: device.platform,
@@ -383,7 +472,7 @@ final class DeviceDetailViewModel {
             metric: metric,
             hours: 24
         ) { [weak self] result in
-            guard let self, self.readings.selectedMetric == metric else { return }
+            guard let self, self.readings.selectedMetric == metric, !self.readings.isPendingLocalData else { return }
             switch result {
             case .success(let summary):
                 self.readings.summary = summary
@@ -392,14 +481,16 @@ final class DeviceDetailViewModel {
                     self.readings.unit = summary.unit
                 }
             case .failure:
+                self.refreshPolicy.recordFailure()
                 self.readings.isSummaryFromCloud = false
-                let since = Date().addingTimeInterval(-24 * 60 * 60)
+                let since = (anchor ?? Date()).addingTimeInterval(-24 * 60 * 60)
                 let window = (try? self.readingsStore.fetch(
                     deviceID: self.device.id,
                     metric: metric,
                     from: since
                 )) ?? []
                 self.readings.summary = ReadingSummary.local(readings: window, metric: metric, since: since)
+                self.scheduleRemoteRefresh()
             }
         }
     }
@@ -425,9 +516,34 @@ final class DeviceDetailViewModel {
         refreshSeriesFromCloud()
     }
 
-    /// 新读数落库后刷新本地列表、分桶与云端汇总。
+    /// 新读数落库后只做本地增量重绘，远端查询交给去抖动调度器。
     func reloadReadings() {
-        loadReadings()
+        applyLocalMetricInfos()
+        reloadReadingsLocally()
+        scheduleRemoteRefresh()
+    }
+
+    // MARK: - Export
+
+    /// 导出当前设备 + 指标 + 区间的读数 CSV；进度回调始终在主线程。
+    func exportReadings(
+        range: ReadingsRange,
+        metric: ReadingMetric,
+        progress: @escaping (Int) -> Void,
+        completion: @escaping (Result<URL, ReadingsExportError>) -> Void
+    ) {
+        exportService.export(
+            device: device,
+            metric: metric,
+            range: range,
+            progress: progress,
+            completion: completion
+        )
+    }
+
+    /// 分享结束后删除临时 CSV，避免长期留存。
+    func removeExportedFile(at url: URL) {
+        exportService.removeExportedFile(at: url)
     }
 
     // MARK: - Display

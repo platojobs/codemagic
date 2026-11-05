@@ -6,6 +6,8 @@ final class ProfileViewController: UIViewController {
         case bluetooth
         case localData
         case sync
+        case alerts
+        case appearance
         case settings
         case about
     }
@@ -124,6 +126,45 @@ final class ProfileViewController: UIViewController {
         navigationController?.pushViewController(logs, animated: true)
     }
 
+    private func presentThrottlePicker() {
+        let sheet = UIAlertController(title: "通知节流窗口", message: "同一设备同一规则在窗口内只提醒一次。", preferredStyle: .actionSheet)
+        for minutes in viewModel.ruleAlertThrottleOptions {
+            let selected = minutes == viewModel.ruleAlertThrottleMinutes
+            sheet.addAction(UIAlertAction(
+                title: selected ? "✓ \(minutes) 分钟" : "\(minutes) 分钟",
+                style: .default
+            ) { [weak self] _ in
+                self?.viewModel.ruleAlertThrottleMinutes = minutes
+            })
+        }
+        sheet.addAction(UIAlertAction(title: "取消", style: .cancel))
+        if let popover = sheet.popoverPresentationController {
+            popover.sourceView = tableView
+            popover.sourceRect = tableView.rectForRow(at: IndexPath(row: 1, section: Section.alerts.rawValue))
+        }
+        present(sheet, animated: true)
+    }
+
+    private func presentAppearancePicker() {
+        let sheet = UIAlertController(title: "外观", message: "深色模式下图表与卡片使用动态配色。", preferredStyle: .actionSheet)
+        for appearance in AppAppearance.allCases {
+            let selected = appearance == viewModel.appearance
+            sheet.addAction(UIAlertAction(
+                title: selected ? "✓ \(appearance.title)" : appearance.title,
+                style: .default
+            ) { [weak self] _ in
+                self?.viewModel.appearance = appearance
+                AppAppearance.apply(appearance)
+            })
+        }
+        sheet.addAction(UIAlertAction(title: "取消", style: .cancel))
+        if let popover = sheet.popoverPresentationController {
+            popover.sourceView = tableView
+            popover.sourceRect = tableView.rectForRow(at: IndexPath(row: 0, section: Section.appearance.rawValue))
+        }
+        present(sheet, animated: true)
+    }
+
     private func openAbout() {
         let about = AboutViewController(
             versionText: viewModel.appVersionText,
@@ -147,6 +188,8 @@ extension ProfileViewController: UITableViewDataSource {
         case .bluetooth: return 3
         case .localData: return 2
         case .sync: return 4 + (viewModel.needsRelogin ? 1 : 0)
+        case .alerts: return 3
+        case .appearance: return 1
         case .settings: return 2
         case .about: return 3
         }
@@ -158,6 +201,8 @@ extension ProfileViewController: UITableViewDataSource {
         case .bluetooth: return "蓝牙权限"
         case .localData: return "本地数据"
         case .sync: return "同步"
+        case .alerts: return "阈值告警"
+        case .appearance: return "外观"
         case .settings: return "设置"
         case .about: return "关于"
         }
@@ -170,6 +215,10 @@ extension ProfileViewController: UITableViewDataSource {
             return viewModel.permissionGuidance
         case .sync:
             return "\(viewModel.syncStatusText)\n\(viewModel.syncDegradationText)"
+        case .alerts:
+            return viewModel.notificationGuidance
+        case .appearance:
+            return "深色模式使用动态语义色，图表、区间带与卡片会自动适配。"
         case .about:
             return viewModel.startupWarning ?? "行为口径与 Android 端共用 docs/consistency.md。"
         case .localData, .settings:
@@ -223,6 +272,42 @@ extension ProfileViewController: UITableViewDataSource {
                     color: AppTheme.Palette.accent
                 )
             }
+
+        case .alerts:
+            if indexPath.row == 0 {
+                guard let cell = tableView.dequeueReusableCell(
+                    withIdentifier: SwitchCell.reuseIdentifier,
+                    for: indexPath
+                ) as? SwitchCell else {
+                    return UITableViewCell()
+                }
+                cell.configure(
+                    title: "阈值告警通知",
+                    isOn: viewModel.ruleAlertsEnabled
+                ) { [weak self] isOn in
+                    self?.viewModel.ruleAlertsEnabled = isOn
+                }
+                return cell
+            }
+            if indexPath.row == 1 {
+                return makeValueCell(
+                    title: "节流窗口",
+                    value: viewModel.ruleAlertThrottleText,
+                    showsDisclosure: true
+                )
+            }
+            return makeValueCell(
+                title: "通知权限",
+                value: viewModel.notificationAuthorizationText,
+                showsDisclosure: viewModel.needsNotificationSettings
+            )
+
+        case .appearance:
+            return makeValueCell(
+                title: "外观",
+                value: viewModel.appearanceText,
+                showsDisclosure: true
+            )
 
         case .settings:
             guard let cell = tableView.dequeueReusableCell(
@@ -279,6 +364,12 @@ extension ProfileViewController: UITableViewDelegate {
             viewModel.manualSync()
         case .sync where indexPath.row == 4:
             confirmRelogin()
+        case .alerts where indexPath.row == 1:
+            presentThrottlePicker()
+        case .alerts where indexPath.row == 2 && viewModel.needsNotificationSettings:
+            openSystemSettings()
+        case .appearance where indexPath.row == 0:
+            presentAppearancePicker()
         case .about where indexPath.row == 2:
             openAbout()
         default:

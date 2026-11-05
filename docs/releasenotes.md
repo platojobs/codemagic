@@ -4,6 +4,7 @@
 
 | Tag | MARKETING_VERSION | Build | 日期 | 对齐后端 |
 | --- | --- | --- | --- | --- |
+| `v0.6.0` | 0.6.0 | 14 | 2026-11-05 | PJGoIoT v0.5.1 |
 | `v0.5.0` | 0.5.0 | 13 | 2026-11-05 | PJGoIoT v0.5.1 |
 | `v0.4.1` | 0.4.1 | 12 | 2026-11-05 | PJGoIoT v0.4.0（tag `7acab36`） |
 | `v0.4.0` | 0.4.0 | 11 | 2026-11-05 | PJGoIoT main `7acab36`（当时未打 tag） |
@@ -16,6 +17,55 @@
 | `v0.3.0` | 0.3.0 | 4 | 2026-11-05 | 0.3.0 |
 | `v0.2.0` | 0.2.0 | 3 | 2026-11-05 | 0.2.0 |
 | `v0.1.0` | — | 1 | 2026-11-05 | — |
+
+---
+
+## v0.6.0（build 14）
+
+**主题：修掉详情页请求风暴与空图降级，同时补齐告警通知、CSV 导出、设备列表可用性与深色模式**
+
+### 修复 1：请求节流（保留真实行为）
+- 读数入库触发 `notify` 时只做本地增量重绘（指标清单 / 最近读数 / 本地 UTC 网格），**不再每次 notify 都打 metrics + series + summary 三次请求**。
+- 远端刷新改为合并 + 800ms 去抖动（`ReadingsRefreshPolicy`）：详情页可见时窗口内只发一次刷新，series 与 summary 共享同一次 `from/to` 计算（metrics 无区间参数）；再次触发会取消上一个待执行任务。
+- 详情页不可见 / App 进入后台时不发任何远端请求；回到前台或重新可见时补刷一次。
+- 远端失败进入指数退避：1s → 2s → 4s …，上限 **5 分钟**，与 notify 频率解耦；任一请求成功即复位。
+- 新增 `ReadingsRefreshPolicyTests` 覆盖去抖、退避、封顶与复位；`ReadingsSeriesTests` 覆盖「不可见不发请求 / 可见只刷一次 / 回前台再刷」。
+
+### 修复 2：本地降级补齐
+- `ReadingsStore.pendingCount(deviceID:)` 判断「服务端指标为空」是否只是本地读数还没上传。
+- 服务端清单为空但本地有 pending / failed 读数时：指标 Chip 用本地聚合、序列用本地 UTC 网格聚合，**图表不再空白**，数据来源显示「待同步：本地数据」。
+- 新增单测 `testEmptyServerMetricsFallsBackToPendingLocalData`，断言指标、选中项、图表数据与来源文案。
+
+### 功能 1：阈值告警本地通知
+- `RuleEvaluator` 扩展 `RuleTriggerEvent`（`triggered` / `recovered` + `deviceID`），规则恢复时发「已恢复」；恢复只针对实际发出过告警的设备。
+- 新增 `UserNotificationService`（`UNUserNotificationCenter`）与 `RuleAlertCoordinator`：首次真正需要通知时才请求授权；开关、节流（1 / 5 / 30 分钟，默认 5，按「规则 + 设备」）集中管理。
+- 通知 `userInfo` 携带 `deviceID`；SceneDelegate 实现通知代理，前台展示横幅，点击直接进入对应设备详情。
+- 「我的」新增真实开关「阈值告警通知」、节流窗口选择与通知权限状态；被拒绝时提示前往系统设置。
+- 新增 `RuleAlertCoordinatorTests` 6 个用例；`RuleEvaluatorTests` 补恢复事件断言。
+
+### 功能 2：读数 CSV 导出
+- 详情页「数据」区新增「导出 CSV」行，导出当前设备 + 当前指标 + 当前区间。
+- 7 天内读本地 SQLite；更长区间走服务端 cursor 分页，单次上限 **50,000 条**，超限返回「请缩短导出区间」。
+- CSV：UTF-8 **BOM**、表头 `recordedAt,metric,value,unit`、ISO8601 **UTC**、含逗号 / 引号 / 换行字段按 RFC 4180 转义、行按时间升序。
+- 生成文件写入临时目录（1 天后自动清理），用 `UIActivityViewController` 分享，分享结束删除文件；导出中显示真实已读取条数，失败弹窗可直接重试。
+- 新增 `ReadingsCSVTests` 与 `ReadingsExportServiceTests`（本地 / 分页 / 超限 / 空数据 / 进度）。
+
+### 功能 3：设备列表可用性
+- 搜索：别名（remark）、广播名、型号、externalID 与 peripheralID，大小写不敏感。
+- 排序：最近出现 / 名称 / 信号强度 / 添加时间；默认最近出现并持久化到 `SettingsStore`；信号取 `RecentDeviceStore` 的最新 RSSI，未知信号排最后。
+- 分组筛选：取真实 `groupName`（含「未分组」），与搜索可叠加。
+- 两种空状态：真的没有设备 vs 筛选无结果；筛选态表头显示「已保存设备（命中 / 总数）」。
+- 新增 `DevicesViewModelTests` 7 个用例。
+
+### 功能 4：深色模式
+- 新增 `AppAppearance`（跟随系统 / 浅色 / 深色），持久化并在启动与切换时应用到窗口；「我的 → 外观」可切换。
+- 图表折线、min–max 区间带、网格、Chip 与卡片统一使用 `AppTheme.Palette` 语义色（系统动态色），无硬编码 `.white` / `.black`；`AccentColor` 增加 dark 变体。
+- 新增 `AppThemeTests`：三态枚举、偏好持久化、浅/深语义色解析差异、AccentColor dark 变体、源码扫描禁止硬编码颜色常量。
+
+### 测试与验收
+- 单测 **188 个**，0 失败；`xcodebuild build` / `test` 全绿。
+- 本地 e2e 仍 **123 项全部 PASS**（本轮无 HTTP 契约变更，后端 `PJGoIoT` v0.5.1 / `STORE=fixture`）。
+- `docs/acceptance.md` 新增通知权限与告警、CSV 导出、深色模式、设备搜索排序筛选、请求节流真机验收项。
 
 ---
 

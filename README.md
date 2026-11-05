@@ -12,16 +12,16 @@
 
 | 项 | 结果 |
 | --- | --- |
-| 版本 | **v0.5.0**（`MARKETING_VERSION 0.5.0`，`CURRENT_PROJECT_VERSION 13`，tag `v0.5.0`，长周期分桶图表 + 服务端指标清单，契约对齐 `PJGoIoT` v0.5.1） |
+| 版本 | **v0.6.0**（`MARKETING_VERSION 0.6.0`，`CURRENT_PROJECT_VERSION 14`，tag `v0.6.0`：请求节流 + 本地降级 + 告警通知 + CSV 导出 + 设备列表可用性 + 深色模式，契约对齐 `PJGoIoT` v0.5.1） |
 | 五模块（首页 / 设备 / 产品 / 市场 / 我的） | 已实现，纯代码 UIKit，真实数据路径 |
 | CoreBluetooth 扫描 + 连接 | 已实现（`CBCentralManager`，真实 RSSI） |
 | BLE 读数采集 | 已实现：连接后订阅心率 `0x2A37`、电量 `0x2A19`、温度 `0x2A6E`、Nordic UART TX `6E400003-…`；各特征独立解析器，失败静默丢弃并写本地日志 |
 | 长周期读数图表 | 已实现：1 小时 / 24 小时 / 7 天 / 30 天区间切换（映射 `1m` / `1h` / `1h` / `1d`），X 轴按桶 `start` 真实时间比例定位，缺口断线，`avg` 折线 + `min`–`max` 区间带，Y 轴自适应并带单位 |
 | 本地持久化 | 已实现（SQLite3，含同步字段；迁移 **v5** 新增 `readings` 表，本地保留 7 天；v4 区分 `advertised_name` 与用户别名并记录三态 patch） |
-| 网络层 | 已实现（URLSession + Codable；设备/型号对齐 openapi 0.3.3；读数查询 / summary / series / metrics 对齐 `PJGoIoT` v0.5.1） |
+| 网络层 | 已实现（URLSession + Codable；设备/型号对齐 openapi 0.3.3；读数查询 / summary / series / metrics 对齐 `PJGoIoT` v0.5.1；详情页远端刷新 800ms 去抖动 + 失败指数退避 ≤5 分钟，不可见/后台不请求） |
 | 同步 | **已实现**：匿名登录、增量拉取、批量推送（设备 ≤100/批 + 读数 ≤200/批、幂等键含读数）、冲突提示、tombstone、Keychain token、前后台 / BGTask 触发、断网累积补传 |
 | 自绘 RSSI + 自绘折线图 + 代码组装空状态 | 已实现（读数图表纯 `draw(_:)`，无第三方图表库） |
-| 单元测试 | **157 个用例，0 失败**（`** TEST SUCCEEDED **`，2026-11-05，Xcode 27.2 / iPhone 17 模拟器；含 18 条读数解析黄金用例、图表几何 9 条、区间/指标/离线降级用例） |
+| 单元测试 | **188 个用例，0 失败**（`** TEST SUCCEEDED **`，2026-11-05，Xcode 27.2 / iPhone 17 模拟器；含刷新去抖/退避、待同步降级、通知节流与恢复、CSV 分页/转义、设备搜索排序筛选、深色语义色扫描） |
 | 模拟器构建 | **通过**（`xcodebuild ... build`，`** BUILD SUCCEEDED **`） |
 | CI | **GitHub Actions 已实际运行 success**：v0.5.0 run [41949724232](https://github.com/platojobs/codemagic/actions/runs/41949724232)（macos-15 + Xcode 16.4，提交 `7ce9539`），并行 `build-test`（157 单测）与 `e2e-contract`（123 项，0 SKIP）；`codemagic.yaml` 作为可选替代保留但未验证 |
 | 真机 BLE / 签名 | **未验证**：本机无真机与 Apple 开发者账号；读数采集与图表需真机 / 可穿戴设备验证（见第 9 节） |
@@ -39,8 +39,11 @@
 
 ### 设备 Devices（`Modules/Devices`）
 - 已保存设备：备注名、分组、最后出现时间、厂商与固件（详情页回写）。
+- **列表可用性（v0.6.0）**：搜索别名 / 广播名 / 型号 / 标识符（大小写不敏感）；排序最近出现 / 名称 / 信号 / 添加时间（默认最近出现并持久化）；按真实分组（含「未分组」）筛选；两种空状态（无设备 vs 筛选无结果）。
 - 本地规则：**断开**、**RSSI 低于阈值**；可新增 / 启停 / 删除，规则持久化。
 - 规则触发写扫描日志并在首页提示；规则可绑定单台设备或全部已保存设备。
+- **阈值告警通知（v0.6.0）**：首次命中请求通知授权，命中发本地通知、恢复发「已恢复」；节流窗口 1 / 5 / 30 分钟（默认 5，同一设备同一规则只报一次）；点击通知进入设备详情。
+- **读数 CSV 导出（v0.6.0）**：当前设备 + 指标 + 区间；7 天内读本地、更长走服务端分页（上限 5 万条）；UTF-8 BOM / ISO8601 UTC / RFC 4180 转义；临时文件分享后删除，进度真实可重试。
 - 设备详情：连接蓝牙 → `GET /api/v1/my/devices/ios/{externalId}` 拉取云端设备记录，**优先展示云端 `deviceType` / `vendor` / `firmwareVersion` / `compatibility`**；云端字段为 `null` 时显示「型号未知」/「—」/「暂无兼容性说明」，绝不出 `"null"`；未注册型号仍展示别名、分组与最近出现时间，并在「云端记录」区展示同步信息；网络失败才降级本地缓存并标注缓存时间，无缓存显示失败空状态与重试。
 - 跨平台设备：服务端拉回的 `platform = android` 设备标注「来自 Android，本机不可连接」，无展开箭头、禁用点击与连接，不进入详情。
 
@@ -60,6 +63,8 @@
 - **同步状态**：上次同步时间、待上传条数、「立即同步」按钮、匿名账号；失败时展示错误码与降级说明，冲突时提示「另一台设备改过这条」。
 - **登录失效（401）**：token 过期时显示「登录已失效」，出现「重新登录」入口；确认弹窗说明旧账号云端数据不自动合并、本机设备会重新上传，确认后才换新匿名账号（游标重置为 0）。未确认前前后台自动同步不会静默建号，见 `docs/troubleshooting.md` 第 3.1 节。
 - 基础设置：自动记录最近设备、启动自动扫描。
+- **阈值告警设置（v0.6.0）**：真实开关、节流窗口（1 / 5 / 30 分钟）与通知权限状态；拒绝时提示前往系统设置。
+- **外观（v0.6.0）**：跟随系统 / 浅色 / 深色三态，窗口级生效并持久化。
 - 版本与关于：读取 `CFBundleShortVersionString / CFBundleVersion` 与当前 `BASE_URL`。
 
 ### 同步（`Core/Sync`）
@@ -83,9 +88,11 @@ codemagic/
 │   ├── Persistence/        # SQLiteDatabase + 5 个 Store
 │   ├── Sync/               # SyncEngine、SyncAPIClient、SyncModels、KeychainTokenStore、SyncMetadataStore
 │   ├── Bluetooth/          # CoreBluetoothService
-│   ├── Rules/              # RuleEvaluator
+│   ├── Rules/              # RuleEvaluator、RuleAlertCoordinator
+│   ├── Export/             # ReadingsCSV、ReadingsExportService
+│   ├── Notifications/      # LocalNotificationServing、UserNotificationService
 │   └── Formatting/         # AppDateFormat
-├── DesignSystem/           # AppTheme、RSISignalView（自绘）、EmptyStateView（代码组装）、LoadingStateView
+├── DesignSystem/           # AppTheme、AppAppearance、RSISignalView（自绘）、EmptyStateView（代码组装）、LoadingStateView
 ├── Modules/
 │   ├── Home/               # Scenes / ViewModels / Views
 │   ├── Devices/
@@ -99,11 +106,11 @@ Config/
 scripts/
 ├── e2e-contract.sh         # 启动本地 fixture 服务 + 运行联调 runner（CI 的 e2e-contract job 复用）
 └── e2e-contract.swift      # 独立 Swift 可执行 runner，真实 URLSession 直连 localhost
-codemagicTests/             # 157 个 XCTest 用例（含读数解析黄金用例与图表几何用例）
+codemagicTests/             # 188 个 XCTest 用例（黄金读数 / 图表几何 / 节流退避 / 通知 / 导出 / 设备筛选 / 深色扫描）
 docs/
 ├── architecture.md
 ├── consistency.md
-├── acceptance.md           # 真机验收清单（五模块 / 蓝牙 / 规则 / 降级 / BGTask / Release）
+├── acceptance.md           # 真机验收清单（五模块 / 蓝牙 / 规则 / 降级 / BGTask / 通知 / 导出 / 深色 / Release）
 ├── troubleshooting.md      # Xcode / 签名 / Keychain / BGTask / BASE_URL / Go 服务 / 端口
 └── releasenotes.md         # 按 tag 的真实发布说明
 ```
@@ -272,6 +279,7 @@ cd /path/to/codemagic
 - 汇总：`GET .../readings/summary?metric=&hours=24` → `{metric, unit, count, min, max, avg, last, windowStart, windowEnd}`。
 - 分桶序列（v0.5.0）：`GET .../readings/series?metric=&from=&to=&bucket=`，`from` / `to` 为 UTC RFC3339，`bucket` ∈ `1m` / `1h` / `1d`；仅返回有数据的桶，按 `start` 升序。
 - 指标清单（v0.5.0）：`GET .../readings/metrics` → `{items:[{metric, unit, count, firstAt, lastAt}]}`，按 `lastAt` 倒序；详情页展示「指标名 · N 条」，单位取该指标最近一条读数。
+- 客户端刷新口径（v0.6.0）：读数入库只本地重绘；可见时远端合并刷新去抖 **800ms**，`series` 与 `summary` 共用同一时间锚点；不可见 / 后台不请求；失败指数退避至 **5 分钟**。服务端清单为空但本地有 pending 读数时，指标与序列均用本地 UTC 网格并标注「待同步：本地数据」。通知、CSV 导出与深色模式均为客户端行为，详见 `docs/consistency.md` 3.10。
 - 区间映射：1 小时 → `1m`（60 桶）、24 小时 → `1h`（24 桶）、7 天 → `1h`（168 桶）、30 天 → `1d`（30 桶），均在 500 桶上限内；默认 24 小时。
 - 图表定位：X 轴按桶 `start` 的真实时间比例定位（不等距）；相邻桶间隔 >1s 视为缺口，折线**断开且不跨缺口连线**（区间带同样断开）；`avg` 连线 + `min`–`max` 区间带；Y 轴按区间 min/max 自适应并带单位；几何计算在 `ReadingsChartGeometry`，有缺口/30 天 24 桶/异常值过滤单测。
 - 离线降级：series 失败时按同一 UTC 网格聚合本地 7 天数据；30 天区间标注「离线：仅本地 7 天数据」，时间轴仍按 30 天绘制、缺数据处留白。

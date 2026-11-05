@@ -32,13 +32,16 @@ final class RuleEvaluatorTests: XCTestCase {
             date: baseDate.addingTimeInterval(2)
         ).isEmpty)
 
-        // 重新出现后再次消失，应再次触发。
-        _ = evaluator.evaluate(
+        // 重新出现时发「已恢复」，再次消失才再次触发。
+        let recovered = evaluator.evaluate(
             rules: [rule],
             devices: [device],
             observedRSSI: [device.peripheralID: -50],
             date: baseDate.addingTimeInterval(3)
         )
+        XCTAssertEqual(recovered.count, 1)
+        XCTAssertEqual(recovered[0].kind, .recovered)
+        XCTAssertTrue(recovered[0].message.contains("已重新出现"))
         let secondGone = evaluator.evaluate(
             rules: [rule],
             devices: [device],
@@ -69,13 +72,16 @@ final class RuleEvaluatorTests: XCTestCase {
             date: baseDate.addingTimeInterval(1)
         ).isEmpty)
 
-        // 信号恢复后重新武装。
-        _ = evaluator.evaluate(
+        // 信号恢复后发「已恢复」并重新武装。
+        let recovered = evaluator.evaluate(
             rules: [rule],
             devices: [device],
             observedRSSI: [device.peripheralID: -60],
             date: baseDate.addingTimeInterval(2)
         )
+        XCTAssertEqual(recovered.count, 1)
+        XCTAssertEqual(recovered[0].kind, .recovered)
+        XCTAssertEqual(recovered[0].deviceID, device.id, "恢复事件带设备 ID，供通知点击跳转")
         let againLow = evaluator.evaluate(
             rules: [rule],
             devices: [device],

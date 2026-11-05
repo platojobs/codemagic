@@ -65,11 +65,19 @@ struct DeviceRule: Identifiable, Equatable {
     }
 }
 
-/// 规则命中后产生的事件，写入本地扫描日志并在界面提示。
+/// 规则事件类型：命中告警 / 恢复。
+enum RuleEventKind: String, Equatable {
+    case triggered
+    case recovered
+}
+
+/// 规则命中或恢复时产生的事件，写入本地扫描日志、发本地通知并在界面提示。
 struct RuleTriggerEvent: Equatable {
     let ruleID: UUID
     let ruleName: String
+    let deviceID: UUID
     let deviceName: String
+    let kind: RuleEventKind
     let message: String
     let occurredAt: Date
 }

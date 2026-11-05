@@ -325,6 +325,7 @@ final class DeviceDetailReadingsServiceTests: XCTestCase {
 
         let viewModel = makeViewModel()
         viewModel.start()
+        viewModel.setVisible(true)
 
         XCTAssertEqual(viewModel.readings.metrics, [.heartRate, .temperature])
         XCTAssertEqual(viewModel.readings.selectedMetric, .heartRate)
@@ -357,6 +358,7 @@ final class DeviceDetailReadingsServiceTests: XCTestCase {
 
         let viewModel = makeViewModel()
         viewModel.start()
+        viewModel.setVisible(true)
 
         XCTAssertEqual(viewModel.readings.selectedRange, .hour24, "默认 24 小时")
         XCTAssertEqual(service.seriesRequests.last?.bucket, .hour)
@@ -385,10 +387,74 @@ final class DeviceDetailReadingsServiceTests: XCTestCase {
 
         let viewModel = makeViewModel()
         viewModel.start()
+        viewModel.setVisible(true)
 
         XCTAssertEqual(viewModel.readings.metrics, [.battery], "本地兜底仍展示真实已有指标")
         XCTAssertEqual(viewModel.readings.selectedMetric, .battery)
         XCTAssertEqual(viewModel.readings.sourceText, "离线：本地数据")
+    }
+
+    /// 详情页不可见时不发远端请求；变为可见后才合并刷新一次。
+    func testNotVisibleSendsNoRemoteRequestsUntilVisible() throws {
+        let now = Date()
+        try readingsStore.insert(
+            DeviceReading(deviceID: device.id, metric: .temperature, value: 22, unit: "℃", recordedAt: now)
+        )
+        service.metricsResult = .success(ReadingMetrics(items: [
+            ReadingMetricInfo(metric: "temperature", unit: "℃", count: 1, lastAt: now)
+        ]))
+        service.seriesResult = .success(ReadingsSeries(
+            metric: "temperature", unit: "℃", bucket: .hour,
+            from: now.addingTimeInterval(-86_400), to: now,
+            buckets: [ReadingBucket(start: now.addingTimeInterval(-3_600), end: now, count: 1,
+                                    minValue: 22, maxValue: 22, avg: 22, last: 22)]
+        ))
+        service.summaryResult = .success(
+            ReadingSummary(metric: "temperature", unit: "℃", count: 1, minValue: 22, maxValue: 22, avg: 22, last: 22)
+        )
+
+        let viewModel = makeViewModel()
+        viewModel.start()
+        XCTAssertTrue(service.seriesRequests.isEmpty, "不可见时读取本地即可")
+        XCTAssertEqual(service.metricsRequests, 0)
+
+        viewModel.setVisible(true)
+        XCTAssertEqual(service.metricsRequests, 1, "可见时合并刷新一次")
+        XCTAssertEqual(service.seriesRequests.count, 1)
+
+        viewModel.setVisible(false)
+        viewModel.setVisible(true)
+        XCTAssertEqual(service.metricsRequests, 2, "回到前台再刷一次")
+    }
+
+    /// 服务端指标清单为空但本地有未同步读数：指标与序列都用本地，并标注待同步。
+    func testEmptyServerMetricsFallsBackToPendingLocalData() throws {
+        let now = Date()
+        try readingsStore.insert(
+            DeviceReading(deviceID: device.id, metric: .temperature, value: 21, unit: "℃",
+                          recordedAt: now.addingTimeInterval(-60))
+        )
+        XCTAssertGreaterThan(try readingsStore.pendingCount(deviceID: device.id), 0)
+
+        let emptySeries = ReadingsSeries(
+            metric: "temperature", unit: "℃", bucket: .hour,
+            from: now.addingTimeInterval(-86_400), to: now, buckets: []
+        )
+        service.metricsResult = .success(ReadingMetrics(items: []))
+        service.seriesResult = .success(emptySeries)
+        service.summaryResult = .success(
+            ReadingSummary(metric: "temperature", unit: "℃", count: 0, minValue: 0, maxValue: 0, avg: 0, last: 0)
+        )
+
+        let viewModel = makeViewModel()
+        viewModel.start()
+        viewModel.setVisible(true)
+
+        XCTAssertEqual(viewModel.readings.metrics, [.temperature], "沿用本地聚合出的指标")
+        XCTAssertEqual(viewModel.readings.selectedMetric, .temperature)
+        XCTAssertTrue(viewModel.readings.hasData, "本地 UTC 网格仍有数据，不能空图")
+        XCTAssertTrue(viewModel.readings.isPendingLocalData)
+        XCTAssertEqual(viewModel.readings.sourceText, "待同步：本地数据")
     }
 }
 
@@ -398,6 +464,7 @@ private final class FakeReadingsService: ReadingsAPIServicing {
     var seriesResult: Result<ReadingsSeries, AppError> = .failure(.network("未配置"))
     var summaryResult: Result<ReadingSummary, AppError> = .failure(.network("未配置"))
     private(set) var seriesRequests: [(metric: ReadingMetric, from: Date, to: Date, bucket: ReadingsBucket)] = []
+    private(set) var metricsRequests = 0
 
     func fetchReadings(
         platform: String,
@@ -440,6 +507,7 @@ private final class FakeReadingsService: ReadingsAPIServicing {
         externalID: String,
         completion: @escaping (Result<ReadingMetrics, AppError>) -> Void
     ) {
+        metricsRequests += 1
         completion(metricsResult)
     }
 }

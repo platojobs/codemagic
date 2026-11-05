@@ -63,11 +63,24 @@ final class ReadingsLineChartView: UIView {
         drawDots(layout: layout, context: context)
     }
 
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        // CGColor 是静态快照，外观切换后必须重绘才能换成深色解析值。
+        if previousTraitCollection?.hasDifferentColorAppearance(comparedTo: traitCollection) == true {
+            setNeedsDisplay()
+        }
+    }
+
     // MARK: - Drawing
+
+    /// 自绘 CGColor 必须显式按当前 trait 解析，否则深色模式下会沿用上一次浅色解析结果。
+    private func cgColor(_ color: UIColor) -> CGColor {
+        color.resolvedColor(with: traitCollection).cgColor
+    }
 
     private func drawGrid(in plotRect: CGRect, context: CGContext) {
         context.saveGState()
-        context.setStrokeColor(AppTheme.Palette.separator.cgColor)
+        context.setStrokeColor(cgColor(AppTheme.Palette.separator))
         context.setLineWidth(0.5)
         for index in 0...4 {
             let y = plotRect.minY + plotRect.height * CGFloat(index) / 4
@@ -77,7 +90,7 @@ final class ReadingsLineChartView: UIView {
         context.strokePath()
 
         // 坐标轴：左侧纵轴 + 底部横轴
-        context.setStrokeColor(AppTheme.Palette.tertiaryText.cgColor)
+        context.setStrokeColor(cgColor(AppTheme.Palette.tertiaryText))
         context.setLineWidth(1)
         context.move(to: CGPoint(x: plotRect.minX, y: plotRect.minY))
         context.addLine(to: CGPoint(x: plotRect.minX, y: plotRect.maxY))
@@ -90,7 +103,7 @@ final class ReadingsLineChartView: UIView {
     private func drawBands(layout: ReadingsChartLayout, context: CGContext) {
         guard !layout.bandPolygons.isEmpty else { return }
         context.saveGState()
-        context.setFillColor(AppTheme.Palette.accent.withAlphaComponent(0.16).cgColor)
+        context.setFillColor(cgColor(AppTheme.Palette.accent.withAlphaComponent(0.16)))
         for polygon in layout.bandPolygons where polygon.count > 2 {
             context.beginPath()
             context.move(to: polygon[0])
@@ -106,7 +119,7 @@ final class ReadingsLineChartView: UIView {
     /// 每段单独描边：缺口处不跨空缺连线。
     private func drawPolylines(layout: ReadingsChartLayout, context: CGContext) {
         context.saveGState()
-        context.setStrokeColor(AppTheme.Palette.accent.cgColor)
+        context.setStrokeColor(cgColor(AppTheme.Palette.accent))
         context.setLineWidth(2)
         context.setLineJoin(.round)
         context.setLineCap(.round)
@@ -123,7 +136,7 @@ final class ReadingsLineChartView: UIView {
     private func drawDots(layout: ReadingsChartLayout, context: CGContext) {
         guard !layout.points.isEmpty else { return }
         context.saveGState()
-        context.setFillColor(AppTheme.Palette.accent.cgColor)
+        context.setFillColor(cgColor(AppTheme.Palette.accent))
         // 点数多时缩小半径，避免糊成一条线。
         let radius: CGFloat = layout.points.count > 30 ? 2 : 3
         for point in layout.points {
