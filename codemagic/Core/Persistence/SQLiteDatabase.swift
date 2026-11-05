@@ -144,6 +144,9 @@ final class SQLiteDatabase {
         if version < 6 {
             try migrateToVersion6()
         }
+        if version < 7 {
+            try migrateToVersion7()
+        }
     }
 
     /// v1：五张业务表，均含 `id / updated_at / deleted_at / sync_state`。
@@ -288,6 +291,60 @@ final class SQLiteDatabase {
         );
         PRAGMA user_version = 6;
         """)
+    }
+
+    /// v7：规则从「只看信号」扩到「看读数」。
+    ///
+    /// 新增列都带默认值，旧规则升级后仍是原来的 RSSI / 断开规则：
+    /// `metric` 保持 NULL、`comparison` 回填 `lte`、`consecutive` 回填 1，
+    /// 旧规则照常按 `threshold` 判定，不丢任何一条。
+    private func migrateToVersion7() throws {
+        // 极端旧库可能从未建过 rules 表（例如只跑过部分迁移的夹具），直接按 v7 结构建表。
+        let columns = try performQuery("PRAGMA table_info(rules);", [])
+        guard !columns.isEmpty else {
+            try executeScript("""
+            CREATE TABLE IF NOT EXISTS rules (
+                id TEXT PRIMARY KEY NOT NULL,
+                name TEXT NOT NULL,
+                trigger TEXT NOT NULL,
+                threshold INTEGER NOT NULL,
+                metric TEXT,
+                comparison TEXT NOT NULL DEFAULT 'lte',
+                reading_threshold REAL NOT NULL DEFAULT 0,
+                consecutive INTEGER NOT NULL DEFAULT 1,
+                device_id TEXT,
+                is_enabled INTEGER NOT NULL,
+                created_at REAL NOT NULL,
+                updated_at REAL NOT NULL,
+                deleted_at REAL,
+                sync_state TEXT NOT NULL
+            );
+            PRAGMA user_version = 7;
+            """)
+            return
+        }
+
+        // 逐列判断后再加：夹具数据库可能已经包含部分新列（例如把当前库回落到旧版本号）。
+        let existing = Set(columns.compactMap { $0.text("name") })
+        var script = ""
+        if !existing.contains("metric") {
+            script += "ALTER TABLE rules ADD COLUMN metric TEXT;\n"
+        }
+        if !existing.contains("comparison") {
+            script += "ALTER TABLE rules ADD COLUMN comparison TEXT NOT NULL DEFAULT 'lte';\n"
+        }
+        if !existing.contains("reading_threshold") {
+            script += "ALTER TABLE rules ADD COLUMN reading_threshold REAL NOT NULL DEFAULT 0;\n"
+        }
+        if !existing.contains("consecutive") {
+            script += "ALTER TABLE rules ADD COLUMN consecutive INTEGER NOT NULL DEFAULT 1;\n"
+        }
+        script += """
+        UPDATE rules SET comparison = 'lte' WHERE comparison IS NULL OR comparison = '';
+        UPDATE rules SET consecutive = 1 WHERE consecutive < 1 OR consecutive > 5;
+        PRAGMA user_version = 7;
+        """
+        try executeScript(script)
     }
 
     private func currentUserVersion() throws -> Int {

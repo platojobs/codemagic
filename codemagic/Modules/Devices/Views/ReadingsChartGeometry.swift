@@ -143,6 +143,59 @@ enum ReadingsChartGeometry {
         )
     }
 
+    /// 点选命中：返回距离触点最近的桶下标。
+    ///
+    /// - 只比较折线各桶的均值点，按最近距离取一个；
+    /// - 最近点仍超出 `proximity`（默认 24pt）视为点在空白处，返回 nil；
+    /// - 纯函数，不读取视图状态，命中与否与 Y 轴缩放无关。
+    static func hitIndex(
+        for point: CGPoint,
+        layout: ReadingsChartLayout,
+        proximity: CGFloat = 24
+    ) -> Int? {
+        guard !layout.points.isEmpty else { return nil }
+        var bestIndex: Int?
+        var bestDistance = CGFloat.greatestFiniteMagnitude
+        for (index, candidate) in layout.points.enumerated() {
+            let dx = candidate.x - point.x
+            let dy = candidate.y - point.y
+            let distance = (dx * dx + dy * dy).squareRoot()
+            if distance < bestDistance {
+                bestDistance = distance
+                bestIndex = index
+            }
+        }
+        guard let bestIndex, bestDistance <= proximity else { return nil }
+        return bestIndex
+    }
+
+    /// 点选摘要：`start–end · 最小 / 最大 / 平均 / 最新 · 条数`，时间用本地时区。
+    ///
+    /// 时间与单位均由参数注入，便于单测在不同时区与区间长度下断言。
+    static func bucketSummary(
+        _ bucket: ReadingsChartBucket,
+        unit: String,
+        timeZone: TimeZone = .current,
+        locale: Locale = .current,
+        showDate: Bool = false
+    ) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = locale
+        formatter.timeZone = timeZone
+        formatter.dateFormat = showDate ? "MM-dd HH:mm" : "HH:mm"
+        let start = formatter.string(from: bucket.start)
+        let end = formatter.string(from: bucket.end)
+        let last = bucket.lastValue.map { DeviceRule.formatReading($0, unit: unit) } ?? "—"
+        return [
+            "\(start)–\(end)",
+            "最小 \(DeviceRule.formatReading(bucket.minValue, unit: unit))",
+            "最大 \(DeviceRule.formatReading(bucket.maxValue, unit: unit))",
+            "平均 \(DeviceRule.formatReading(bucket.average, unit: unit))",
+            "最新 \(last)",
+            "\(bucket.count) 条",
+        ].joined(separator: " · ")
+    }
+
     private static func clamp(_ ratio: Double) -> Double {
         min(max(ratio, 0), 1)
     }

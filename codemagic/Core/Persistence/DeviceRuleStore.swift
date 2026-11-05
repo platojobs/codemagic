@@ -19,15 +19,19 @@ final class DeviceRuleStore {
         try database.execute(
             """
             INSERT OR REPLACE INTO rules
-            (id, name, trigger, threshold, device_id, is_enabled,
-             created_at, updated_at, deleted_at, sync_state)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+            (id, name, trigger, threshold, metric, comparison, reading_threshold, consecutive,
+             device_id, is_enabled, created_at, updated_at, deleted_at, sync_state)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """,
             [
                 .text(rule.id.uuidString),
                 .text(rule.name),
                 .text(rule.trigger.rawValue),
                 .integer(Int64(rule.threshold)),
+                rule.metric.map { .text($0.rawValue) } ?? .null,
+                .text(rule.comparison.rawValue),
+                .double(rule.readingThreshold),
+                .integer(Int64(rule.consecutive)),
                 rule.deviceID.map { .text($0.uuidString) } ?? .null,
                 .integer(rule.isEnabled ? 1 : 0),
                 .double(rule.createdAt.timeIntervalSince1970),
@@ -64,6 +68,10 @@ final class DeviceRuleStore {
             name: row.text("name") ?? "",
             trigger: RuleTrigger(rawValue: row.text("trigger") ?? "") ?? .disconnect,
             threshold: Int(row.integer("threshold") ?? -80),
+            metric: row.text("metric").flatMap(ReadingMetric.init(rawValue:)),
+            comparison: RuleComparison(rawValue: row.text("comparison") ?? "") ?? .lessOrEqual,
+            readingThreshold: row.double("reading_threshold") ?? 0,
+            consecutive: Int(row.integer("consecutive") ?? 1),
             deviceID: row.text("device_id").flatMap(UUID.init(uuidString:)),
             isEnabled: row.bool("is_enabled"),
             createdAt: createdAt,

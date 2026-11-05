@@ -3,17 +3,19 @@ import UIKit
 /// 自绘折线图：坐标轴、网格、折线、数据点与 min–max 区间带全部由 `draw(_:)` 绘制，不依赖第三方图表库。
 ///
 /// 折线按桶 `start` 的真实时间比例定位；服务端只返回有数据的桶，桶间缺口处折线断开。
+/// 点 / 长按折线上的桶会选中该桶并展示时间区间与 min/max/avg/last，点空白处取消。
 final class ReadingsLineChartView: UIView {
     private var buckets: [ReadingsChartBucket] = []
     private var interval = DateInterval(start: Date(timeIntervalSince1970: 0), duration: 0)
     private var unit: String = ""
     private var rangeTitle: String = ""
+    private var metricName: String = ""
+    private var selectedIndex: Int?
 
-    private let leftInset: CGFloat = 56
-    private let rightInset: CGFloat = 14
-    private let topInset: CGFloat = 14
-    private let bottomInset: CGFloat = 30
+    /// 点选近邻阈值：触点到桶均值点的距离超过该值视为空白。
+    private static let hitProximity: CGFloat = 24
 
+    // MARK: - Init
     override init(frame: CGRect) {
         super.init(frame: frame)
         backgroundColor = .clear
@@ -21,6 +23,13 @@ final class ReadingsLineChartView: UIView {
         contentMode = .redraw
         isAccessibilityElement = true
         accessibilityTraits = .image
+        accessibilityHint = "轻点折线上的时间桶可查看该时段的最小、最大、平均与最新读数"
+
+        let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
+        addGestureRecognizer(tap)
+        let longPress = UILongPressGestureRecognizer(target: self, action: #selector(handleLongPress(_:)))
+        longPress.minimumPressDuration = 0.3
+        addGestureRecognizer(longPress)
     }
 
     @available(*, unavailable)
@@ -29,25 +38,27 @@ final class ReadingsLineChartView: UIView {
     }
 
     /// 传入按时间升序的有数据的桶，以及查询区间（决定 X 轴比例）。
-    func configure(buckets: [ReadingsChartBucket], interval: DateInterval, unit: String, rangeTitle: String) {
+    func configure(
+        buckets: [ReadingsChartBucket],
+        interval: DateInterval,
+        unit: String,
+        rangeTitle: String,
+        metricName: String = ""
+    ) {
         self.buckets = buckets.sorted { $0.start < $1.start }
         self.interval = interval
         self.unit = unit
         self.rangeTitle = rangeTitle
-        accessibilityLabel = self.buckets.isEmpty
-            ? "暂无读数"
-            : "\(rangeTitle)走势，共 \(self.buckets.count) 个时间桶"
+        self.metricName = metricName
+        // 数据变化后旧下标可能越界，直接清空选中态。
+        selectedIndex = nil
+        updateAccessibilityLabel()
         setNeedsDisplay()
     }
 
     override func draw(_ rect: CGRect) {
         guard let context = UIGraphicsGetCurrentContext() else { return }
-        let plotRect = CGRect(
-            x: rect.minX + leftInset,
-            y: rect.minY + topInset,
-            width: max(rect.width - leftInset - rightInset, 1),
-            height: max(rect.height - topInset - bottomInset, 1)
-        )
+        let plotRect = Self.plotRect(in: rect)
         drawGrid(in: plotRect, context: context)
 
         let layout = ReadingsChartGeometry.layout(buckets: buckets, interval: interval, in: plotRect)
@@ -61,6 +72,7 @@ final class ReadingsLineChartView: UIView {
         drawBands(layout: layout, context: context)
         drawPolylines(layout: layout, context: context)
         drawDots(layout: layout, context: context)
+        drawSelection(layout: layout, in: plotRect, context: context)
     }
 
     override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
@@ -69,6 +81,73 @@ final class ReadingsLineChartView: UIView {
         if previousTraitCollection?.hasDifferentColorAppearance(comparedTo: traitCollection) == true {
             setNeedsDisplay()
         }
+    }
+
+    // MARK: - Geometry
+
+    private static func plotRect(in rect: CGRect) -> CGRect {
+        CGRect(
+            x: rect.minX + 56,
+            y: rect.minY + 14,
+            width: max(rect.width - 56 - 14, 1),
+            height: max(rect.height - 14 - 30, 1)
+        )
+    }
+
+    private func currentLayout(in rect: CGRect) -> ReadingsChartLayout {
+        ReadingsChartGeometry.layout(buckets: buckets, interval: interval, in: Self.plotRect(in: rect))
+    }
+
+    // MARK: - Selection
+
+    @objc private func handleTap(_ recognizer: UITapGestureRecognizer) {
+        select(at: recognizer.location(in: self))
+    }
+
+    @objc private func handleLongPress(_ recognizer: UILongPressGestureRecognizer) {
+        guard recognizer.state == .began || recognizer.state == .changed else { return }
+        select(at: recognizer.location(in: self))
+    }
+
+    private func select(at point: CGPoint) {
+        let layout = currentLayout(in: bounds)
+        let hit = ReadingsChartGeometry.hitIndex(
+            for: point,
+            layout: layout,
+            proximity: Self.hitProximity
+        )
+        // 命中空白处即取消选中；不改变 Y 轴（layout 始终由全部桶计算）。
+        guard hit != selectedIndex else { return }
+        selectedIndex = hit
+        updateAccessibilityLabel()
+        setNeedsDisplay()
+    }
+
+    // MARK: - Accessibility
+
+    private func updateAccessibilityLabel() {
+        guard !buckets.isEmpty else {
+            accessibilityLabel = "暂无读数"
+            return
+        }
+        if let selectedIndex, buckets.indices.contains(selectedIndex) {
+            let summary = ReadingsChartGeometry.bucketSummary(
+                buckets[selectedIndex],
+                unit: unit,
+                showDate: interval.duration > 2 * 86_400
+            )
+            accessibilityLabel = "\(prefix())\(summary)"
+        } else {
+            let minText = format(buckets.map(\.minValue).min() ?? 0)
+            let maxText = format(buckets.map(\.maxValue).max() ?? 0)
+            let count = buckets.reduce(0) { $0 + $1.count }
+            accessibilityLabel = "\(prefix())最低 \(minText)，最高 \(maxText)，共 \(count) 个数据点"
+        }
+    }
+
+    private func prefix() -> String {
+        let name = metricName.isEmpty ? "走势" : metricName
+        return "\(name)，最近 \(rangeTitle)，"
     }
 
     // MARK: - Drawing
@@ -152,6 +231,72 @@ final class ReadingsLineChartView: UIView {
         context.restoreGState()
     }
 
+    /// 选中态：竖向参考线 + 放大的数据点 + 顶部摘要条，明确区分其余桶。
+    private func drawSelection(layout: ReadingsChartLayout, in plotRect: CGRect, context: CGContext) {
+        guard let selectedIndex,
+              layout.buckets.indices.contains(selectedIndex),
+              layout.points.indices.contains(selectedIndex)
+        else { return }
+        let point = layout.points[selectedIndex]
+
+        context.saveGState()
+        // 竖向参考线只做位置提示，不改变 Y 轴范围。
+        context.setStrokeColor(cgColor(AppTheme.Palette.accent.withAlphaComponent(0.35)))
+        context.setLineWidth(1)
+        context.move(to: CGPoint(x: point.x, y: plotRect.minY))
+        context.addLine(to: CGPoint(x: point.x, y: plotRect.maxY))
+        context.strokePath()
+
+        context.setFillColor(cgColor(AppTheme.Palette.accent))
+        context.fillEllipse(in: CGRect(x: point.x - 6, y: point.y - 6, width: 12, height: 12))
+        context.setStrokeColor(cgColor(AppTheme.Palette.cardBackground))
+        context.setLineWidth(2)
+        context.strokeEllipse(in: CGRect(x: point.x - 4, y: point.y - 4, width: 8, height: 8))
+        context.restoreGState()
+
+        let bucket = layout.buckets[selectedIndex]
+        let summary = ReadingsChartGeometry.bucketSummary(
+            bucket,
+            unit: unit,
+            showDate: interval.duration > 2 * 86_400
+        )
+        drawSummary(summary, in: plotRect)
+    }
+
+    private func drawSummary(_ text: String, in plotRect: CGRect) {
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: UIFont.preferredFont(forTextStyle: .caption2),
+            .foregroundColor: AppTheme.Palette.primaryText,
+        ]
+        let maxWidth = plotRect.width - 12
+        let bounding = (text as NSString).boundingRect(
+            with: CGSize(width: maxWidth, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: attributes,
+            context: nil
+        )
+        let size = CGSize(width: ceil(bounding.width) + 12, height: ceil(bounding.height) + 8)
+        let origin = CGPoint(x: plotRect.minX + 6, y: plotRect.minY + 4)
+        let box = CGRect(origin: origin, size: size)
+        let path = UIBezierPath(roundedRect: box, cornerRadius: 6)
+        AppTheme.Palette.cardBackground.resolvedColor(with: traitCollection).setFill()
+        path.fill()
+        AppTheme.Palette.separator.resolvedColor(with: traitCollection).setStroke()
+        path.lineWidth = 0.5
+        path.stroke()
+        (text as NSString).draw(
+            with: CGRect(
+                x: box.minX + 6,
+                y: box.minY + 4,
+                width: maxWidth,
+                height: box.height - 8
+            ),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: attributes,
+            context: nil
+        )
+    }
+
     private func drawYAxisLabels(layout: ReadingsChartLayout, in plotRect: CGRect) {
         let labels: [(text: String, y: CGFloat)] = [
             (format(layout.yMax), plotRect.minY),
@@ -217,8 +362,6 @@ final class ReadingsLineChartView: UIView {
     }
 
     private func format(_ value: Double) -> String {
-        let rounded = (value * 10).rounded() / 10
-        let text = rounded == rounded.rounded() ? String(Int(rounded)) : String(format: "%.1f", rounded)
-        return unit.isEmpty ? text : "\(text) \(unit)"
+        DeviceRule.formatReading(value, unit: unit)
     }
 }

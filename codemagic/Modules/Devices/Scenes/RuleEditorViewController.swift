@@ -1,6 +1,6 @@
 import UIKit
 
-/// 新增本地规则的表单：名称、触发条件、阈值与生效设备，纯代码构建。
+/// 新增本地规则的表单：名称、触发条件（断开 / 信号 / 读数阈值）、阈值、连续条数与生效设备，纯代码构建。
 final class RuleEditorViewController: UIViewController {
     // MARK: - Input
 
@@ -9,16 +9,40 @@ final class RuleEditorViewController: UIViewController {
 
     private var selectedDeviceIndex = 0
     private var selectedTrigger: RuleTrigger = .disconnect
+    private var selectedMetric: ReadingMetric = .temperature
+    private var selectedComparison: RuleComparison = .greaterOrEqual
+    private var consecutive = 1
+
+    private static let editableMetrics: [ReadingMetric] = [
+        .temperature, .humidity, .battery, .heartRate, .co2,
+    ]
 
     // MARK: - Subviews
 
     private let scrollView = UIScrollView()
     private let contentStack = UIStackView()
     private let nameField = UITextField()
-    private let triggerControl = UISegmentedControl(items: ["设备断开", "信号低于阈值"])
+    private let triggerControl = UISegmentedControl(items: ["设备断开", "信号低于阈值", "读数阈值"])
     private let thresholdLabel = AppTheme.makeLabel(style: .subheadline, color: AppTheme.Palette.primaryText)
     private let thresholdSlider = UISlider()
     private let thresholdContainer = UIStackView()
+
+    private let readingContainer = UIStackView()
+    private let metricButton = UIButton(type: .system)
+    private let comparisonControl = UISegmentedControl(
+        items: RuleComparison.allCases.map(\.symbol)
+    )
+    private let readingThresholdField = UITextField()
+    private let readingThresholdUnitLabel = AppTheme.makeLabel(
+        style: .footnote,
+        color: AppTheme.Palette.secondaryText
+    )
+    private let consecutiveStepper = UIStepper()
+    private let consecutiveLabel = AppTheme.makeLabel(
+        style: .subheadline,
+        color: AppTheme.Palette.primaryText
+    )
+
     private let targetButton = UIButton(type: .system)
     private let noteLabel = AppTheme.makeLabel(style: .footnote, color: AppTheme.Palette.secondaryText)
 
@@ -44,6 +68,7 @@ final class RuleEditorViewController: UIViewController {
         configureNavigationItems()
         configureLayout()
         configureThresholdSection()
+        configureReadingSection()
         updateThresholdVisibility()
     }
 
@@ -108,12 +133,13 @@ final class RuleEditorViewController: UIViewController {
             content: makeTriggerControl()
         ))
         contentStack.addArrangedSubview(thresholdContainer)
+        contentStack.addArrangedSubview(readingContainer)
         contentStack.addArrangedSubview(makeFieldGroup(
             title: "生效设备",
             content: makeTargetButton()
         ))
 
-        noteLabel.text = "规则只在本地运行：扫描时按条件记录日志并在首页提示，不会向设备下发任何指令。"
+        noteLabel.text = "规则只在本地运行：扫描 / 取数时按条件记录日志、发本地通知，不会向设备下发任何指令。"
         contentStack.addArrangedSubview(noteLabel)
     }
 
@@ -175,6 +201,71 @@ final class RuleEditorViewController: UIViewController {
         thresholdContainer.addArrangedSubview(thresholdSlider)
     }
 
+    /// 读数阈值区：指标、比较符、阈值（带单位）与连续条数（防抖 1–5）。
+    private func configureReadingSection() {
+        readingContainer.axis = .vertical
+        readingContainer.spacing = AppTheme.Spacing.small
+
+        let titleLabel = AppTheme.makeLabel(style: .footnote, color: AppTheme.Palette.secondaryText)
+        titleLabel.text = "指标阈值"
+
+        var metricConfiguration = UIButton.Configuration.plain()
+        metricConfiguration.title = selectedMetric.displayName
+        metricConfiguration.image = UIImage(systemName: SymbolName.disclosure)
+        metricConfiguration.imagePlacement = .trailing
+        metricConfiguration.imagePadding = AppTheme.Spacing.small
+        metricConfiguration.contentInsets = .zero
+        metricButton.configuration = metricConfiguration
+        metricButton.contentHorizontalAlignment = .leading
+        metricButton.addTarget(self, action: #selector(handleMetricSelection), for: .touchUpInside)
+
+        comparisonControl.selectedSegmentIndex = RuleComparison.allCases.firstIndex(of: selectedComparison) ?? 0
+        comparisonControl.addTarget(self, action: #selector(handleComparisonChange), for: .valueChanged)
+
+        readingThresholdField.borderStyle = .roundedRect
+        readingThresholdField.keyboardType = .numbersAndPunctuation
+        readingThresholdField.placeholder = "30"
+        readingThresholdField.text = "30"
+        readingThresholdField.translatesAutoresizingMaskIntoConstraints = false
+        readingThresholdField.heightAnchor.constraint(equalToConstant: 40).isActive = true
+
+        let thresholdRow = UIStackView(arrangedSubviews: [
+            readingThresholdField, readingThresholdUnitLabel,
+        ])
+        thresholdRow.axis = .horizontal
+        thresholdRow.spacing = AppTheme.Spacing.small
+        thresholdRow.alignment = .center
+
+        consecutiveStepper.minimumValue = 1
+        consecutiveStepper.maximumValue = 5
+        consecutiveStepper.stepValue = 1
+        consecutiveStepper.value = Double(consecutive)
+        consecutiveStepper.addTarget(self, action: #selector(handleConsecutiveChange), for: .valueChanged)
+
+        let consecutiveRow = UIStackView(arrangedSubviews: [
+            consecutiveLabel, consecutiveStepper,
+        ])
+        consecutiveRow.axis = .horizontal
+        consecutiveRow.spacing = AppTheme.Spacing.small
+        consecutiveRow.alignment = .center
+
+        readingContainer.addArrangedSubview(titleLabel)
+        readingContainer.addArrangedSubview(makeFieldGroup(title: "指标", content: metricButton))
+        readingContainer.addArrangedSubview(makeFieldGroup(title: "比较符", content: comparisonControl))
+        readingContainer.addArrangedSubview(makeFieldGroup(title: "阈值", content: thresholdRow))
+        readingContainer.addArrangedSubview(makeFieldGroup(title: "连续满足条数", content: consecutiveRow))
+        updateReadingUnit()
+        updateConsecutiveLabel()
+    }
+
+    private func updateReadingUnit() {
+        readingThresholdUnitLabel.text = selectedMetric.defaultUnit
+    }
+
+    private func updateConsecutiveLabel() {
+        consecutiveLabel.text = consecutive > 1 ? "连续 \(consecutive) 条读数才告警" : "单条读数满足即告警"
+    }
+
     // MARK: - State
 
     private func updateThresholdLabel() {
@@ -183,18 +274,59 @@ final class RuleEditorViewController: UIViewController {
     }
 
     private func updateThresholdVisibility() {
-        thresholdContainer.isHidden = selectedTrigger == .disconnect
+        thresholdContainer.isHidden = selectedTrigger != .rssiBelowThreshold
+        readingContainer.isHidden = selectedTrigger != .readingThreshold
     }
 
     // MARK: - Actions
 
     @objc private func handleTriggerChange() {
-        selectedTrigger = triggerControl.selectedSegmentIndex == 1 ? .rssiBelowThreshold : .disconnect
+        switch triggerControl.selectedSegmentIndex {
+        case 1: selectedTrigger = .rssiBelowThreshold
+        case 2: selectedTrigger = .readingThreshold
+        default: selectedTrigger = .disconnect
+        }
         updateThresholdVisibility()
     }
 
     @objc private func handleThresholdChange() {
         updateThresholdLabel()
+    }
+
+    @objc private func handleComparisonChange() {
+        let index = comparisonControl.selectedSegmentIndex
+        guard RuleComparison.allCases.indices.contains(index) else { return }
+        selectedComparison = RuleComparison.allCases[index]
+    }
+
+    @objc private func handleConsecutiveChange() {
+        consecutive = Int(consecutiveStepper.value.rounded())
+        updateConsecutiveLabel()
+    }
+
+    @objc private func handleMetricSelection() {
+        let sheet = UIAlertController(title: "选择指标", message: nil, preferredStyle: .actionSheet)
+        for metric in Self.editableMetrics {
+            sheet.addAction(
+                UIAlertAction(title: metric.displayName, style: .default) { [weak self] _ in
+                    self?.selectedMetric = metric
+                    self?.updateMetricButtonTitle()
+                    self?.updateReadingUnit()
+                }
+            )
+        }
+        sheet.addAction(UIAlertAction(title: "取消", style: .cancel))
+        if let popover = sheet.popoverPresentationController {
+            popover.sourceView = metricButton
+            popover.sourceRect = metricButton.bounds
+        }
+        present(sheet, animated: true)
+    }
+
+    private func updateMetricButtonTitle() {
+        var configuration = metricButton.configuration
+        configuration?.title = selectedMetric.displayName
+        metricButton.configuration = configuration
     }
 
     @objc private func handleTargetSelection() {
@@ -229,19 +361,49 @@ final class RuleEditorViewController: UIViewController {
         let trimmedName = nameField.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let resolvedName: String
         if trimmedName.isEmpty {
-            resolvedName = selectedTrigger == .disconnect ? "设备断开提醒" : "信号强度提醒"
+            switch selectedTrigger {
+            case .disconnect: resolvedName = "设备断开提醒"
+            case .rssiBelowThreshold: resolvedName = "信号强度提醒"
+            case .readingThreshold: resolvedName = "\(selectedMetric.displayName)阈值提醒"
+            }
         } else {
             resolvedName = trimmedName
+        }
+
+        var readingValue = 0.0
+        if selectedTrigger == .readingThreshold {
+            let text = (readingThresholdField.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let parsed = Double(text), parsed.isFinite else {
+                presentInvalidThreshold()
+                return
+            }
+            readingValue = parsed
         }
 
         let rule = DeviceRule(
             name: resolvedName,
             trigger: selectedTrigger,
             threshold: Int(thresholdSlider.value.rounded()),
+            metric: selectedTrigger == .readingThreshold ? selectedMetric : nil,
+            comparison: selectedComparison,
+            readingThreshold: readingValue,
+            consecutive: consecutive,
             deviceID: deviceOptions[selectedDeviceIndex].id,
             isEnabled: true
         )
         onSave(rule)
         dismiss(animated: true)
+    }
+
+    private func presentInvalidThreshold() {
+        let alert = UIAlertController(
+            title: "阈值无效",
+            message: "请输入一个有效数字，例如 30 或 30.5。",
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "好", style: .default) { [weak self] _ in
+            self?.readingThresholdField.becomeFirstResponder()
+        })
+        present(alert, animated: true)
     }
 }

@@ -94,6 +94,101 @@ final class PersistenceTests: XCTestCase {
         XCTAssertEqual(loaded.trigger, .disconnect)
     }
 
+    func testReadingThresholdRuleRoundTripsAllFields() throws {
+        let store = DeviceRuleStore(database: testDatabase.database)
+        let rule = DeviceRule(
+            name: "高温告警",
+            trigger: .readingThreshold,
+            metric: .temperature,
+            comparison: .greaterOrEqual,
+            readingThreshold: 30,
+            consecutive: 3,
+            deviceID: UUID()
+        )
+        try store.upsert(rule)
+        let loaded = try XCTUnwrap(store.fetchAll().first)
+
+        XCTAssertEqual(loaded.trigger, .readingThreshold)
+        XCTAssertEqual(loaded.metric, .temperature)
+        XCTAssertEqual(loaded.comparison, .greaterOrEqual)
+        XCTAssertEqual(loaded.readingThreshold, 30)
+        XCTAssertEqual(loaded.consecutive, 3)
+        XCTAssertEqual(loaded.triggerDescription, "温度 >= 30 ℃，连续 3 条读数时告警")
+    }
+
+    /// v6 旧库升级到 v7：旧 RSSI / 断开规则不得丢失，且回填为 RSSI 语义（metric 为空、比较符 lte、连续 1 条）。
+    func testLegacyRulesSurviveVersion7MigrationAndStillFire() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codemagic-rules-legacy-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let path = directory.appendingPathComponent("legacy.sqlite").path
+
+        let rssiID = UUID()
+        let disconnectID = UUID()
+        var handle: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(path, &handle), SQLITE_OK)
+        XCTAssertNotNil(handle)
+        let legacySQL = """
+        CREATE TABLE rules (
+            id TEXT PRIMARY KEY NOT NULL,
+            name TEXT NOT NULL,
+            trigger TEXT NOT NULL,
+            threshold INTEGER NOT NULL,
+            device_id TEXT,
+            is_enabled INTEGER NOT NULL,
+            created_at REAL NOT NULL,
+            updated_at REAL NOT NULL,
+            deleted_at REAL,
+            sync_state TEXT NOT NULL
+        );
+        INSERT INTO rules VALUES ('\(rssiID.uuidString)', '旧弱信号规则', 'rssiBelowThreshold', -80, NULL, 1, 900, 1000, NULL, 'synced');
+        INSERT INTO rules VALUES ('\(disconnectID.uuidString)', '旧断开规则', 'disconnect', -80, NULL, 1, 900, 1000, NULL, 'synced');
+        CREATE TABLE scan_logs (
+            id TEXT PRIMARY KEY NOT NULL,
+            occurred_at REAL NOT NULL,
+            category TEXT NOT NULL,
+            level TEXT NOT NULL,
+            message TEXT NOT NULL,
+            updated_at REAL NOT NULL,
+            deleted_at REAL,
+            sync_state TEXT NOT NULL
+        );
+        PRAGMA user_version = 6;
+        """
+        XCTAssertEqual(sqlite3_exec(handle, legacySQL, nil, nil, nil), SQLITE_OK)
+        sqlite3_close(handle)
+
+        let migrated = try SQLiteDatabase(path: path)
+        defer { migrated.close() }
+
+        let store = DeviceRuleStore(database: migrated)
+        let rules = try store.fetchAll()
+        XCTAssertEqual(rules.count, 2, "旧规则一条都不能丢")
+
+        let rssiRule = try XCTUnwrap(rules.first { $0.id == rssiID })
+        XCTAssertEqual(rssiRule.trigger, .rssiBelowThreshold)
+        XCTAssertEqual(rssiRule.threshold, -80)
+        XCTAssertNil(rssiRule.metric, "旧规则不回填指标")
+        XCTAssertEqual(rssiRule.comparison, .lessOrEqual, "v7 默认比较符回填为 lte")
+        XCTAssertEqual(rssiRule.consecutive, 1, "v7 默认连续 1 条")
+        XCTAssertEqual(rssiRule.readingThreshold, 0)
+        XCTAssertEqual(rssiRule.syncState, .synced, "同步状态保留")
+
+        // 升级后规则仍然生效：RSSI ≤ -80 立即触发。
+        let evaluator = RuleEvaluator()
+        let device = makeSavedDevice()
+        let events = evaluator.evaluate(
+            rules: [rssiRule],
+            devices: [device],
+            observedRSSI: [device.peripheralID: -85],
+            date: Date(timeIntervalSince1970: 1000)
+        )
+        XCTAssertEqual(events.count, 1)
+        XCTAssertTrue(events[0].message.contains("-80 dBm"))
+        XCTAssertEqual(try migrated.query("PRAGMA user_version;").first?.integer("user_version"), 7)
+    }
+
     func testRecentDevicesSortedByLastSeen() throws {
         let store = RecentDeviceStore(database: testDatabase.database)
         let older = UUID()
@@ -171,7 +266,7 @@ final class PersistenceTests: XCTestCase {
         XCTAssertEqual(loaded.syncKey, "android:\(externalID)")
 
         let version = try testDatabase.database.query("PRAGMA user_version;").first?.integer("user_version")
-        XCTAssertEqual(version, 6)
+        XCTAssertEqual(version, 7)
     }
 
     func testDeviceTypeColumnRoundTrip() throws {
@@ -241,7 +336,7 @@ final class PersistenceTests: XCTestCase {
         XCTAssertEqual(device.groupPatch, .absent)
 
         let version = try migrated.query("PRAGMA user_version;").first?.integer("user_version")
-        XCTAssertEqual(version, 6)
+        XCTAssertEqual(version, 7)
     }
 
     func testAdvertisedNameAndPatchStatesRoundTrip() throws {

@@ -9,7 +9,8 @@ final class DeviceDetailViewController: UIViewController {
             buckets: [ReadingsChartBucket],
             interval: DateInterval,
             unit: String,
-            rangeTitle: String
+            rangeTitle: String,
+            metricName: String
         )
         case metricPicker
         case export
@@ -261,7 +262,8 @@ final class DeviceDetailViewController: UIViewController {
                     buckets: state.buckets,
                     interval: state.interval,
                     unit: state.unit,
-                    rangeTitle: state.selectedRange.title
+                    rangeTitle: state.selectedRange.title,
+                    metricName: state.selectedMetric?.displayName ?? ""
                 )
             ),
         ]
@@ -396,7 +398,7 @@ extension DeviceDetailViewController: UITableViewDataSource {
             }
             return cell
 
-        case .chart(let buckets, let interval, let unit, let rangeTitle):
+        case .chart(let buckets, let interval, let unit, let rangeTitle, let metricName):
             guard let cell = tableView.dequeueReusableCell(
                 withIdentifier: ReadingsChartCell.reuseIdentifier,
                 for: indexPath
@@ -407,7 +409,8 @@ extension DeviceDetailViewController: UITableViewDataSource {
                 buckets: buckets,
                 interval: interval,
                 unit: unit,
-                rangeTitle: rangeTitle
+                rangeTitle: rangeTitle,
+                metricName: metricName
             )
             return cell
 

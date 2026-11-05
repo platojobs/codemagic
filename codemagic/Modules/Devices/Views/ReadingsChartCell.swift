@@ -31,9 +31,16 @@ final class ReadingsChartCell: UITableViewCell {
         buckets: [ReadingsChartBucket],
         interval: DateInterval,
         unit: String,
-        rangeTitle: String
+        rangeTitle: String,
+        metricName: String
     ) {
-        chartView.configure(buckets: buckets, interval: interval, unit: unit, rangeTitle: rangeTitle)
+        chartView.configure(
+            buckets: buckets,
+            interval: interval,
+            unit: unit,
+            rangeTitle: rangeTitle,
+            metricName: metricName
+        )
     }
 }
 

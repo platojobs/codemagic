@@ -12,18 +12,18 @@
 
 | 项 | 结果 |
 | --- | --- |
-| 版本 | **v0.10.0**（`MARKETING_VERSION 0.10.0`，`CURRENT_PROJECT_VERSION 18`，tag `v0.10.0`：410 全量重同步 + 503 退避 + 会话到期日 + 真 Postgres E2E，契约对齐 `PJGoIoT` v0.9.0 / openapi 0.7.0） |
+| 版本 | **v0.11.0**（`MARKETING_VERSION 0.11.0`，`CURRENT_PROJECT_VERSION 19`，tag `v0.11.0`：指标阈值规则 + 图表点选 + CSV 区间文件名，契约沿用 `PJGoIoT` v0.9.0 / openapi 0.7.0） |
 | 五模块（首页 / 智能 / 产品 / 市场 / 我的） | 已实现，纯代码 UIKit，真实数据路径；设备管理并入首页，规则与场景集中在「智能」 |
 | CoreBluetooth 扫描 + 连接 | 已实现（`CBCentralManager`，真实 RSSI） |
 | BLE 读数采集 | 已实现：连接后订阅心率 `0x2A37`、电量 `0x2A19`、温度 `0x2A6E`、Nordic UART TX `6E400003-…`；各特征独立解析器，失败静默丢弃并写本地日志 |
-| 长周期读数图表 | 已实现：1 小时 / 24 小时 / 7 天 / 30 天区间切换（映射 `1m` / `1h` / `1h` / `1d`），X 轴按桶 `start` 真实时间比例定位，缺口断线，`avg` 折线 + `min`–`max` 区间带，Y 轴自适应并带单位 |
-| 本地持久化 | 已实现（SQLite3，含同步字段；迁移 **v6** 新增仅本机的 `scenarios` 表；v5 新增 `readings` 表，本地保留 7 天；v4 区分 `advertised_name` 与用户别名并记录三态 patch） |
+| 长周期读数图表 | 已实现：1 小时 / 24 小时 / 7 天 / 30 天区间切换（映射 `1m` / `1h` / `1h` / `1d`），X 轴按桶 `start` 真实时间比例定位，缺口断线，`avg` 折线 + `min`–`max` 区间带，Y 轴自适应并带单位；**v0.11.0 支持点选 / 长按桶查看 start–end、min/max/avg/last 与条数（本地时区），点空白取消，Y 轴不变，并给出无障碍摘要** |
+| 本地持久化 | 已实现（SQLite3，含同步字段；迁移 **v7** 为 `rules` 加指标阈值字段并回填旧规则，v6 新增仅本机的 `scenarios` 表；v5 新增 `readings` 表，本地保留 7 天；v4 区分 `advertised_name` 与用户别名并记录三态 patch） |
 | 设计系统（v0.8.0） | **已落地**：`Palette` 36 个语义色（浅/深 `UIColor(dynamicProvider:)`）、`Layout` 4pt 阶梯 / 16 页边距 / 56·72·88 行高 / 12 圆角 / 1dp 描边、`AppText` 10 级字号与等宽数字；代码内无硬编码色值与字号（单测强制扫描） |
 | 网络层 | 已实现（URLSession + Codable；设备/型号/同步/账号对齐 `PJGoIoT` v0.9.0 openapi 0.7.0；读数查询 / summary / series / metrics 对齐 v0.5.1 起；详情页远端刷新 800ms 去抖动 + 失败指数退避 ≤5 分钟，不可见/后台不请求；分页上限 changes 500 / readings 500 / export 5000 客户端先收敛） |
 | 同步 | **已实现**：匿名登录、增量拉取、批量推送（设备 ≤100/批 + 读数 ≤200/批、幂等键含读数）、冲突提示、tombstone、Keychain token、前后台 / BGTask 触发、断网累积补传；后台唤醒仅做受限推送（不拉增量、不建号、≥15 分钟间隔）；**410 `RESYNC_REQUIRED` 自动全量重同步（pending 不丢）**，503 `TIMEOUT` 指数退避 |
 | 自绘 RSSI + 自绘折线图 + 代码组装空状态 | 已实现（读数图表纯 `draw(_:)`，无第三方图表库） |
 | 首启引导 | **已实现**：3 步（蓝牙 / 通知 / 后台采集），仅首次或未走完时出现，可跳过；步骤与完成标记持久化到 `UserDefaults` |
-| 单元测试 | **236 个用例，0 失败**（`** TEST SUCCEEDED **`，2026-11-05，Xcode 27.2 / iPhone 17 模拟器；含 410 全量重同步 / pending 保留 / 二次从 0 / HTTP fake transport、503 TIMEOUT 退避、错误码映射表、changes/readings/export 分页上限、36 语义色与深浅变体、硬编码色值/字号审计、场景动作、迁移、刷新退避、通知节流、CSV 分页、接管码、注销、后台限流、首启与术语审计） |
+| 单元测试 | **260 个用例，0 失败**（`** TEST SUCCEEDED **`，2026-11-05，Xcode 27.2 / iPhone Duo · iOS 27.2 模拟器；含指标阈值规则（比较符边界 / 防抖 1–5 条 / 恢复一次 / 单位 / 旧规则 v6→v7 升级仍生效）、图表点选几何（最近桶 / 近邻阈值 / 空白不命中 / Y 轴不变 / 本地时区摘要）、CSV 文件名与 BOM、410 全量重同步、503 TIMEOUT 退避、错误码映射、分页上限、设计令牌审计、场景动作、通知节流、接管码、注销、首启与术语审计） |
 | 模拟器构建 | **通过**（`xcodebuild ... build`，`** BUILD SUCCEEDED **`） |
 | CI | **GitHub Actions 已实际运行 success**：v0.10.0 tag run [41979289081](https://github.com/platojobs/codemagic/actions/runs/41979289081)（success，提交 `74f14c4`），并行 `Build & Test`（**236 单测**）与 `E2E contract`（**151 项，0 SKIP**）；同 sha 的 `main` run [41979270921](https://github.com/platojobs/codemagic/actions/runs/41979270921) 经重跑同样 success；v0.9.0 run [41973731269](https://github.com/platojobs/codemagic/actions/runs/41973731269) 为上一基线；`codemagic.yaml` 作为可选替代保留但未验证 |
 | 真机 BLE / 签名 | **未验证**：本机无真机与 Apple 开发者账号；读数采集与图表需真机 / 可穿戴设备验证（见第 9 节） |
@@ -48,7 +48,8 @@
 - 空状态 / 错误状态 / 骨架屏齐全；设备卡片支持长按编辑与删除，点击进入详情。
 
 ### 智能 Smart（`Modules/Smart`）
-- **自动化**：本地规则（**断开**、**RSSI 低于阈值**）新增 / 启停 / 删除，规则持久化；可绑定单台设备或全部已保存设备；列表下方展示最近 5 条真实触发记录（摘自本地扫描日志）。
+- **自动化**：本地规则（**断开**、**RSSI 低于阈值**、**指标阈值**）新增 / 启停 / 删除，规则持久化；可绑定单台设备或全部已保存设备；列表下方展示最近 5 条真实触发记录（摘自本地扫描日志）。
+- **指标阈值（v0.11.0）**：条件为「指标（温度 / 湿度 / 电量 / 心率 / CO₂）+ 比较符（`>` / `<` / `>=` / `<=`）+ 阈值 + 连续 N 条（1–5，默认 1）」，阈值与单位成对展示（`℃` / `%` / `bpm` / `ppm`）。判定接在 `ReadingsIngestor` 落库之后、复用同一 `RuleEvaluator` 与 `RuleAlertCoordinator`，不另起链路；命中写入「智能 → 最近触发」（触发值、阈值、时间、设备），恢复只在确实发过触发通知后补一条。
 - **阈值告警通知（v0.6.0 起）**：首次命中请求通知授权，命中发本地通知、恢复发「已恢复」；节流窗口 1 / 5 / 30 分钟（默认 5，同一设备同一规则只报一次）；点击通知进入设备详情。
 - **场景（v0.8.0，仅本机）**：见「场景」小节。
 
@@ -60,7 +61,8 @@
 
 ### 设备详情（`Modules/Devices`）
 - 设备详情：连接蓝牙 → `GET /api/v1/my/devices/ios/{externalId}` 拉取云端设备记录，**优先展示云端 `deviceType` / `vendor` / `firmwareVersion` / `compatibility`**；云端字段为 `null` 时显示「型号未知」/「—」/「暂无兼容性说明」，绝不出 `"null"`；未注册型号仍展示别名、分组与最近出现时间，并在「云端记录」区展示同步信息；网络失败才降级本地缓存并标注缓存时间，无缓存显示失败空状态与重试。
-- **读数 CSV 导出（v0.6.0）**：当前设备 + 指标 + 区间；7 天内读本地、更长走服务端分页（上限 5 万条）；UTF-8 BOM / ISO8601 UTC / RFC 4180 转义；临时文件分享后删除，进度真实可重试。
+- **图表点选（v0.11.0）**：轻点 / 长按折线桶选中该桶，顶部摘要条展示 `start–end`、最小 / 最大 / 平均 / 最新与条数（本地时区）；点空白处取消；选中态不改变 Y 轴；图表 `accessibilityLabel` 在未选中时给出「指标，最近区间，最低 / 最高，共 N 个数据点」，选中后替换为当前桶摘要。
+- **读数 CSV 导出（v0.6.0 起，v0.11.0 扩展文件名）**：当前设备 + 指标 + 区间；7 天内读本地、更长走服务端分页（上限 5 万条）；UTF-8 BOM / ISO8601 UTC / RFC 4180 转义；文件名含设备名、设备标识末 8 位、指标、区间起止与 UTC 时间（如 `readings-温湿度计-4A2F9C31-temperature-20261105T010000Z-20261105T020000Z-1a2b3c4d.csv`）；临时文件分享后删除，进度真实可重试。
 - 跨平台设备：服务端拉回的 `platform = android` 设备标注「来自 Android，本机不可连接」，无展开箭头、禁用点击与连接，不进入详情。
 
 ### 产品 Products（`Modules/Products`）
@@ -440,6 +442,8 @@ HTTP/1.1 410 Gone
 
 ## 10. 版本记录
 
+- `v0.11.0`：指标阈值规则 + 图表点选 + CSV 区间文件名（`MARKETING_VERSION 0.11.0` / build 19，tag `v0.11.0`）。规则条件扩为「指标 + 比较符 + 阈值 + 连续 N 条（1–5，默认 1）」，判定接在 `ReadingsIngestor` → `RuleEvaluator` 同一链路，命中日志带触发值 / 阈值 / 时间 / 设备并进「智能 → 最近触发」，恢复只在确实发过触发通知后补一条；SQLite v7 为 `rules` 增加 `metric` / `comparison` / `reading_threshold` / `consecutive` 并回填旧规则（仍按 RSSI / 断开生效）。图表支持点选 / 长按桶查看 `start–end`、min/max/avg/last 与条数（本地时区），点空白取消、Y 轴不变、无障碍摘要随选中更新；几何命中（最近桶 / 24pt 近邻阈值 / 空白不命中）为纯函数。CSV 文件名含设备名、设备标识末 8 位、指标与 UTC 区间起止。新增单测 24 个（共 260 个）。规则仅本机，不改变网络契约。
+- `v0.10.0`：跟进后端新契约与真 Postgres E2E（build 18，tag `v0.10.0`）。410 `RESYNC_REQUIRED` 清游标并以 `cursor=0` 全量重拉，pending 设备 / 读数保留并重新上传，终态只处理一次、不进指数退避，界面明确提示；503 `TIMEOUT` 映射「服务端繁忙，稍后重试」并退避；401 文案「登录已失效」；`expiresAt` 在「我的」只读展示；`readings 500 / export 5000 / changes 500` 上限提前分片。新增 `scripts/e2e-postgres.sh`（本地真 Postgres，macOS runner 无 Docker 故不进 CI）。单测 236 个，E2E 151 项。
 - `v0.9.0`：首启引导 + 权限前置 + 启动打点 + 上架材料（`MARKETING_VERSION 0.9.0` / build 17，tag `v0.9.0`）。新增 3 步首启引导（蓝牙 / 通知 / `bluetooth-central` 后台限制），仅首次或未走完时出现，可跳过，`settings.onboardingCompleted` / `settings.onboardingStep` 持久化；蓝牙改为「先说明后申请」：`CBCentralManager` 延迟到用户点「继续」或真实扫描时创建，冷启动不再弹授权框；拒绝 / 受限时展示「仅本机可用」与「去系统设置」，首页空态主行动统一为「开始扫描」，权限被拒时改为「去系统设置」。新增 `App/LaunchMetrics.swift`（`os_signpost` + 控制台打点）与阶段日志：稳态冷启动 302.5 ms → 288.5 ms（4 次中位数，Debug 模拟器），首装首启 1718.3 ms → 479.3 ms；7 天读数清理移到后台队列，SQLite 打开 / 迁移仍同步（1.8 ms）。新增 `docs/store-listing.md`、`docs/privacy-policy.md`、`docs/app-privacy.md` 与 `PrivacyInfo.xcprivacy`（UserDefaults `CA92.1`、文件时间戳 `C617.1`、系统启动时间 `35F9.1`；无位置 / 广告 / 分析 / 账号密码）。术语统一：设备（不用装置）、同步（不用上传）、告警（事件）/ 通知（系统渠道）、接管码（不用配对码）；新增 `OnboardingTests` 5 个用例（含 13 条高频文案禁用词审计）。单测 **226** 个，E2E 151 项（无契约变更）。后端 `PJGoIoT` v0.7.0（契约 0.6.0）。
 - `v0.8.0`：设计令牌落地 + 米家信息架构 + 本地场景（`MARKETING_VERSION 0.8.0` / build 16，tag `v0.8.0`）。新增 `DesignSystem/DesignTokens.swift`：`Palette` 36 个语义色（浅/深各一套，`UIColor(dynamicProvider:)`）、`Layout` 4pt 阶梯 / 16 页边距 / 56·72·88 行高 / 12 圆角 / 1dp 描边、`AppText` 10 级字号与等宽数字、`Motion` / `Elevation`；窗口与导航栏跟随语义色，统一按压态（浅 6% / 深 8% 遮罩，卡片 0.98）与列表卡片 1dp 描边零阴影；自绘大标题 96→56 收缩（12pt 阈值、200ms 插值）。五 Tab 改为**首页 / 智能 / 产品 / 市场 / 我的**，原「设备」Tab 取消：首页为设备卡片网格（名称 / 连接状态 / 最近读数 / 信号条、分组分段、搜索排序、今日告警摘要、快捷场景），「智能」集中自动化规则与场景。新增 SQLite `scenarios` 表（迁移 **v6**，仅本机不同步）与场景执行器：连接 / 断开设备、开始 / 停止后台采集、静音告警 10/30/60 分钟、立即同步；逐动作执行、失败不阻断、汇总成功/失败与原因并显示进度。三态（骨架 300ms 延迟、空状态真实文案 + 主行动、错误可重试）覆盖五 Tab。单测 **221** 个（新增 14 个：令牌审计 / 场景执行 / 迁移 v6），E2E 151 项（无契约变更）。后端 `PJGoIoT` v0.7.0（契约 0.6.0）。
 - `v0.7.0`：配对码跨设备接管、账号数据导出与注销、后台采集（`MARKETING_VERSION 0.7.0` / build 15，tag `v0.7.0`）。「我的」新增 8 位一次性配对码（真实 `expiresAt` 倒计时、复制、重新生成使旧码失效）、从旧设备接管（token 替换 + 本机设备/读数全部重新标记 pending + 游标清零）、账号导出（`hasMore`/`nextCursor` 循环拉全、临时文件分享后删除、真实进度）、注销（二次确认永久删除，成功清 Keychain/SQLite 业务表/同步元数据，401 与网络错误分别处理）。声明 `bluetooth-central`，新增持久化后台采集开关（默认开启、说明耗电、关闭即断开）；后台唤醒仅受限推送（≤100 设备/≤200 读数、≥15 分钟间隔、不拉增量不建号）。单测 207 个（新增 19 个），E2E 151 项（新增 28 项）。后端 `PJGoIoT` v0.7.0（契约 0.6.0）。
@@ -488,4 +492,4 @@ HTTP/1.1 410 Gone
 | [`docs/app-privacy.md`](docs/app-privacy.md) | `PrivacyInfo.xcprivacy` 与代码位置逐项对照，含必需理由 API（UserDefaults `CA92.1`、文件时间戳 `C617.1`、系统启动时间 `35F9.1`） |
 | [`codemagic/Resources/PrivacyInfo.xcprivacy`](codemagic/Resources/PrivacyInfo.xcprivacy) | 实际打包进 App 的隐私清单：非追踪、5 类收集数据（Device ID / User ID / Other User Content / Health / Other Usage Data）、3 类必需理由 API |
 
-> 上架文案与版本说明一致：当前为 `v0.9.0`（build 17），详见 [`docs/releasenotes.md`](docs/releasenotes.md)。
+> 上架文案与版本说明一致：当前为 `v0.11.0`（build 19），详见 [`docs/releasenotes.md`](docs/releasenotes.md)。

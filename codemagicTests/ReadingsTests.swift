@@ -322,7 +322,7 @@ final class ReadingsStoreTests: XCTestCase {
         defer { migrated.close() }
 
         let version = try migrated.query("PRAGMA user_version;").first?.integer("user_version")
-        XCTAssertEqual(version, 6, "迁移后版本为 6")
+        XCTAssertEqual(version, 7, "迁移后版本为 7")
 
         let store = ReadingsStore(database: migrated)
         let reading = DeviceReading(
@@ -413,6 +413,104 @@ final class ReadingsIngestorTests: XCTestCase {
         XCTAssertEqual(try readingsStore.pendingCount(), 0)
         XCTAssertEqual(try logStore.fetchRecent(limit: 10).first?.category, .reading)
     }
+
+    // MARK: - 读数阈值规则接入
+
+    /// 温度 0x2A6E：uint16、0.01 ℃ 放大，小端序。
+    private func temperatureSample(_ celsius: Double, at time: TimeInterval) -> BluetoothReadingSample {
+        let raw = UInt16((celsius * 100).rounded())
+        return BluetoothReadingSample(
+            peripheralID: device.peripheralID,
+            characteristic: .temperature,
+            data: Data([UInt8(raw & 0xFF), UInt8((raw >> 8) & 0xFF)]),
+            receivedAt: Date(timeIntervalSince1970: time)
+        )
+    }
+
+    private func makeRuleIngestor(
+        rule: DeviceRule,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) throws -> ReadingsIngestor {
+        let ruleStore = DeviceRuleStore(database: testDatabase.database)
+        try ruleStore.upsert(rule)
+        return ReadingsIngestor(
+            readingsStore: readingsStore,
+            deviceStore: deviceStore,
+            logStore: logStore,
+            ruleStore: ruleStore,
+            ruleEvaluator: RuleEvaluator()
+        )
+    }
+
+    func testReadingRuleTriggerIsLoggedWithValueThresholdAndUnit() throws {
+        let rule = DeviceRule(
+            name: "高温告警",
+            trigger: .readingThreshold,
+            metric: .temperature,
+            comparison: .greaterOrEqual,
+            readingThreshold: 30,
+            consecutive: 2,
+            deviceID: device.id
+        )
+        let ingestor = try makeRuleIngestor(rule: rule)
+
+        _ = ingestor.ingest(temperatureSample(31.5, at: 500))
+        XCTAssertEqual(try logStore.countRuleAlerts(since: Date(timeIntervalSince1970: 0)), 0, "第一条未满足防抖")
+
+        _ = ingestor.ingest(temperatureSample(32.4, at: 501))
+        let alerts = try logStore.fetchRecent(limit: 10).filter { $0.category == .rule }
+        XCTAssertEqual(alerts.count, 1)
+        XCTAssertEqual(alerts[0].level, .warning)
+        XCTAssertTrue(alerts[0].message.contains("32.4 ℃"))
+        XCTAssertTrue(alerts[0].message.contains("30 ℃"))
+        XCTAssertTrue(alerts[0].message.contains("连续 2 条"))
+        XCTAssertTrue(alerts[0].message.contains(device.displayName))
+        XCTAssertEqual(alerts[0].occurredAt, Date(timeIntervalSince1970: 501))
+        XCTAssertEqual(try readingsStore.count(deviceID: device.id), 2, "读数照常落库")
+    }
+
+    func testReadingRuleRecoveryLogsInfoOnlyAfterTrigger() throws {
+        let rule = DeviceRule(
+            name: "高温告警",
+            trigger: .readingThreshold,
+            metric: .temperature,
+            comparison: .greaterOrEqual,
+            readingThreshold: 30,
+            consecutive: 1,
+            deviceID: device.id
+        )
+        let ingestor = try makeRuleIngestor(rule: rule)
+
+        _ = ingestor.ingest(temperatureSample(28, at: 600))
+        XCTAssertEqual(try logStore.fetchRecent(limit: 10).filter { $0.category == .rule }.count, 0)
+
+        _ = ingestor.ingest(temperatureSample(31, at: 601))
+        _ = ingestor.ingest(temperatureSample(28.5, at: 602))
+        let ruleLogs = try logStore.fetchRecent(limit: 10)
+            .filter { $0.category == .rule }
+            .sorted { $0.occurredAt < $1.occurredAt }
+        XCTAssertEqual(ruleLogs.count, 2)
+        XCTAssertEqual(ruleLogs[0].level, .warning)
+        XCTAssertEqual(ruleLogs[1].level, .info, "恢复只记 info，不进「最近触发」")
+        XCTAssertTrue(ruleLogs[1].message.contains("已恢复"))
+        XCTAssertEqual(try logStore.countRuleAlerts(since: Date(timeIntervalSince1970: 0)), 1)
+    }
+
+    func testDisabledReadingRuleDoesNotTrigger() throws {
+        let rule = DeviceRule(
+            name: "停用规则",
+            trigger: .readingThreshold,
+            metric: .temperature,
+            comparison: .greaterOrEqual,
+            readingThreshold: 30,
+            consecutive: 1,
+            isEnabled: false
+        )
+        let ingestor = try makeRuleIngestor(rule: rule)
+        _ = ingestor.ingest(temperatureSample(35, at: 700))
+        XCTAssertEqual(try logStore.fetchRecent(limit: 10).filter { $0.category == .rule }.count, 0)
+    }
 }
 
 final class ReadingsChartGeometryTests: XCTestCase {
@@ -447,5 +545,141 @@ final class ReadingsChartGeometryTests: XCTestCase {
             points.allSatisfy { abs($0.y - rect.midY) < 0.001 },
             "全相等时避免除零并居中"
         )
+    }
+}
+
+/// 图表点选：命中判定是纯函数，空白、近邻阈值与最近桶都在这里覆盖。
+final class ReadingsChartSelectionTests: XCTestCase {
+    private let rect = CGRect(x: 0, y: 0, width: 320, height: 180)
+    private let base = Date(timeIntervalSince1970: 1_800_000_000)
+
+    private func buckets(_ values: [Double]) -> [ReadingsChartBucket] {
+        values.enumerated().map { index, value in
+            ReadingsChartBucket(
+                start: base.addingTimeInterval(Double(index) * 3_600),
+                end: base.addingTimeInterval(Double(index + 1) * 3_600),
+                average: value,
+                minValue: value - 1,
+                maxValue: value + 1,
+                count: 6,
+                lastValue: value + 0.4
+            )
+        }
+    }
+
+    private func layout(_ values: [Double]) -> ReadingsChartLayout {
+        let items = buckets(values)
+        let interval = DateInterval(
+            start: items.first!.start,
+            end: items.last!.end
+        )
+        return ReadingsChartGeometry.layout(buckets: items, interval: interval, in: rect)
+    }
+
+    func testEmptyLayoutNeverHits() {
+        let empty = ReadingsChartGeometry.layout(
+            buckets: [],
+            interval: DateInterval(start: base, duration: 86_400),
+            in: rect
+        )
+        XCTAssertNil(ReadingsChartGeometry.hitIndex(for: CGPoint(x: rect.midX, y: rect.midY), layout: empty))
+    }
+
+    func testTapOnPointHitsItsBucket() {
+        let layout = layout([20, 24, 22])
+        for (index, point) in layout.points.enumerated() {
+            XCTAssertEqual(ReadingsChartGeometry.hitIndex(for: point, layout: layout), index)
+        }
+    }
+
+    func testTapNearPointStillHitsNearestBucket() {
+        let layout = layout([20, 24, 22])
+        let target = layout.points[1]
+        let near = CGPoint(x: target.x + 8, y: target.y + 6)
+        XCTAssertEqual(ReadingsChartGeometry.hitIndex(for: near, layout: layout), 1, "近邻阈值内按最近桶命中")
+    }
+
+    func testTapOnBlankAreaDoesNotHit() {
+        let layout = layout([20, 24, 22])
+        let point = layout.points[1]
+        XCTAssertNil(
+            ReadingsChartGeometry.hitIndex(
+                for: CGPoint(x: point.x, y: point.y - 40),
+                layout: layout
+            ),
+            "超出近邻阈值的空白区域不命中"
+        )
+        XCTAssertNil(
+            ReadingsChartGeometry.hitIndex(
+                for: CGPoint(x: rect.maxX - 4, y: rect.maxY - 4),
+                layout: layout
+            ),
+            "远离折线不命中"
+        )
+    }
+
+    func testProximityIsConfigurable() {
+        let layout = layout([20])
+        let point = layout.points[0]
+        let offset = CGPoint(x: point.x, y: point.y + 15)
+        XCTAssertEqual(ReadingsChartGeometry.hitIndex(for: offset, layout: layout), 0)
+        XCTAssertNil(ReadingsChartGeometry.hitIndex(for: offset, layout: layout, proximity: 10))
+    }
+
+    func testSelectionDoesNotChangeYAxis() {
+        let items = buckets([20, 24, 22])
+        let interval = DateInterval(start: items.first!.start, end: items.last!.end)
+        let before = ReadingsChartGeometry.layout(buckets: items, interval: interval, in: rect)
+        // 选中只影响绘制状态；布局仍由全部桶决定，Y 轴范围不变。
+        _ = ReadingsChartGeometry.hitIndex(for: before.points[1], layout: before)
+        let after = ReadingsChartGeometry.layout(buckets: items, interval: interval, in: rect)
+        XCTAssertEqual(before.yMin, after.yMin)
+        XCTAssertEqual(before.yMax, after.yMax)
+    }
+
+    func testBucketSummaryUsesLocalTimeAndUnit() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Asia/Shanghai")!
+        let start = calendar.date(from: DateComponents(
+            year: 2026, month: 11, day: 5, hour: 8, minute: 0
+        ))!
+        let bucket = ReadingsChartBucket(
+            start: start,
+            end: start.addingTimeInterval(3_600),
+            average: 22.5,
+            minValue: 21.5,
+            maxValue: 23,
+            count: 12,
+            lastValue: 22.8
+        )
+        let summary = ReadingsChartGeometry.bucketSummary(
+            bucket,
+            unit: "℃",
+            timeZone: TimeZone(identifier: "Asia/Shanghai")!,
+            locale: Locale(identifier: "en_US_POSIX")
+        )
+        XCTAssertEqual(
+            summary,
+            "08:00–09:00 · 最小 21.5 ℃ · 最大 23 ℃ · 平均 22.5 ℃ · 最新 22.8 ℃ · 12 条"
+        )
+    }
+
+    func testBucketSummaryShowsDashWhenLastValueMissing() {
+        let bucket = ReadingsChartBucket(
+            start: base,
+            end: base.addingTimeInterval(3_600),
+            average: 30,
+            minValue: 29,
+            maxValue: 31,
+            count: 2
+        )
+        let summary = ReadingsChartGeometry.bucketSummary(
+            bucket,
+            unit: "%",
+            timeZone: TimeZone(identifier: "UTC")!,
+            locale: Locale(identifier: "en_US_POSIX")
+        )
+        XCTAssertTrue(summary.contains("最新 —"))
+        XCTAssertTrue(summary.contains("最小 29 %"))
     }
 }

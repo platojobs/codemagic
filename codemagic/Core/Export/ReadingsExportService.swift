@@ -121,7 +121,7 @@ final class ReadingsExportService {
                 }
                 self.deliverProgress(readings.count, progress)
                 let data = ReadingsCSV.data(rows: readings.map(ReadingsCSV.Row.init(reading:)))
-                let url = try self.write(data, device: device, metric: metric)
+                let url = try self.write(data, device: device, metric: metric, interval: interval)
                 self.deliver(.success(url), completion)
             } catch {
                 self.deliver(.failure(.storeFailed(error.localizedDescription)), completion)
@@ -184,7 +184,13 @@ final class ReadingsExportService {
                     self.deliver(.failure(.noData), completion)
                     return
                 }
-                self.writeRows(merged, device: device, metric: metric, completion: completion)
+                self.writeRows(
+                    merged,
+                    device: device,
+                    metric: metric,
+                    interval: interval,
+                    completion: completion
+                )
             }
         }
     }
@@ -193,6 +199,7 @@ final class ReadingsExportService {
         _ items: [ReadingItem],
         device: SavedDevice,
         metric: ReadingMetric,
+        interval: DateInterval,
         completion: @escaping (Result<URL, ReadingsExportError>) -> Void
     ) {
         let rows = items.map { item -> ReadingsCSV.Row in
@@ -209,7 +216,12 @@ final class ReadingsExportService {
         workQueue.async { [weak self] in
             guard let self else { return }
             do {
-                let url = try self.write(ReadingsCSV.data(rows: rows), device: device, metric: metric)
+                let url = try self.write(
+                    ReadingsCSV.data(rows: rows),
+                    device: device,
+                    metric: metric,
+                    interval: interval
+                )
                 self.deliver(.success(url), completion)
             } catch {
                 self.deliver(.failure(.writeFailed(error.localizedDescription)), completion)
@@ -219,17 +231,50 @@ final class ReadingsExportService {
 
     // MARK: - File
 
-    private func write(_ data: Data, device: SavedDevice, metric: ReadingMetric) throws -> URL {
+    /// 文件名带设备名与设备标识、指标、区间起止（UTC）与随机后缀：
+    /// `readings-温湿度计-4A2F9C31-temperature-20261105T013000Z-20261105T043000Z-1a2b3c4d.csv`
+    private func write(
+        _ data: Data,
+        device: SavedDevice,
+        metric: ReadingMetric,
+        interval: DateInterval
+    ) throws -> URL {
         try fileManager.createDirectory(at: directoryURL, withIntermediateDirectories: true)
-        let stamp = Int(Date().timeIntervalSince1970)
-        let safeName = device.displayName
-            .replacingOccurrences(of: "/", with: "_")
-            .replacingOccurrences(of: ":", with: "_")
-        let filename = "readings-\(safeName)-\(metric.rawValue)-\(stamp)-\(UUID().uuidString.prefix(8)).csv"
+        let filename = Self.filename(device: device, metric: metric, interval: interval)
         let url = directoryURL.appendingPathComponent(filename)
         try data.write(to: url, options: .atomic)
         return url
     }
+
+    /// 文件名的纯函数部分，便于单测；日期一律 UTC。
+    static func filename(
+        device: SavedDevice,
+        metric: ReadingMetric,
+        interval: DateInterval,
+        suffix: String = String(UUID().uuidString.prefix(8)).lowercased()
+    ) -> String {
+        let safeName = device.displayName
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: ":", with: "_")
+            .replacingOccurrences(of: " ", with: "_")
+        let identifier = String(device.externalID
+            .filter { $0.isLetter || $0.isNumber }
+            .suffix(8))
+        let shortID = identifier.isEmpty
+            ? String(device.id.uuidString.replacingOccurrences(of: "-", with: "").suffix(8))
+            : identifier
+        let from = utcStamp.string(from: interval.start)
+        let to = utcStamp.string(from: interval.end)
+        return "readings-\(safeName)-\(shortID)-\(metric.rawValue)-\(from)-\(to)-\(suffix).csv"
+    }
+
+    private static let utcStamp: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        formatter.dateFormat = "yyyyMMdd'T'HHmmss'Z'"
+        return formatter
+    }()
 
     /// 临时目录中也只保留 1 天内的文件，避免异常退出后残留。
     private func cleanupStaleFiles() {

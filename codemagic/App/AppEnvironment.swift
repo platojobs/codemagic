@@ -104,7 +104,10 @@ final class AppEnvironment {
         readingsIngestor = ReadingsIngestor(
             readingsStore: readingsStore,
             deviceStore: savedDeviceStore,
-            logStore: scanLogStore
+            logStore: scanLogStore,
+            ruleStore: ruleStore,
+            ruleEvaluator: RuleEvaluator(),
+            ruleAlertCoordinator: ruleAlertCoordinator
         )
         pairingService = PairingService(
             api: accountAPI,

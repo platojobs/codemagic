@@ -184,6 +184,71 @@ final class ReadingsExportServiceTests: XCTestCase {
         }
         wait(for: [expectation], timeout: 5)
     }
+
+    /// 文件名：设备名 + 设备标识 + 指标 + 区间起止（UTC）+ 随机后缀。
+    func testFilenameCarriesDeviceMetricAndUTCRange() {
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = TimeZone(identifier: "UTC")!
+        let from = utc.date(from: DateComponents(
+            year: 2026, month: 11, day: 5, hour: 1, minute: 0
+        ))!
+        let to = from.addingTimeInterval(3_600)
+        let shortID = String(device.externalID.filter { $0.isLetter || $0.isNumber }.suffix(8))
+        let name = ReadingsExportService.filename(
+            device: device,
+            metric: .temperature,
+            interval: DateInterval(start: from, end: to),
+            suffix: "abcd1234"
+        )
+        XCTAssertEqual(
+            name,
+            "readings-温湿度计-\(shortID)-temperature-20261105T010000Z-20261105T020000Z-abcd1234.csv"
+        )
+        XCTAssertTrue(name.hasSuffix(".csv"))
+    }
+
+    func testFilenameReplacesPathSeparatorsAndSpaces() {
+        var special = makeSavedDevice(name: "厨房/阳台 探头")
+        special.externalID = "AA:BB:CC:DD:EE:FF"
+        let name = ReadingsExportService.filename(
+            device: special,
+            metric: .humidity,
+            interval: DateInterval(start: Date(timeIntervalSince1970: 0), end: Date(timeIntervalSince1970: 60)),
+            suffix: "deadbeef"
+        )
+        XCTAssertTrue(name.hasPrefix("readings-厨房_阳台_探头-CCDDEEFF-"), name)
+        XCTAssertFalse(name.contains("/"), "文件名不能带路径分隔符")
+        XCTAssertFalse(name.contains(" "), "空格替换为下划线")
+        XCTAssertTrue(name.contains("-humidity-"))
+        XCTAssertTrue(name.contains("19700101T000000Z-19700101T000100Z"))
+    }
+
+    func testExportedFileIsCreatedInsideDirectoryWithBOM() throws {
+        let now = Date()
+        try readingsStore.insert(DeviceReading(
+            deviceID: device.id, metric: .temperature, value: 21, unit: "℃",
+            recordedAt: now.addingTimeInterval(-3_600)
+        ))
+        let exporter = ReadingsExportService(
+            readingsStore: readingsStore,
+            readingsService: ReadingPageFake(),
+            directoryURL: exportDirectory
+        )
+        let expectation = expectation(description: "export")
+        exporter.export(device: device, metric: .temperature, range: .day7, progress: { _ in }) { result in
+            defer { expectation.fulfill() }
+            guard case .success(let url) = result else {
+                return XCTFail("导出失败：\(result)")
+            }
+            XCTAssertEqual(url.deletingLastPathComponent(), self.exportDirectory)
+            let data = (try? Data(contentsOf: url)) ?? Data()
+            XCTAssertEqual(Array(data.prefix(3)), [0xEF, 0xBB, 0xBF], "UTF-8 BOM 让 Excel 正确识别中文")
+            let text = String(data: data.dropFirst(3), encoding: .utf8) ?? ""
+            XCTAssertTrue(text.hasPrefix("recordedAt,metric,value,unit\n"))
+            try? FileManager.default.removeItem(at: url)
+        }
+        wait(for: [expectation], timeout: 5)
+    }
 }
 
 /// 分页假实现：按顺序返回预置页，并记录每次请求参数。

@@ -438,6 +438,15 @@ iOS 用例固化在 `codemagicTests/ReadingsGoldenTests.swift`；新增特征或
 
 ---
 
+### 3.14 指标阈值规则与「仅本机」语义（v0.11.0）
+
+- **规则仅本机**：`rules` / `scan_logs` / `scenarios` 均不参与 `GET /sync/changes` 与 `push`；新增的 `metric` / `comparison` / `reading_threshold` / `consecutive` 字段**不进入任何请求体**。后端没有规则端点，云端不会保存规则，换机 / 重装后规则不迁移。注销账号时随业务表一并清理。
+- **指标清单**：`temperature`（℃）、`humidity`（%）、`battery`（%）、`heart_rate`（bpm）、`co2`（ppm），与 3.9 的 `metrics` 枚举一致；比较符为 `gt` / `gte` / `lt` / `lte`，界面展示 `>` / `>=` / `<` / `<=`。
+- **判定链路**：BLE notify → `ReadingParser` → `ReadingsStore.insert` → `ReadingsIngestor.evaluateReadingRules` → `RuleEvaluator.evaluateReadings` → `ScanLogStore`（触发 `warning` / 恢复 `info`）→ `RuleAlertCoordinator`（节流 + 通知授权 + 恢复只在已送达告警后补发）。
+- **防抖语义**：连续 `N` 条读数（按 `recordedAt` 升序，且仅统计该规则指标）全部满足才触发一次；触发后继续满足不重复告警；任一条不满足即计数清零并恢复一次。阈值与单位在规则描述、命中日志与通知文案中成对出现，不显示裸数字。
+- **升级兼容**：v7 迁移逐列判断 `PRAGMA table_info(rules)` 后补列；旧规则保持原 `trigger` / `threshold` / `sync_state`，回填 `metric = NULL`、`comparison = 'lte'`、`consecutive = 1`，升级后仍生效（`PersistenceTests.testLegacyRulesSurviveVersion7MigrationAndStillFire`）。
+- **不改变契约**：本节不涉及网络字段，`openapi 0.7.0` 保持原样；E2E 契约套件不变。
+
 ## 4. 错误码
 
 客户端错误码用于日志、空状态副标题与问题反馈，**两端含义一致**：
@@ -546,23 +555,27 @@ iOS 迁移版本：
 - v3（v0.3.3，对齐 openapi 0.3.2）：`saved_devices` 增加 `device_type TEXT`（可空）；旧库升级后为 `NULL`，由设备详情拿到云端 `deviceType` 后回填。
 - v4（v0.3.6）：`saved_devices` 增加 `advertised_name TEXT`（广播名），以及 `alias_patch` / `advertised_name_patch` / `group_patch` 三态标记列，用于区分「未修改」与「显式清除」。
 - v5（v0.4.0）：新增 `readings` 表（`id`, `device_id`, `metric`, `value`, `unit`, `recorded_at`, `sync_state`），索引 `(device_id, metric, recorded_at DESC)` 支撑最近 60 点与 7 天清理。
+- v6（v0.8.0）：新增仅本机的 `scenarios` 表（`id`, `name`, `actions` JSON, `created_at`, `updated_at`），无同步字段。
+- v7（v0.11.0）：`rules` 增加 `metric TEXT`（可空）、`comparison TEXT NOT NULL DEFAULT 'lte'`、`reading_threshold REAL NOT NULL DEFAULT 0`、`consecutive INTEGER NOT NULL DEFAULT 1`；旧行回填为 `metric = NULL` / `lte` / `1`，仍按原 RSSI / 断开条件生效。
 
 iOS 表结构（`codemagic.sqlite`）：
 
 | 表 | 关键字段 |
 | --- | --- |
 | `saved_devices` | `id, peripheral_id, platform, external_id, name, remark, group_name, mac, vendor, device_type, firmware_version, last_seen_at, created_at, updated_at, deleted_at, sync_state` |
-| `rules` | `id, name, trigger, threshold, device_id, enabled, created_at, updated_at, deleted_at, sync_state` |
+| `rules` | `id, name, trigger, threshold, metric, comparison, reading_threshold, consecutive, device_id, enabled, created_at, updated_at, deleted_at, sync_state` |
 | `scan_logs` | `id, category, level, message, created_at, updated_at, deleted_at, sync_state` |
 | `recent_devices` | `peripheral_id, name, rssi, last_seen_at, updated_at, deleted_at, sync_state` |
 | `device_info_cache` | `peripheral_id, payload(JSON), fetched_at, updated_at, deleted_at, sync_state` |
 | `readings` | `id, device_id, metric, value, unit, recorded_at, sync_state` |
+| `scenarios`（仅本机） | `id, name, actions(JSON), created_at, updated_at` — 无 `deleted_at` / `sync_state` |
 
 规则触发语义（两端一致）：
 
 - **断开**：上一轮扫描存在、本轮不再出现（iOS 以 10s 未再出现为离开判定）。
 - **RSSI 低于阈值**：低于或等于阈值触发一次，恢复后重新武装。
-- 规则触发写本地日志；不做系统级通知（两端均未实现推送）。
+- **指标阈值（v0.11.0）**：`metric` 读数满足 `comparison` + `reading_threshold` 且**连续 `consecutive` 条（1–5，默认 1）**才触发一次；任一条不满足即清零并（若已告警）恢复一次。判定接在 `ReadingsIngestor` 落库之后，命中日志含触发值、阈值、时间与设备，进入「智能 → 最近触发」。
+- 规则触发写本地日志并（若用户授权通知）发本地通知；恢复通知只在确实发过触发通知后补一条。规则**不参与 push / changes**（仅本机），详见 3.14。
 
 ### 7.1 同步行为（v0.2.0 起，与 openapi 对齐）
 

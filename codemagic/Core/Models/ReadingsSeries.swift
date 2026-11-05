@@ -132,7 +132,8 @@ struct ReadingBucket: Decodable, Equatable {
             average: avg,
             minValue: Swift.min(minValue, maxValue),
             maxValue: Swift.max(minValue, maxValue),
-            count: count
+            count: count,
+            lastValue: last
         )
     }
 }
@@ -245,6 +246,28 @@ struct ReadingsChartBucket: Equatable {
     let minValue: Double
     let maxValue: Double
     let count: Int
+    /// 桶内最后一条读数；服务端与本地聚合都可能缺失，缺失时点选摘要显示「—」。
+    let lastValue: Double?
+
+    init(
+        start: Date,
+        end: Date,
+        average: Double,
+        minValue: Double,
+        maxValue: Double,
+        count: Int,
+        lastValue: Double? = nil
+    ) {
+        self.start = start
+        self.end = end
+        self.average = average
+        self.minValue = minValue
+        self.maxValue = maxValue
+        self.count = count
+        self.lastValue = lastValue
+    }
+
+    var duration: TimeInterval { end.timeIntervalSince(start) }
 }
 
 /// `GET .../readings/metrics` 的单项；`unit` 取该指标最近一条读数的单位。
