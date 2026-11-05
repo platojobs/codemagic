@@ -6,7 +6,7 @@ final class EmptyStateView: UIView {
     private let imageView = UIImageView()
     private let titleLabel = UILabel()
     private let messageLabel = UILabel()
-    private let actionButton = AppButton(style: .secondary, title: "重试")
+    private let actionButton = AppButton(style: .secondary, title: L10n.t("common.retry"))
     private let stackView = UIStackView()
     private var action: (() -> Void)?
 

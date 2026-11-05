@@ -29,7 +29,7 @@ final class RuleCell: UITableViewCell {
         nameLabel.text = rule.name
         descriptionLabel.text = "\(rule.triggerDescription) · \(targetName)"
         toggle.isOn = rule.isEnabled
-        toggle.accessibilityLabel = "启用规则 \(rule.name)"
+        toggle.accessibilityLabel = L10n.f("rule.cell.toggle", String(describing: rule.name))
     }
 
     @objc private func handleToggle() {

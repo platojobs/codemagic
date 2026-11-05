@@ -5,7 +5,7 @@ final class ErrorStateView: UIView {
     private let iconView = UIImageView()
     private let titleLabel = UILabel()
     private let messageLabel = UILabel()
-    private let retryButton = AppButton(style: .secondary, title: "重试", symbolName: SymbolName.refresh)
+    private let retryButton = AppButton(style: .secondary, title: L10n.t("common.retry"), symbolName: SymbolName.refresh)
     private var retryAction: (() -> Void)?
 
     init(height: CGFloat = 240) {
@@ -19,7 +19,7 @@ final class ErrorStateView: UIView {
         fatalError("init(coder:) has not been implemented")
     }
 
-    func configure(title: String, message: String, retryTitle: String = "重试", action: (() -> Void)?) {
+    func configure(title: String, message: String, retryTitle: String = L10n.t("common.retry"), action: (() -> Void)?) {
         titleLabel.text = title
         titleLabel.apply(.callout, color: Palette.textPrimary)
         messageLabel.text = message

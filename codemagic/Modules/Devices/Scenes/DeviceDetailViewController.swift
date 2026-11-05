@@ -155,7 +155,7 @@ final class DeviceDetailViewController: UIViewController {
 
     private func configureNavigationItems() {
         navigationItem.rightBarButtonItem = UIBarButtonItem(
-            title: "重试",
+            title: L10n.t("common.retry"),
             style: .plain,
             target: self,
             action: #selector(handleRetry)
@@ -182,52 +182,52 @@ final class DeviceDetailViewController: UIViewController {
 
         var localRows: [Row] = [
             // 展示顺序：用户别名 → 广播名 → 型号名/型号键，见 SavedDevice.displayName。
-            Row(title: "显示名称", value: device.displayName),
-            Row(title: "用户别名", value: device.remark.isEmpty ? "—" : device.remark),
-            Row(title: "广播名", value: device.advertisedName.isEmpty ? "—" : device.advertisedName),
-            Row(title: "分组", value: device.groupName),
-            Row(title: "标识符", value: device.peripheralID.uuidString),
+            Row(title: L10n.t("device.detail.displayName"), value: device.displayName),
+            Row(title: L10n.t("device.detail.alias"), value: device.remark.isEmpty ? "—" : device.remark),
+            Row(title: L10n.t("device.detail.advertisedName"), value: device.advertisedName.isEmpty ? "—" : device.advertisedName),
+            Row(title: L10n.t("device.detail.group"), value: device.groupName),
+            Row(title: L10n.t("device.detail.identifier"), value: device.peripheralID.uuidString),
             Row(
-                title: "最近出现",
-                value: device.lastSeenAt.map { AppDateFormat.absolute($0) } ?? "尚无扫描记录"
+                title: L10n.t("device.detail.lastSeen"),
+                value: device.lastSeenAt.map { AppDateFormat.absolute($0) } ?? L10n.t("device.detail.noScanRecord")
             ),
         ]
 
         if let product = viewModel.product {
-            localRows.append(Row(title: "厂商", value: product.vendor.isEmpty ? "—" : product.vendor))
+            localRows.append(Row(title: L10n.t("device.detail.vendor"), value: product.vendor.isEmpty ? "—" : product.vendor))
             // 未注册型号时 deviceType 为 null：显示「型号未知」，不影响别名 / 分组 / 最近出现。
             localRows.append(
-                Row(title: "型号", value: product.deviceType.isEmpty ? "型号未知" : product.deviceType)
+                Row(title: L10n.t("catalog.model"), value: product.deviceType.isEmpty ? L10n.t("device.detail.modelUnknown") : product.deviceType)
             )
             localRows.append(
-                Row(title: "固件版本", value: product.firmwareVersion.isEmpty ? "—" : product.firmwareVersion)
+                Row(title: L10n.t("device.detail.firmwareVersion"), value: product.firmwareVersion.isEmpty ? "—" : product.firmwareVersion)
             )
             localRows.append(Row(title: "MAC", value: product.mac.isEmpty ? "—" : product.mac))
         }
-        sections.append(SectionModel(title: "设备信息", rows: localRows))
+        sections.append(SectionModel(title: L10n.t("device.detail.info"), rows: localRows))
         sections.append(makeDataSection())
 
         if let product = viewModel.product {
             if !product.gattServices.isEmpty {
                 let serviceRows = product.gattServices.map {
-                    Row(title: $0.name.isEmpty ? "未命名服务" : $0.name, value: $0.uuid)
+                    Row(title: $0.name.isEmpty ? L10n.t("device.detail.unnamedService") : $0.name, value: $0.uuid)
                 }
-                sections.append(SectionModel(title: "GATT 服务与特征", rows: serviceRows))
+                sections.append(SectionModel(title: L10n.t("device.detail.gatt"), rows: serviceRows))
             }
 
             let compatibilityValue = product.compatibility.isEmpty
-                ? "暂无兼容性说明"
-                : product.compatibility.joined(separator: "；")
+                ? L10n.t("device.detail.noCompatibility")
+                : product.compatibility.joined(separator: L10n.t("common.semicolonSeparator"))
             sections.append(
                 SectionModel(
-                    title: "兼容性",
-                    rows: [Row(title: "兼容设备 / 固件", value: compatibilityValue)]
+                    title: L10n.t("device.detail.compatibility"),
+                    rows: [Row(title: L10n.t("device.detail.compatibleDevices"), value: compatibilityValue)]
                 )
             )
 
             if !product.note.isEmpty {
                 sections.append(
-                    SectionModel(title: "云端记录", rows: [Row(title: "同步信息", value: product.note)])
+                    SectionModel(title: L10n.t("device.detail.cloudRecord"), rows: [Row(title: L10n.t("device.detail.syncInfo"), value: product.note)])
                 )
             }
         }
@@ -241,23 +241,23 @@ final class DeviceDetailViewController: UIViewController {
         let state = viewModel.readings
         guard !state.metricInfos.isEmpty else {
             return SectionModel(
-                title: "数据",
-                rows: [Row(title: "暂无读数", value: viewModel.readingsEmptyMessage, kind: .emptyState)]
+                title: L10n.t("device.detail.data"),
+                rows: [Row(title: L10n.t("device.detail.noReadings"), value: viewModel.readingsEmptyMessage, kind: .emptyState)]
             )
         }
 
         var rows: [Row] = [
-            Row(title: "区间", value: state.selectedRange.title, kind: .range),
+            Row(title: L10n.t("device.detail.range"), value: state.selectedRange.title, kind: .range),
             Row(
-                title: "指标",
-                value: state.selectedMetric.map { viewModel.metricTitle(for: $0) } ?? "未选择",
+                title: L10n.t("device.detail.metric"),
+                value: state.selectedMetric.map { viewModel.metricTitle(for: $0) } ?? L10n.t("device.detail.notSelected"),
                 kind: .metricPicker
             ),
             Row(
-                title: "\(state.selectedRange.title) 走势",
+                title: L10n.f("device.detail.trendTitle", String(describing: state.selectedRange.title)),
                 value: state.hasData
-                    ? "\(state.buckets.count) 个时间桶 · \(state.metricCount) 条"
-                    : "暂无读数",
+                    ? L10n.f("device.detail.bucketSummary", String(describing: state.buckets.count), String(describing: state.metricCount))
+                    : L10n.t("device.detail.noReadings"),
                 kind: .chart(
                     buckets: state.buckets,
                     interval: state.interval,
@@ -270,29 +270,29 @@ final class DeviceDetailViewController: UIViewController {
 
         if let summary = state.summary, summary.count > 0 {
             let unit = summary.unit.isEmpty ? state.unit : summary.unit
-            rows.append(Row(title: "24 小时 · 最小", value: formatted(summary.minValue, unit: unit)))
-            rows.append(Row(title: "24 小时 · 最大", value: formatted(summary.maxValue, unit: unit)))
-            rows.append(Row(title: "24 小时 · 平均", value: formatted(summary.avg, unit: unit)))
-            rows.append(Row(title: "24 小时 · 最新", value: formatted(summary.last, unit: unit)))
-            rows.append(Row(title: "24 小时 · 条数", value: "\(summary.count) 条"))
+            rows.append(Row(title: L10n.t("device.detail.summary.min"), value: formatted(summary.minValue, unit: unit)))
+            rows.append(Row(title: L10n.t("device.detail.summary.max"), value: formatted(summary.maxValue, unit: unit)))
+            rows.append(Row(title: L10n.t("device.detail.summary.avg"), value: formatted(summary.avg, unit: unit)))
+            rows.append(Row(title: L10n.t("device.detail.summary.last"), value: formatted(summary.last, unit: unit)))
+            rows.append(Row(title: L10n.t("device.detail.summary.count"), value: L10n.f("common.readingsCount", String(describing: summary.count))))
         } else {
-            rows.append(Row(title: "24 小时汇总", value: "暂无 24 小时内的读数"))
+            rows.append(Row(title: L10n.t("device.detail.summary24h"), value: L10n.t("device.detail.noReadings24h")))
         }
 
-        rows.append(Row(title: "数据来源", value: state.sourceText))
+        rows.append(Row(title: L10n.t("device.detail.dataSource"), value: state.sourceText))
 
         if let metric = state.selectedMetric {
             rows.append(
                 Row(
-                    title: "导出 CSV",
-                    value: "\(metric.displayName) · \(state.selectedRange.title) · 当前设备",
+                    title: L10n.t("device.detail.exportCSV"),
+                    value: L10n.f("device.detail.exportContext", String(describing: metric.displayName), String(describing: state.selectedRange.title)),
                     kind: .export
                 )
             )
         }
 
         if state.recent.isEmpty {
-            rows.append(Row(title: "最近记录", value: "暂无记录"))
+            rows.append(Row(title: L10n.t("device.detail.recentRecords"), value: L10n.t("common.noRecords")))
         } else {
             for reading in state.recent {
                 rows.append(
@@ -303,13 +303,13 @@ final class DeviceDetailViewController: UIViewController {
                 )
             }
         }
-        return SectionModel(title: "数据", rows: rows)
+        return SectionModel(title: L10n.t("device.detail.data"), rows: rows)
     }
 
     private func formatted(_ value: Double?, unit: String) -> String {
         guard let value else { return "—" }
         let rounded = (value * 10).rounded() / 10
-        let text = rounded == rounded.rounded() ? String(Int(rounded)) : String(format: "%.1f", rounded)
+        let text = rounded == rounded.rounded() ? String(Int(rounded)) : String(format: "%.1f", locale: Locale.current, rounded)
         return unit.isEmpty ? text : "\(text) \(unit)"
     }
 
@@ -336,14 +336,14 @@ final class DeviceDetailViewController: UIViewController {
         let title: String
         switch viewModel.state {
         case .failed(let error):
-            title = "设备信息读取失败"
-            message = "\(error.localizedDescriptionText)。请确认本地 Go 服务或线上接口可用。"
+            title = L10n.t("device.detail.infoLoadFailed")
+            message = L10n.f("device.detail.infoLoadFailedDetail", String(describing: error.localizedDescriptionText))
         case .connecting, .loadingInfo:
-            title = "正在读取设备信息"
-            message = "连接蓝牙后将从服务端拉取厂商与固件版本，失败时会回退到本地缓存。"
+            title = L10n.t("device.detail.readingInfo")
+            message = L10n.t("device.detail.infoLoadingNote")
         case .idle:
-            title = "尚未读取"
-            message = "点击右上角重试。"
+            title = L10n.t("device.detail.notReadYet")
+            message = L10n.t("device.detail.tapRetry")
         case .loaded, .cache:
             title = ""
             message = ""
@@ -353,7 +353,7 @@ final class DeviceDetailViewController: UIViewController {
             symbolName: SymbolName.device,
             title: title,
             message: message,
-            actionTitle: "重试",
+            actionTitle: L10n.t("common.retry"),
             action: { [weak self] in self?.viewModel.retry() }
         )
         tableView.backgroundView = emptyStateView
@@ -474,11 +474,11 @@ extension DeviceDetailViewController: UITableViewDelegate {
         guard exportProgressAlert == nil else { return }
 
         let alert = UIAlertController(
-            title: "正在导出 CSV",
-            message: "已读取 0 条…",
+            title: L10n.t("device.detail.exporting"),
+            message: L10n.t("device.detail.exportProgress0"),
             preferredStyle: .alert
         )
-        alert.addAction(UIAlertAction(title: "取消", style: .cancel) { [weak self] _ in
+        alert.addAction(UIAlertAction(title: L10n.t("common.cancel"), style: .cancel) { [weak self] _ in
             self?.exportProgressAlert = nil
         })
         present(alert, animated: true)
@@ -488,7 +488,7 @@ extension DeviceDetailViewController: UITableViewDelegate {
             range: range,
             metric: metric,
             progress: { [weak self] count in
-                self?.exportProgressAlert?.message = "已读取 \(count) 条…"
+                self?.exportProgressAlert?.message = L10n.f("device.detail.exportProgress", String(describing: count))
             },
             completion: { [weak self] result in
                 guard let self, self.exportProgressAlert != nil else { return }
@@ -524,12 +524,12 @@ extension DeviceDetailViewController: UITableViewDelegate {
         metric: ReadingMetric
     ) {
         let alert = UIAlertController(
-            title: "导出失败",
-            message: error.errorDescription ?? "未知错误",
+            title: L10n.t("device.detail.exportFailed"),
+            message: error.errorDescription ?? L10n.t("common.unknownError"),
             preferredStyle: .alert
         )
-        alert.addAction(UIAlertAction(title: "取消", style: .cancel))
-        alert.addAction(UIAlertAction(title: "重试", style: .default) { [weak self] _ in
+        alert.addAction(UIAlertAction(title: L10n.t("common.cancel"), style: .cancel))
+        alert.addAction(UIAlertAction(title: L10n.t("common.retry"), style: .default) { [weak self] _ in
             self?.startExport(range: range, metric: metric)
         })
         present(alert, animated: true)
@@ -538,7 +538,7 @@ extension DeviceDetailViewController: UITableViewDelegate {
     private func presentMetricPicker() {
         let metrics = viewModel.readings.metrics
         guard metrics.count > 1 else { return }
-        let sheet = UIAlertController(title: "选择指标", message: nil, preferredStyle: .actionSheet)
+        let sheet = UIAlertController(title: L10n.t("device.detail.selectMetric"), message: nil, preferredStyle: .actionSheet)
         for metric in metrics {
             let isSelected = metric == viewModel.readings.selectedMetric
             let title = viewModel.metricTitle(for: metric)
@@ -549,7 +549,7 @@ extension DeviceDetailViewController: UITableViewDelegate {
                 }
             )
         }
-        sheet.addAction(UIAlertAction(title: "取消", style: .cancel))
+        sheet.addAction(UIAlertAction(title: L10n.t("common.cancel"), style: .cancel))
         if let popover = sheet.popoverPresentationController {
             popover.sourceView = tableView
             popover.sourceRect = tableView.rectForRow(at: IndexPath(row: 0, section: 0))

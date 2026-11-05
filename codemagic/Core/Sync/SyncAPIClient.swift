@@ -60,7 +60,7 @@ final class SyncAPIClient: SyncAPIServicing {
                 do {
                     let decoded = try self.decoder.decode(AnonymousResponse.self, from: response.data)
                     guard !decoded.token.isEmpty else {
-                        self.deliver(.failure(.decoding("匿名登录响应缺少 token")), completion)
+                        self.deliver(.failure(.decoding(L10n.t("sync.api.missingToken"))), completion)
                         return
                     }
                     self.deliver(
@@ -98,7 +98,7 @@ final class SyncAPIClient: SyncAPIServicing {
             URLQueryItem(name: "limit", value: String(APILimits.clamp(limit, to: APILimits.changes))),
         ]
         guard let url = components?.url else {
-            completion(.failure(.configuration("无法构造同步 URL")))
+            completion(.failure(.configuration(L10n.t("sync.api.urlFailed"))))
             return
         }
         let request = HTTPRequest(url: url, headers: authorization(token))
@@ -124,7 +124,7 @@ final class SyncAPIClient: SyncAPIServicing {
                 PushRequest(clientID: clientID, devices: devices, readings: readings)
             )
         } catch {
-            completion(.failure(.decoding("推送请求编码失败：\(error.localizedDescription)")))
+            completion(.failure(.decoding(L10n.f("sync.api.encodeFailed", String(describing: error.localizedDescription)))))
             return
         }
 
@@ -253,7 +253,7 @@ final class SyncAPIClient: SyncAPIServicing {
 
 /// BASE_URL 未配置时的降级实现：同步请求直接返回配置错误，不影响本地功能。
 final class UnavailableSyncAPI: SyncAPIServicing {
-    private let error = AppError.configuration("BASE_URL 未正确配置，同步不可用")
+    private let error = AppError.configuration(L10n.t("sync.api.baseUrlMissing"))
 
     func createAnonymousSession(completion: @escaping (Result<AnonymousSession, AppError>) -> Void) {
         completion(.failure(error))

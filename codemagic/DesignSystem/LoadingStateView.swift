@@ -9,7 +9,7 @@ final class LoadingStateView: UIView {
     override init(frame: CGRect) {
         super.init(frame: frame)
         spinner.startAnimating()
-        label.text = "正在加载…"
+        label.text = L10n.t("common.loading")
         label.textAlignment = .center
 
         stack.axis = .vertical

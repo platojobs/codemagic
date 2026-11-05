@@ -23,7 +23,7 @@ final class ReadingsLineChartView: UIView {
         contentMode = .redraw
         isAccessibilityElement = true
         accessibilityTraits = .image
-        accessibilityHint = "轻点折线上的时间桶可查看该时段的最小、最大、平均与最新读数"
+        accessibilityHint = L10n.t("chart.a11y.hint")
 
         let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
         addGestureRecognizer(tap)
@@ -58,7 +58,7 @@ final class ReadingsLineChartView: UIView {
 
     override func draw(_ rect: CGRect) {
         guard let context = UIGraphicsGetCurrentContext() else { return }
-        let plotRect = Self.plotRect(in: rect)
+        let plotRect = plotRect(in: rect)
         drawGrid(in: plotRect, context: context)
 
         let layout = ReadingsChartGeometry.layout(buckets: buckets, interval: interval, in: plotRect)
@@ -85,17 +85,33 @@ final class ReadingsLineChartView: UIView {
 
     // MARK: - Geometry
 
-    private static func plotRect(in rect: CGRect) -> CGRect {
-        CGRect(
-            x: rect.minX + 56,
+    private func plotRect(in rect: CGRect) -> CGRect {
+        let leading = yAxisLeadingInset(in: rect)
+        return CGRect(
+            x: rect.minX + leading,
             y: rect.minY + 14,
-            width: max(rect.width - 56 - 14, 1),
+            width: max(rect.width - leading - 14, 1),
             height: max(rect.height - 14 - 30, 1)
         )
     }
 
+    /// Y 轴标签随动态字体缩放，左侧预留宽度按实际标签宽度计算，避免大字号时标签压到绘图区。
+    private func yAxisLeadingInset(in rect: CGRect) -> CGFloat {
+        let font = Self.yAxisFont()
+        let samples = [buckets.map(\.minValue).min(), buckets.map(\.maxValue).max()]
+            .compactMap { $0.map(format) }
+        let width = samples
+            .map { ($0 as NSString).size(withAttributes: [.font: font]).width }
+            .max() ?? 0
+        return min(max(56, width + 14), rect.width * 0.45)
+    }
+
+    private static func yAxisFont() -> UIFont {
+        AppText.caption.font()
+    }
+
     private func currentLayout(in rect: CGRect) -> ReadingsChartLayout {
-        ReadingsChartGeometry.layout(buckets: buckets, interval: interval, in: Self.plotRect(in: rect))
+        ReadingsChartGeometry.layout(buckets: buckets, interval: interval, in: plotRect(in: rect))
     }
 
     // MARK: - Selection
@@ -127,7 +143,7 @@ final class ReadingsLineChartView: UIView {
 
     private func updateAccessibilityLabel() {
         guard !buckets.isEmpty else {
-            accessibilityLabel = "暂无读数"
+            accessibilityLabel = L10n.t("device.detail.noReadings")
             return
         }
         if let selectedIndex, buckets.indices.contains(selectedIndex) {
@@ -141,13 +157,13 @@ final class ReadingsLineChartView: UIView {
             let minText = format(buckets.map(\.minValue).min() ?? 0)
             let maxText = format(buckets.map(\.maxValue).max() ?? 0)
             let count = buckets.reduce(0) { $0 + $1.count }
-            accessibilityLabel = "\(prefix())最低 \(minText)，最高 \(maxText)，共 \(count) 个数据点"
+            accessibilityLabel = L10n.f("chart.a11y.summary", String(describing: prefix()), String(describing: minText), String(describing: maxText), String(describing: count))
         }
     }
 
     private func prefix() -> String {
-        let name = metricName.isEmpty ? "走势" : metricName
-        return "\(name)，最近 \(rangeTitle)，"
+        let name = metricName.isEmpty ? L10n.t("chart.trend") : metricName
+        return L10n.f("chart.a11y.prefix", String(describing: name), String(describing: rangeTitle))
     }
 
     // MARK: - Drawing
@@ -304,7 +320,7 @@ final class ReadingsLineChartView: UIView {
             (format(layout.yMin), plotRect.maxY),
         ]
         let attributes: [NSAttributedString.Key: Any] = [
-            .font: UIFont.preferredFont(forTextStyle: .caption2),
+            .font: Self.yAxisFont(),
             .foregroundColor: AppTheme.Palette.secondaryText,
         ]
         for label in labels {
@@ -342,7 +358,7 @@ final class ReadingsLineChartView: UIView {
     }
 
     private func drawEmptyText(in plotRect: CGRect) {
-        let text = "暂无读数"
+        let text = L10n.t("device.detail.noReadings")
         let attributes: [NSAttributedString.Key: Any] = [
             .font: UIFont.preferredFont(forTextStyle: .footnote),
             .foregroundColor: AppTheme.Palette.secondaryText,

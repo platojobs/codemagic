@@ -64,7 +64,7 @@ final class ProductAPIClient: ProductServicing {
         completion: @escaping (Result<ProductModel, AppError>) -> Void
     ) {
         guard let session = tokenStore?.load(), !session.token.isEmpty else {
-            completion(.failure(.sync("尚未创建匿名会话，无法读取云端设备记录；请先在「我的」执行同步")))
+            completion(.failure(.sync(L10n.t("product.noSession"))))
             return
         }
         let externalID = peripheralID.uuidString.uppercased()
@@ -160,7 +160,7 @@ final class ProductAPIClient: ProductServicing {
         completion: @escaping (Result<DeviceCatalog, AppError>) -> Void
     ) {
         guard !type.isEmpty else {
-            completion(.failure(.decoding("型号缺少 type 字段")))
+            completion(.failure(.decoding(L10n.t("product.modelMissingType"))))
             return
         }
         let encodedType = type.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? type
@@ -178,7 +178,7 @@ final class ProductAPIClient: ProductServicing {
         let compatibility = catalog?.deviceType.compatibility ?? type.compatibility
         let noteParts = [
             type.descriptionText,
-            catalog?.accessories.isEmpty == false ? "配件 \(catalog?.accessories.count ?? 0) 件" : "",
+            catalog?.accessories.isEmpty == false ? L10n.f("product.accessoryCount", String(describing: catalog?.accessories.count ?? 0)) : "",
         ]
         return ProductModel(
             mac: "",
@@ -187,7 +187,7 @@ final class ProductAPIClient: ProductServicing {
             firmwareVersion: firmware,
             gattServices: type.gattServices,
             compatibility: compatibility?.displayItems ?? [],
-            note: noteParts.filter { !$0.isEmpty }.joined(separator: "；"),
+            note: noteParts.filter { !$0.isEmpty }.joined(separator: L10n.t("common.semicolonSeparator")),
             apiIdentifier: type.type
         )
     }
@@ -206,18 +206,18 @@ final class ProductAPIClient: ProductServicing {
     }
 
     private func recordNote(_ record: UserDeviceInfo) -> String {
-        var parts = ["云同步记录（\(record.platform)）"]
-        if !record.alias.isEmpty { parts.append("别名：\(record.alias)") }
+        var parts = [L10n.f("product.cloudRecord", String(describing: record.platform))]
+        if !record.alias.isEmpty { parts.append(L10n.f("product.alias", String(describing: record.alias))) }
         if let advertised = record.advertisedName, !advertised.isEmpty {
-            parts.append("广播名：\(advertised)")
+            parts.append(L10n.f("product.advertisedName", String(describing: advertised)))
         }
-        if !record.group.isEmpty { parts.append("分组：\(record.group)") }
-        parts.append("externalId：\(record.externalID)")
+        if !record.group.isEmpty { parts.append(L10n.f("product.group", String(describing: record.group))) }
+        parts.append(L10n.f("product.externalID", record.externalID))
         if record.updatedAt.timeIntervalSince1970 > 0 {
             let formatter = DateFormatter()
-            formatter.locale = Locale(identifier: "zh_CN")
-            formatter.dateFormat = "yyyy-MM-dd HH:mm"
-            parts.append("更新于 \(formatter.string(from: record.updatedAt))")
+            formatter.locale = Locale.current
+            formatter.dateFormat = DateFormatter.dateFormat(fromTemplate: "yMMMdjm", options: 0, locale: Locale.current)
+            parts.append(L10n.f("product.updatedAt", String(describing: formatter.string(from: record.updatedAt))))
         }
         return parts.joined(separator: " · ")
     }
@@ -229,11 +229,11 @@ final class ProductAPIClient: ProductServicing {
                 items.append(MarketItem(
                     id: firmware.id,
                     kind: .firmware,
-                    name: firmware.version.isEmpty ? "未命名固件" : "固件 \(firmware.version)",
+                    name: firmware.version.isEmpty ? L10n.t("product.firmwareUnnamed") : L10n.f("product.firmwareVersion", String(describing: firmware.version)),
                     // 未核实发布方时保留空串，不回退成型号厂商，避免编造。
                     vendor: firmware.vendor,
                     version: firmware.version,
-                    compatibility: firmware.compatibility?.displayItems.joined(separator: "；") ?? "",
+                    compatibility: firmware.compatibility?.displayItems.joined(separator: L10n.t("common.semicolonSeparator")) ?? "",
                     compatibilityTags: firmware.compatibility?.filterTags ?? [],
                     summary: firmware.releaseNotes
                 ))
@@ -245,7 +245,7 @@ final class ProductAPIClient: ProductServicing {
                     name: accessory.name,
                     vendor: accessory.vendor,
                     version: accessory.sku,
-                    compatibility: accessory.compatibility?.displayItems.joined(separator: "；") ?? "",
+                    compatibility: accessory.compatibility?.displayItems.joined(separator: L10n.t("common.semicolonSeparator")) ?? "",
                     compatibilityTags: accessory.compatibility?.filterTags ?? [],
                     summary: accessory.descriptionText
                 ))

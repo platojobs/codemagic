@@ -447,6 +447,16 @@ iOS 用例固化在 `codemagicTests/ReadingsGoldenTests.swift`；新增特征或
 - **升级兼容**：v7 迁移逐列判断 `PRAGMA table_info(rules)` 后补列；旧规则保持原 `trigger` / `threshold` / `sync_state`，回填 `metric = NULL`、`comparison = 'lte'`、`consecutive = 1`，升级后仍生效（`PersistenceTests.testLegacyRulesSurviveVersion7MigrationAndStillFire`）。
 - **不改变契约**：本节不涉及网络字段，`openapi 0.7.0` 保持原样；E2E 契约套件不变。
 
+### 3.15 推荐规则、本地化与动态字体（v0.12.0）
+
+- **推荐规则不新建模型**：模板由 `RuleTemplateCatalog` 生成（温度 > 30℃、湿度 > 70%、电量 < 20%、心率 > 120、CO₂ > 1000ppm），一键添加写入现有 `rules`（`trigger = readingThreshold`、`consecutive = 1`），不新增表 / 列，SQLite 保持 v7。模板来源只取 `ReadingsStore.availableMetrics(deviceID:)`（该设备真实出现过的指标），`pressure` / `other` 不产生模板。
+- **推荐规则仅本机**：与 3.14 的规则同口径，不参与 push / changes，换机不迁移。
+- **本地化**：界面文案一律 `L10n.t(key)` / `L10n.f(key, args...)`，key 命名 `<域>.<界面>.<语义>`；`zh-Hans` 与 `en` 两份 `Localizable.strings` 的 key 集合与 `%@` 数量必须一致（`LocalizationTests` 强制）。新增文案必须同时补两份文件，禁止只补中文。
+- **术语**：Device / Reading / Sync / Scan / Group / Alert / **Transfer Code**（不使用 `pairing code`，旧接口字段名除外）。
+- **数字与日期**：界面一律 `Locale.current`（`String(format:locale:)`、`DateFormatter.dateFormat(fromTemplate:options:locale:)`）；CSV 内容、表头与文件名保持 `en_US_POSIX` + UTC，不随系统语言变化。
+- **动态字体**：字号统一 `AppText`（`UIFontMetrics`）+ `applyFont(_:)`（`adjustsFontForContentSizeCategory = true`），禁止新增固定 `UIFont.systemFont(ofSize:)` 字号；表格行高 `automaticDimension`；图表 Y 轴左侧留白按当前字号测量，AX 字号下保持 3 个刻度且不与绘图区重叠。
+- **不改变契约**：本节不涉及网络字段，`openapi 0.7.0` 保持原样；E2E 契约套件不变。
+
 ## 4. 错误码
 
 客户端错误码用于日志、空状态副标题与问题反馈，**两端含义一致**：

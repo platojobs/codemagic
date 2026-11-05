@@ -17,8 +17,8 @@ final class HomeDashboardViewController: UIViewController {
 
     private let collectionView: UICollectionView
     private let searchBar = UISearchBar()
-    private let sortButton = AppButton(style: .filterChip, title: "排序", symbolName: "arrow.up.arrow.down")
-    private let groupButton = AppButton(style: .filterChip, title: "分组", symbolName: "line.3.horizontal.decrease.circle")
+    private let sortButton = AppButton(style: .filterChip, title: L10n.t("devices.sort"), symbolName: "arrow.up.arrow.down")
+    private let groupButton = AppButton(style: .filterChip, title: L10n.t("device.detail.group"), symbolName: "line.3.horizontal.decrease.circle")
     private let controlsView = UIStackView()
     private var titleHost: LargeTitleHost?
 
@@ -45,19 +45,19 @@ final class HomeDashboardViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = "首页"
+        title = L10n.t("tab.home")
         view.backgroundColor = Palette.canvas
         configureCollectionView()
         configureControls()
         configureNavigation()
 
         titleHost = LargeTitleHost(
-            title: "首页",
+            title: L10n.t("tab.home"),
             viewController: self,
             scrollView: collectionView,
             adjustsContentInset: false
         )
-        titleHost?.setSubtitle("设备、场景与今日告警")
+        titleHost?.setSubtitle(L10n.t("home.subtitle"))
 
         controlsView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(controlsView)
@@ -93,7 +93,7 @@ final class HomeDashboardViewController: UIViewController {
             target: self,
             action: #selector(presentScanner)
         )
-        navigationItem.rightBarButtonItem?.accessibilityLabel = "扫描附近设备"
+        navigationItem.rightBarButtonItem?.accessibilityLabel = L10n.t("home.scan.action")
     }
 
     private func configureCollectionView() {
@@ -119,13 +119,13 @@ final class HomeDashboardViewController: UIViewController {
 
     private func configureControls() {
         searchBar.delegate = self
-        searchBar.placeholder = "搜索别名、广播名、型号或标识符"
+        searchBar.placeholder = L10n.t("devices.searchPlaceholder")
         searchBar.searchBarStyle = .minimal
         searchBar.autocapitalizationType = .none
         searchBar.backgroundImage = UIImage()
         searchBar.searchTextField.backgroundColor = Palette.surface
         searchBar.searchTextField.textColor = Palette.textPrimary
-        searchBar.searchTextField.font = AppText.callout.font()
+        searchBar.searchTextField.applyFont(AppText.callout.font())
         searchBar.searchTextField.layer.cornerRadius = Radius.input
         searchBar.searchTextField.layer.cornerCurve = .continuous
         searchBar.searchTextField.layer.borderWidth = Stroke.one
@@ -148,8 +148,8 @@ final class HomeDashboardViewController: UIViewController {
     }
 
     private func refreshControls() {
-        sortButton.configuration?.title = "排序：\(viewModel.sort.title)"
-        groupButton.configuration?.title = "分组：\(viewModel.groupFilter ?? "全部")"
+        sortButton.configuration?.title = L10n.f("devices.sortSummary", String(describing: viewModel.sort.title))
+        groupButton.configuration?.title = viewModel.groupFilter.map { L10n.f("devices.groupSummary", $0) } ?? L10n.t("devices.groupSummaryAll")
         groupButton.isHidden = viewModel.availableGroups.isEmpty
     }
 
@@ -283,7 +283,7 @@ final class HomeDashboardViewController: UIViewController {
             message: AppCopy.Permission.localOnlyMessage,
             preferredStyle: .alert
         )
-        alert.addAction(UIAlertAction(title: "取消", style: .cancel))
+        alert.addAction(UIAlertAction(title: L10n.t("common.cancel"), style: .cancel))
         alert.addAction(UIAlertAction(title: AppCopy.Permission.openSettings, style: .default) { [weak self] _ in
             self?.openSystemSettings()
         })
@@ -311,25 +311,25 @@ final class HomeDashboardViewController: UIViewController {
             ruleAlertCoordinator: environment.ruleAlertCoordinator
         )
         let scanner = HomeViewController(viewModel: scanViewModel)
-        scanner.title = "扫描附近设备"
+        scanner.title = L10n.t("home.scan.action")
         let navigation = UINavigationController(rootViewController: scanner)
         present(navigation, animated: true)
     }
 
     @objc private func handleSort() {
-        let sheet = UIAlertController(title: "排序方式", message: nil, preferredStyle: .actionSheet)
+        let sheet = UIAlertController(title: L10n.t("devices.sortOrder"), message: nil, preferredStyle: .actionSheet)
         for option in DeviceSort.allCases {
             sheet.addAction(UIAlertAction(title: option == viewModel.sort ? "✓ \(option.title)" : option.title, style: .default) { [weak self] _ in
                 self?.viewModel.updateSort(option)
             })
         }
-        sheet.addAction(UIAlertAction(title: "取消", style: .cancel))
+        sheet.addAction(UIAlertAction(title: L10n.t("common.cancel"), style: .cancel))
         presentSheet(sheet, source: sortButton)
     }
 
     @objc private func handleGroup() {
-        let sheet = UIAlertController(title: "按分组筛选", message: nil, preferredStyle: .actionSheet)
-        sheet.addAction(UIAlertAction(title: viewModel.groupFilter == nil ? "✓ 全部" : "全部", style: .default) { [weak self] _ in
+        let sheet = UIAlertController(title: L10n.t("devices.filterByGroup"), message: nil, preferredStyle: .actionSheet)
+        sheet.addAction(UIAlertAction(title: viewModel.groupFilter == nil ? L10n.t("devices.groupAllChecked") : L10n.t("common.all"), style: .default) { [weak self] _ in
             self?.viewModel.updateGroupFilter(nil)
         })
         for group in viewModel.availableGroups {
@@ -337,7 +337,7 @@ final class HomeDashboardViewController: UIViewController {
                 self?.viewModel.updateGroupFilter(group)
             })
         }
-        sheet.addAction(UIAlertAction(title: "取消", style: .cancel))
+        sheet.addAction(UIAlertAction(title: L10n.t("common.cancel"), style: .cancel))
         presentSheet(sheet, source: groupButton)
     }
 
@@ -357,7 +357,7 @@ final class HomeDashboardViewController: UIViewController {
     func openDeviceDetail(deviceID: UUID) {
         viewModel.reload()
         guard let device = viewModel.device(id: deviceID) else {
-            ToastView.show("设备已删除或不在本机", kind: .failure, in: self)
+            ToastView.show(L10n.t("home.deviceGone"), kind: .failure, in: self)
             return
         }
         openDetail(for: device)
@@ -382,9 +382,9 @@ final class HomeDashboardViewController: UIViewController {
         overlay.onFinish = { [weak self] result in
             guard let self else { return }
             if result.isFullySuccessful {
-                ToastView.show("「\(result.scenarioName)」\(result.summaryText)", kind: .success, in: self)
+                ToastView.show(L10n.f("scenario.result.quoted", result.scenarioName, result.summaryText), kind: .success, in: self)
             } else {
-                ToastView.show("「\(result.scenarioName)」\(result.failureText)", kind: .failure, in: self)
+                ToastView.show(L10n.f("scenario.result.quoted", result.scenarioName, result.failureText), kind: .failure, in: self)
             }
             self.viewModel.reload()
         }
@@ -395,17 +395,17 @@ final class HomeDashboardViewController: UIViewController {
     }
 
     private func presentEditAlert(for device: SavedDevice) {
-        let alert = UIAlertController(title: "编辑设备", message: "备注名用于展示，分组用于首页分段。", preferredStyle: .alert)
+        let alert = UIAlertController(title: L10n.t("devices.edit"), message: L10n.t("home.editNote"), preferredStyle: .alert)
         alert.addTextField { field in
             field.text = device.remark.isEmpty ? device.advertisedName : device.remark
-            field.placeholder = "备注名"
+            field.placeholder = L10n.t("devices.alias")
         }
         alert.addTextField { field in
             field.text = device.groupName
-            field.placeholder = "分组"
+            field.placeholder = L10n.t("device.detail.group")
         }
-        alert.addAction(UIAlertAction(title: "取消", style: .cancel))
-        alert.addAction(UIAlertAction(title: "保存", style: .default) { [weak self, weak alert] _ in
+        alert.addAction(UIAlertAction(title: L10n.t("common.cancel"), style: .cancel))
+        alert.addAction(UIAlertAction(title: L10n.t("common.save"), style: .default) { [weak self, weak alert] _ in
             let remark = alert?.textFields?.first?.text ?? ""
             let group = alert?.textFields?.last?.text ?? ""
             self?.viewModel.updateDevice(id: device.id, remark: remark, groupName: group)
@@ -415,12 +415,12 @@ final class HomeDashboardViewController: UIViewController {
 
     private func confirmDelete(_ device: SavedDevice) {
         let alert = UIAlertController(
-            title: "删除设备？",
-            message: "将同时删除该设备关联的本地规则。删除会先软删除，便于后续同步。",
+            title: L10n.t("devices.deleteTitle"),
+            message: L10n.t("home.deleteNote"),
             preferredStyle: .alert
         )
-        alert.addAction(UIAlertAction(title: "取消", style: .cancel))
-        alert.addAction(UIAlertAction(title: "删除", style: .destructive) { [weak self] _ in
+        alert.addAction(UIAlertAction(title: L10n.t("common.cancel"), style: .cancel))
+        alert.addAction(UIAlertAction(title: L10n.t("common.delete"), style: .destructive) { [weak self] _ in
             self?.viewModel.deleteDevice(id: device.id)
         })
         present(alert, animated: true)
@@ -480,9 +480,9 @@ extension HomeDashboardViewController: UICollectionViewDataSource {
             ) as? HomeEmptyCell else { return UICollectionViewCell() }
             cell.configure(
                 symbol: SymbolName.rule,
-                title: "还没有场景",
-                message: "把常用动作组合成场景，例如连接设备后立即同步。",
-                actionTitle: "去智能页创建"
+                title: L10n.t("home.noScenarios"),
+                message: L10n.t("home.noScenariosMessage"),
+                actionTitle: L10n.t("home.createInSmart")
             ) { [weak self] in
                 self?.openSmart()
             }
@@ -558,7 +558,7 @@ extension HomeDashboardViewController: UICollectionViewDataSource {
 
         switch sections[indexPath.section] {
         case .scenarios, .scenarioEmpty:
-            header.configure(title: "快捷场景")
+            header.configure(title: L10n.t("home.quickScenarios"))
         case .devices(let group, let items):
             header.configure(title: "\(group) · \(items.count)")
         default:
@@ -586,13 +586,13 @@ extension HomeDashboardViewController: UICollectionViewDelegate {
         let device = items[indexPath.item]
         return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
             guard let self else { return nil }
-            let edit = UIAction(title: "编辑备注与分组", image: UIImage(systemName: SymbolName.edit)) { _ in
+            let edit = UIAction(title: L10n.t("home.editAliasGroup"), image: UIImage(systemName: SymbolName.edit)) { _ in
                 self.presentEditAlert(for: device)
             }
-            let delete = UIAction(title: "删除设备", image: UIImage(systemName: SymbolName.delete), attributes: .destructive) { _ in
+            let delete = UIAction(title: L10n.t("home.deleteDevice"), image: UIImage(systemName: SymbolName.delete), attributes: .destructive) { _ in
                 self.confirmDelete(device)
             }
-            let detail = UIAction(title: "查看详情", image: UIImage(systemName: SymbolName.disclosure)) { _ in
+            let detail = UIAction(title: L10n.t("home.viewDetail"), image: UIImage(systemName: SymbolName.disclosure)) { _ in
                 self.openDetail(for: device)
             }
             return UIMenu(children: [detail, edit, delete])

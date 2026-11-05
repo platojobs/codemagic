@@ -9,10 +9,10 @@ enum DeviceSort: String, CaseIterable, Equatable {
 
     var title: String {
         switch self {
-        case .recent: return "最近出现"
-        case .name: return "名称"
-        case .signal: return "信号强度"
-        case .addedAt: return "添加时间"
+        case .recent: return L10n.t("sort.lastSeen")
+        case .name: return L10n.t("sort.name")
+        case .signal: return L10n.t("sort.rssi")
+        case .addedAt: return L10n.t("sort.addedAt")
         }
     }
 }

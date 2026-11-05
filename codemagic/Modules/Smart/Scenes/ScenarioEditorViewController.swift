@@ -32,13 +32,13 @@ final class ScenarioEditorViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = existing == nil ? "新增场景" : "编辑场景"
+        title = existing == nil ? L10n.t("scenario.editor.newTitle") : L10n.t("scenario.editor.editTitle")
         view.backgroundColor = Palette.canvas
         navigationItem.leftBarButtonItem = UIBarButtonItem(
-            title: "取消", style: .plain, target: self, action: #selector(cancel)
+            title: L10n.t("common.cancel"), style: .plain, target: self, action: #selector(cancel)
         )
         navigationItem.rightBarButtonItem = UIBarButtonItem(
-            title: "保存", style: .done, target: self, action: #selector(save)
+            title: L10n.t("common.save"), style: .done, target: self, action: #selector(save)
         )
         configureLayout()
         renderActions()
@@ -66,13 +66,13 @@ final class ScenarioEditorViewController: UIViewController {
         ])
 
         let nameLabel = UILabel()
-        nameLabel.text = "场景名称"
-        nameLabel.font = AppText.callout.font(weight: .medium)
+        nameLabel.text = L10n.t("scenario.editor.name")
+        nameLabel.applyFont(AppText.callout.font(weight: .medium))
         nameLabel.textColor = Palette.textSecondary
 
         nameField.text = existing?.name
-        nameField.placeholder = "例如：回家后连接设备并同步"
-        nameField.font = AppText.body.font()
+        nameField.placeholder = L10n.t("scenario.editor.namePlaceholder")
+        nameField.applyFont(AppText.body.font())
         nameField.textColor = Palette.textPrimary
         nameField.backgroundColor = Palette.surface
         nameField.layer.cornerRadius = Radius.input
@@ -84,19 +84,19 @@ final class ScenarioEditorViewController: UIViewController {
         nameField.heightAnchor.constraint(equalToConstant: Layout.inputH).isActive = true
 
         let actionsTitle = UILabel()
-        actionsTitle.text = "动作（按顺序执行）"
-        actionsTitle.font = AppText.callout.font(weight: .medium)
+        actionsTitle.text = L10n.t("scenario.editor.actions")
+        actionsTitle.applyFont(AppText.callout.font(weight: .medium))
         actionsTitle.textColor = Palette.textSecondary
 
         actionsStack.axis = .vertical
         actionsStack.spacing = Layout.space8
 
-        let addButton = AppButton(style: .secondary, title: "添加动作", symbolName: "plus")
+        let addButton = AppButton(style: .secondary, title: L10n.t("scenario.editor.addAction"), symbolName: "plus")
         addButton.addTarget(self, action: #selector(addAction), for: .touchUpInside)
 
         let note = UILabel()
-        note.text = "场景仅保存在本机，不参与账号同步。动作失败不会阻断后续动作，执行结束会汇总结果。"
-        note.font = AppText.caption.font()
+        note.text = L10n.t("scenario.editor.note")
+        note.applyFont(AppText.caption.font())
         note.textColor = Palette.textTertiary
         note.numberOfLines = 0
 
@@ -112,8 +112,8 @@ final class ScenarioEditorViewController: UIViewController {
         actionsStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         guard !actions.isEmpty else {
             let placeholder = UILabel()
-            placeholder.text = "还没有动作，点击下方按钮添加。"
-            placeholder.font = AppText.callout.font()
+            placeholder.text = L10n.t("scenario.editor.noActions")
+            placeholder.applyFont(AppText.callout.font())
             placeholder.textColor = Palette.textSecondary
             placeholder.numberOfLines = 0
             actionsStack.addArrangedSubview(placeholder)
@@ -136,14 +136,14 @@ final class ScenarioEditorViewController: UIViewController {
 
         let label = UILabel()
         label.text = "\(index + 1). \(actionDetail(action))"
-        label.font = AppText.callout.font()
+        label.applyFont(AppText.callout.font())
         label.textColor = Palette.textPrimary
         label.numberOfLines = 2
 
         let remove = UIButton(type: .system)
         remove.setImage(UIImage(systemName: SymbolName.delete), for: .normal)
         remove.tintColor = Palette.danger
-        remove.accessibilityLabel = "删除动作"
+        remove.accessibilityLabel = L10n.t("scenario.editor.deleteAction")
         remove.addAction(UIAction { [weak self] _ in
             self?.actions.remove(at: index)
             self?.renderActions()
@@ -174,11 +174,11 @@ final class ScenarioEditorViewController: UIViewController {
     @objc private func save() {
         let name = (nameField.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else {
-            presentAlert(title: "请填写场景名称", message: "名称为空时无法保存。")
+            presentAlert(title: L10n.t("scenario.editor.missingName"), message: L10n.t("scenario.editor.missingNameMessage"))
             return
         }
         guard !actions.isEmpty else {
-            presentAlert(title: "请至少添加一个动作", message: "场景必须包含可执行动作。")
+            presentAlert(title: L10n.t("scenario.editor.missingAction"), message: L10n.t("scenario.editor.missingActionMessage"))
             return
         }
         let now = Date()
@@ -194,29 +194,29 @@ final class ScenarioEditorViewController: UIViewController {
     }
 
     @objc private func addAction() {
-        let sheet = UIAlertController(title: "添加动作", message: "只列出真实可执行的动作。", preferredStyle: .actionSheet)
-        sheet.addAction(UIAlertAction(title: "连接指定设备", style: .default) { [weak self] _ in
+        let sheet = UIAlertController(title: L10n.t("scenario.editor.addAction"), message: L10n.t("scenario.editor.actionsFootnote"), preferredStyle: .actionSheet)
+        sheet.addAction(UIAlertAction(title: L10n.t("scenario.action.connectTarget"), style: .default) { [weak self] _ in
             self?.pickDevice(forConnect: true)
         })
-        sheet.addAction(UIAlertAction(title: "断开指定设备", style: .default) { [weak self] _ in
+        sheet.addAction(UIAlertAction(title: L10n.t("scenario.action.disconnectTarget"), style: .default) { [weak self] _ in
             self?.pickDevice(forConnect: false)
         })
-        sheet.addAction(UIAlertAction(title: "开始后台采集", style: .default) { [weak self] _ in
+        sheet.addAction(UIAlertAction(title: L10n.t("scenario.action.startBackground"), style: .default) { [weak self] _ in
             self?.actions.append(.startBackgroundCollection)
             self?.renderActions()
         })
-        sheet.addAction(UIAlertAction(title: "停止后台采集", style: .default) { [weak self] _ in
+        sheet.addAction(UIAlertAction(title: L10n.t("scenario.action.stopBackground"), style: .default) { [weak self] _ in
             self?.actions.append(.stopBackgroundCollection)
             self?.renderActions()
         })
-        sheet.addAction(UIAlertAction(title: "静音告警", style: .default) { [weak self] _ in
+        sheet.addAction(UIAlertAction(title: L10n.t("scenario.action.muteAlerts"), style: .default) { [weak self] _ in
             self?.pickMuteMinutes()
         })
-        sheet.addAction(UIAlertAction(title: "立即同步", style: .default) { [weak self] _ in
+        sheet.addAction(UIAlertAction(title: L10n.t("scenario.action.syncNow"), style: .default) { [weak self] _ in
             self?.actions.append(.syncNow)
             self?.renderActions()
         })
-        sheet.addAction(UIAlertAction(title: "取消", style: .cancel))
+        sheet.addAction(UIAlertAction(title: L10n.t("common.cancel"), style: .cancel))
         if let popover = sheet.popoverPresentationController {
             popover.sourceView = view
             popover.sourceRect = CGRect(x: view.bounds.midX, y: view.bounds.maxY, width: 1, height: 1)
@@ -226,10 +226,10 @@ final class ScenarioEditorViewController: UIViewController {
 
     private func pickDevice(forConnect: Bool) {
         guard !deviceOptions.isEmpty else {
-            presentAlert(title: "还没有可用设备", message: "请先在首页扫描并保存设备。")
+            presentAlert(title: L10n.t("scenario.editor.noDevices"), message: L10n.t("scenario.editor.noDevicesMessage"))
             return
         }
-        let sheet = UIAlertController(title: "选择设备", message: nil, preferredStyle: .actionSheet)
+        let sheet = UIAlertController(title: L10n.t("scenario.editor.selectDevice"), message: nil, preferredStyle: .actionSheet)
         for option in deviceOptions {
             sheet.addAction(UIAlertAction(title: option.name, style: .default) { [weak self] _ in
                 guard let self else { return }
@@ -239,7 +239,7 @@ final class ScenarioEditorViewController: UIViewController {
                 self.renderActions()
             })
         }
-        sheet.addAction(UIAlertAction(title: "取消", style: .cancel))
+        sheet.addAction(UIAlertAction(title: L10n.t("common.cancel"), style: .cancel))
         if let popover = sheet.popoverPresentationController {
             popover.sourceView = view
             popover.sourceRect = CGRect(x: view.bounds.midX, y: view.bounds.maxY, width: 1, height: 1)
@@ -248,14 +248,14 @@ final class ScenarioEditorViewController: UIViewController {
     }
 
     private func pickMuteMinutes() {
-        let sheet = UIAlertController(title: "静音时长", message: "静音期间规则仍会记录，但不再发送通知。", preferredStyle: .actionSheet)
+        let sheet = UIAlertController(title: L10n.t("scenario.editor.muteDuration"), message: L10n.t("scenario.editor.muteNote"), preferredStyle: .actionSheet)
         for minutes in ScenarioAction.muteOptions {
-            sheet.addAction(UIAlertAction(title: "\(minutes) 分钟", style: .default) { [weak self] _ in
+            sheet.addAction(UIAlertAction(title: L10n.f("profile.throttleMinutes", String(describing: minutes)), style: .default) { [weak self] _ in
                 self?.actions.append(.muteAlerts(minutes: minutes))
                 self?.renderActions()
             })
         }
-        sheet.addAction(UIAlertAction(title: "取消", style: .cancel))
+        sheet.addAction(UIAlertAction(title: L10n.t("common.cancel"), style: .cancel))
         if let popover = sheet.popoverPresentationController {
             popover.sourceView = view
             popover.sourceRect = CGRect(x: view.bounds.midX, y: view.bounds.maxY, width: 1, height: 1)
@@ -265,13 +265,13 @@ final class ScenarioEditorViewController: UIViewController {
 
     private func actionDetail(_ action: ScenarioAction) -> String {
         action.detail { id in
-            deviceOptions.first { $0.id == id }?.name ?? "已删除的设备"
+            deviceOptions.first { $0.id == id }?.name ?? L10n.t("common.deviceDeleted")
         }
     }
 
     private func presentAlert(title: String, message: String) {
         let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "知道了", style: .default))
+        alert.addAction(UIAlertAction(title: L10n.t("common.gotIt"), style: .default))
         present(alert, animated: true)
     }
 }

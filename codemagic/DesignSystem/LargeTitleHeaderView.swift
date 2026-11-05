@@ -18,7 +18,7 @@ final class LargeTitleHeaderView: UIView {
 
         inlineLabel.text = title
         inlineLabel.apply(.headline, color: Palette.textPrimary, alignment: .center)
-        inlineLabel.font = AppText.headline.font(weight: .semibold)
+        inlineLabel.applyFont(AppText.headline.font(weight: .semibold))
         inlineLabel.alpha = 0
 
         subtitleLabel.apply(.callout, color: Palette.textSecondary)

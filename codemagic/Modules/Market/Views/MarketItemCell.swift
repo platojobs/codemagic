@@ -31,14 +31,14 @@ final class MarketItemCell: UITableViewCell {
             : AppTheme.Palette.accent
         kindLabel.backgroundColor = kindLabel.textColor.withAlphaComponent(0.15)
 
-        nameLabel.text = item.name.isEmpty ? "未命名条目" : item.name
+        nameLabel.text = item.name.isEmpty ? L10n.t("market.item.unnamed") : item.name
 
         var metaParts: [String] = []
         if !item.vendor.isEmpty { metaParts.append(item.vendor) }
-        if !item.version.isEmpty { metaParts.append("版本 \(item.version)") }
-        metaLabel.text = metaParts.isEmpty ? "厂商与版本信息未提供" : metaParts.joined(separator: " · ")
+        if !item.version.isEmpty { metaParts.append(L10n.f("market.item.version", String(describing: item.version))) }
+        metaLabel.text = metaParts.isEmpty ? L10n.t("market.item.noVendorVersion") : metaParts.joined(separator: " · ")
 
-        compatibilityLabel.text = "兼容：\(item.compatibility.isEmpty ? "暂无说明" : item.compatibility)"
+        compatibilityLabel.text = L10n.f("market.item.compatibility", item.compatibility.isEmpty ? L10n.t("market.item.noCompatibility") : item.compatibility)
         summaryLabel.text = item.summary.isEmpty ? nil : item.summary
         summaryLabel.isHidden = item.summary.isEmpty
     }

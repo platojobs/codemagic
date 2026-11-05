@@ -21,11 +21,11 @@ final class ProductsViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = "产品"
+        title = L10n.t("tab.products")
         view.backgroundColor = AppTheme.Palette.background
         configureTableView()
         navigationItem.rightBarButtonItem = UIBarButtonItem(
-            title: "刷新",
+            title: L10n.t("market.refresh"),
             style: .plain,
             target: self,
             action: #selector(handleRefresh)
@@ -70,8 +70,8 @@ final class ProductsViewController: UIViewController {
         case .failed(let error):
             skeletonController.end()
             errorStateView.configure(
-                title: "产品数据加载失败",
-                message: "\(error.localizedDescriptionText)。请检查网络或 BASE_URL 配置。"
+                title: L10n.t("products.loadFailed"),
+                message: L10n.f("market.loadFailedDetail", String(describing: error.localizedDescriptionText))
             ) { [weak self] in
                 self?.viewModel.reload()
             }
@@ -81,9 +81,9 @@ final class ProductsViewController: UIViewController {
             skeletonController.end()
             emptyStateView.configure(
                 symbolName: SymbolName.product,
-                title: "暂无产品型号",
-                message: "服务端返回了空列表，新增型号后会显示在这里。",
-                actionTitle: "刷新",
+                title: L10n.t("products.emptyTitle"),
+                message: L10n.t("products.emptyMessage"),
+                actionTitle: L10n.t("market.refresh"),
                 action: { [weak self] in self?.viewModel.reload() }
             )
             tableView.backgroundView = emptyStateView

@@ -26,7 +26,7 @@ final class SavedDeviceCell: UITableViewCell {
 
         var metaParts = [device.groupName]
         metaParts.append(
-            device.lastSeenAt.map { "最近出现 \(AppDateFormat.relative($0))" } ?? "尚无扫描记录"
+            device.lastSeenAt.map { L10n.f("device.cell.lastSeen", String(describing: AppDateFormat.relative($0))) } ?? L10n.t("device.detail.noScanRecord")
         )
         metaLabel.text = metaParts.joined(separator: " · ")
 
@@ -35,10 +35,10 @@ final class SavedDeviceCell: UITableViewCell {
             detailParts.append(vendor)
         }
         if let firmware = device.firmwareVersion, !firmware.isEmpty {
-            detailParts.append("固件 \(firmware)")
+            detailParts.append(L10n.f("device.cell.firmware", String(describing: firmware)))
         }
         if detailParts.isEmpty {
-            detailParts.append("尚未读取厂商信息")
+            detailParts.append(L10n.t("device.cell.noVendor"))
         }
         detailLabel.text = detailParts.joined(separator: " · ")
 

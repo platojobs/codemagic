@@ -20,13 +20,13 @@ enum ReadingMetric: String, Codable, CaseIterable, Equatable {
 
     var displayName: String {
         switch self {
-        case .temperature: return "温度"
-        case .humidity: return "湿度"
-        case .battery: return "电量"
-        case .heartRate: return "心率"
+        case .temperature: return L10n.t("metric.temperature")
+        case .humidity: return L10n.t("metric.humidity")
+        case .battery: return L10n.t("metric.battery")
+        case .heartRate: return L10n.t("metric.heartRate")
         case .co2: return "CO₂"
-        case .pressure: return "气压"
-        case .other: return "其他"
+        case .pressure: return L10n.t("metric.pressure")
+        case .other: return L10n.t("metric.other")
         }
     }
 
@@ -80,7 +80,7 @@ struct DeviceReading: Identifiable, Equatable {
         if rounded == rounded.rounded(), abs(rounded) < 1_000_000 {
             return String(Int(rounded))
         }
-        return String(format: "%.1f", rounded)
+        return String(format: "%.1f", locale: Locale.current, rounded)
     }
 
     var displayText: String {

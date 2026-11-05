@@ -4,21 +4,21 @@ import Foundation
 enum AppDateFormat {
     private static let relativeFormatter: RelativeDateTimeFormatter = {
         let formatter = RelativeDateTimeFormatter()
-        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.locale = Locale.current
         formatter.unitsStyle = .short
         return formatter
     }()
 
     private static let absoluteFormatter: DateFormatter = {
         let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "zh_CN")
-        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        formatter.locale = Locale.current
+        formatter.dateFormat = DateFormatter.dateFormat(fromTemplate: "yMMMdHms", options: 0, locale: Locale.current)
         return formatter
     }()
 
     static func relative(_ date: Date, now: Date = Date()) -> String {
         if abs(date.timeIntervalSince(now)) < 60 {
-            return "刚刚"
+            return L10n.t("date.justNow")
         }
         return relativeFormatter.localizedString(for: date, relativeTo: now)
     }
@@ -29,8 +29,8 @@ enum AppDateFormat {
 
     private static let dayFormatter: DateFormatter = {
         let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "zh_CN")
-        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.locale = Locale.current
+        formatter.dateFormat = DateFormatter.dateFormat(fromTemplate: "yMMMd", options: 0, locale: Locale.current)
         return formatter
     }()
 

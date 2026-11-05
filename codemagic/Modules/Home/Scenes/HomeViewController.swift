@@ -31,7 +31,7 @@ final class HomeViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = "首页"
+        title = L10n.t("tab.home")
         view.backgroundColor = AppTheme.Palette.background
         configureTableView()
         configureHeader()
@@ -194,16 +194,16 @@ extension HomeViewController: UITableViewDelegate {
         tableView.deselectRow(at: indexPath, animated: true)
         let row = viewModel.rows[indexPath.row]
         if row.isSaved {
-            presentAlert(title: "已在首页保存", message: "可在「首页」修改备注名、分组或添加规则。")
+            presentAlert(title: L10n.t("home.savedTitle"), message: L10n.t("home.savedMessage"))
         } else {
             viewModel.saveDevice(row)
-            presentAlert(title: "已保存", message: "设备已加入「首页」，可继续设置备注与规则。")
+            presentAlert(title: L10n.t("common.saved"), message: L10n.t("home.savedMessage2"))
         }
     }
 
     private func presentAlert(title: String, message: String) {
         let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "知道了", style: .default))
+        alert.addAction(UIAlertAction(title: L10n.t("common.gotIt"), style: .default))
         present(alert, animated: true)
     }
 }

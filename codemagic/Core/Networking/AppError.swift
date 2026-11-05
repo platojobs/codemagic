@@ -35,20 +35,20 @@ enum AppError: Error, Equatable {
     var message: String {
         switch self {
         case .network:
-            return "网络请求失败，请检查网络或本地服务是否启动"
+            return L10n.t("error.network")
         case .server(let statusCode):
             return Self.serverMessage(statusCode: statusCode)
         case .api(let code, let statusCode, _):
             let entry = APIErrorCatalog.entry(for: code)
-            return "\(entry.message)（HTTP \(statusCode) / \(code)）"
+            return L10n.f("error.httpDetail", entry.message, String(statusCode), code)
         case .sync(let detail):
             return detail
         case .decoding:
-            return "响应数据结构与约定不符"
+            return L10n.t("error.decoding")
         case .configuration:
-            return "BASE_URL 未配置或格式非法"
+            return L10n.t("error.config")
         case .database:
-            return "本地数据读写失败"
+            return L10n.t("error.database")
         case .bluetooth(let detail):
             return detail
         }
@@ -117,13 +117,13 @@ enum AppError: Error, Equatable {
     private static func serverMessage(statusCode: Int) -> String {
         switch statusCode {
         case 401:
-            return "登录已失效，请在「我的」页重新登录"
+            return L10n.t("error.unauthorized")
         case 410:
-            return "云端变更记录已过期，需要全量重新同步"
+            return L10n.t("error.resyncRequired")
         case 503:
-            return "服务端繁忙，稍后重试"
+            return L10n.t("error.timeout")
         default:
-            return "服务端返回异常状态（HTTP \(statusCode)）"
+            return L10n.f("error.httpStatus", String(describing: statusCode))
         }
     }
 }

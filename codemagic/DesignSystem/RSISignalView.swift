@@ -99,9 +99,9 @@ final class RSISignalView: UIView {
 
     private func updateAccessibility() {
         if isSignalUnavailable {
-            accessibilityLabel = "信号强度：未获取"
+            accessibilityLabel = L10n.t("signal.unknown")
         } else {
-            accessibilityLabel = "信号强度：\(rssi) dBm，4 格中的 \(signalLevel) 格"
+            accessibilityLabel = L10n.f("signal.value", String(describing: rssi), String(describing: signalLevel))
         }
     }
 }

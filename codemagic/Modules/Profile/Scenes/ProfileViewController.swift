@@ -30,7 +30,7 @@ final class ProfileViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = "我的"
+        title = L10n.t("tab.profile")
         view.backgroundColor = AppTheme.Palette.background
         configureTableView()
         viewModel.onChange = { [weak self] in
@@ -97,12 +97,12 @@ final class ProfileViewController: UIViewController {
 
     private func confirmClearLogs() {
         let alert = UIAlertController(
-            title: "清空扫描日志？",
-            message: "日志采用软删除，记录会在本地保留 deletedAt 与待同步状态。",
+            title: L10n.t("profile.clearLogTitle"),
+            message: L10n.t("profile.clearLogMessage"),
             preferredStyle: .alert
         )
-        alert.addAction(UIAlertAction(title: "取消", style: .cancel))
-        alert.addAction(UIAlertAction(title: "清空", style: .destructive) { [weak self] _ in
+        alert.addAction(UIAlertAction(title: L10n.t("common.cancel"), style: .cancel))
+        alert.addAction(UIAlertAction(title: L10n.t("common.clear"), style: .destructive) { [weak self] _ in
             self?.viewModel.clearLogs()
         })
         present(alert, animated: true)
@@ -111,12 +111,12 @@ final class ProfileViewController: UIViewController {
     /// 重新登录必须由用户确认：会换新的匿名账号，旧账号云端数据不会自动合并。
     private func confirmRelogin() {
         let alert = UIAlertController(
-            title: "重新登录？",
-            message: "将创建新的匿名账号，旧账号的云端数据不会自动合并到新账号；本机已有设备会重新同步到新账号。",
+            title: L10n.t("profile.reloginTitle"),
+            message: L10n.t("profile.reloginMessage"),
             preferredStyle: .alert
         )
-        alert.addAction(UIAlertAction(title: "取消", style: .cancel))
-        alert.addAction(UIAlertAction(title: "重新登录", style: .destructive) { [weak self] _ in
+        alert.addAction(UIAlertAction(title: L10n.t("common.cancel"), style: .cancel))
+        alert.addAction(UIAlertAction(title: L10n.t("profile.relogin"), style: .destructive) { [weak self] _ in
             self?.viewModel.relogin()
         })
         present(alert, animated: true)
@@ -128,17 +128,17 @@ final class ProfileViewController: UIViewController {
     }
 
     private func presentThrottlePicker() {
-        let sheet = UIAlertController(title: "通知节流窗口", message: "同一设备同一规则在窗口内只提醒一次。", preferredStyle: .actionSheet)
+        let sheet = UIAlertController(title: L10n.t("profile.throttle"), message: L10n.t("profile.throttleNote"), preferredStyle: .actionSheet)
         for minutes in viewModel.ruleAlertThrottleOptions {
             let selected = minutes == viewModel.ruleAlertThrottleMinutes
             sheet.addAction(UIAlertAction(
-                title: selected ? "✓ \(minutes) 分钟" : "\(minutes) 分钟",
+                title: selected ? L10n.f("profile.throttleMinutesChecked", String(describing: minutes)) : L10n.f("profile.throttleMinutes", String(describing: minutes)),
                 style: .default
             ) { [weak self] _ in
                 self?.viewModel.ruleAlertThrottleMinutes = minutes
             })
         }
-        sheet.addAction(UIAlertAction(title: "取消", style: .cancel))
+        sheet.addAction(UIAlertAction(title: L10n.t("common.cancel"), style: .cancel))
         if let popover = sheet.popoverPresentationController {
             popover.sourceView = tableView
             popover.sourceRect = tableView.rectForRow(at: IndexPath(row: 1, section: Section.alerts.rawValue))
@@ -147,7 +147,7 @@ final class ProfileViewController: UIViewController {
     }
 
     private func presentAppearancePicker() {
-        let sheet = UIAlertController(title: "外观", message: "深色模式下图表与卡片使用动态配色。", preferredStyle: .actionSheet)
+        let sheet = UIAlertController(title: L10n.t("profile.appearance"), message: L10n.t("profile.appearanceNote"), preferredStyle: .actionSheet)
         for appearance in AppAppearance.allCases {
             let selected = appearance == viewModel.appearance
             sheet.addAction(UIAlertAction(
@@ -158,7 +158,7 @@ final class ProfileViewController: UIViewController {
                 AppAppearance.apply(appearance)
             })
         }
-        sheet.addAction(UIAlertAction(title: "取消", style: .cancel))
+        sheet.addAction(UIAlertAction(title: L10n.t("common.cancel"), style: .cancel))
         if let popover = sheet.popoverPresentationController {
             popover.sourceView = tableView
             popover.sourceRect = tableView.rectForRow(at: IndexPath(row: 0, section: Section.appearance.rawValue))
@@ -194,14 +194,14 @@ final class ProfileViewController: UIViewController {
     /// 导出进度使用真实已读取读数条数；文件落临时目录，分享面板关闭后删除。
     private func exportAccountData() {
         let progress = UIAlertController(
-            title: "导出我的数据",
-            message: "正在读取账号数据…",
+            title: L10n.t("profile.exportData"),
+            message: L10n.t("profile.exportReading"),
             preferredStyle: .alert
         )
         present(progress, animated: true)
 
         viewModel.exportAccountData(progress: { [weak progress] count in
-            progress?.message = count > 0 ? "已读取 \(count) 条读数…" : "正在读取账号数据…"
+            progress?.message = count > 0 ? L10n.f("profile.exportProgress", String(describing: count)) : L10n.t("profile.exportReading")
         }, completion: { [weak self, weak progress] result in
             progress?.dismiss(animated: true) {
                 guard let self else { return }
@@ -230,27 +230,27 @@ final class ProfileViewController: UIViewController {
 
     private func presentExportError(_ error: AccountExportError) {
         let alert = UIAlertController(
-            title: "导出失败",
-            message: error.errorDescription ?? "请稍后重试。",
+            title: L10n.t("device.detail.exportFailed"),
+            message: error.errorDescription ?? L10n.t("common.tryAgainLater"),
             preferredStyle: .alert
         )
         if error.isRetryable {
-            alert.addAction(UIAlertAction(title: "重试", style: .default) { [weak self] _ in
+            alert.addAction(UIAlertAction(title: L10n.t("common.retry"), style: .default) { [weak self] _ in
                 self?.exportAccountData()
             })
         }
-        alert.addAction(UIAlertAction(title: "好", style: .cancel))
+        alert.addAction(UIAlertAction(title: L10n.t("common.ok"), style: .cancel))
         present(alert, animated: true)
     }
 
     private func confirmDeleteAccount() {
         let alert = UIAlertController(
-            title: "注销账号？",
+            title: L10n.t("profile.deleteAccountTitle"),
             message: viewModel.accountDeletionConfirmationText,
             preferredStyle: .alert
         )
-        alert.addAction(UIAlertAction(title: "取消", style: .cancel))
-        alert.addAction(UIAlertAction(title: "永久删除并注销", style: .destructive) { [weak self] _ in
+        alert.addAction(UIAlertAction(title: L10n.t("common.cancel"), style: .cancel))
+        alert.addAction(UIAlertAction(title: L10n.t("profile.deleteAccountAction"), style: .destructive) { [weak self] _ in
             self?.performDeleteAccount()
         })
         present(alert, animated: true)
@@ -258,12 +258,12 @@ final class ProfileViewController: UIViewController {
 
     private func performDeleteAccount() {
         guard !viewModel.isSyncing else {
-            presentMessage(title: "无法注销", message: "正在同步，请等待同步结束后再注销账号。")
+            presentMessage(title: L10n.t("profile.deleteAccountBlocked"), message: L10n.t("profile.deleteAccountBlockedMessage"))
             return
         }
         let progress = UIAlertController(
-            title: "注销账号",
-            message: "正在删除云端账号…",
+            title: L10n.t("profile.deleteAccount"),
+            message: L10n.t("profile.deleteAccountProgress"),
             preferredStyle: .alert
         )
         present(progress, animated: true)
@@ -274,21 +274,21 @@ final class ProfileViewController: UIViewController {
                 switch result {
                 case .success:
                     self.presentMessage(
-                        title: "账号已注销",
-                        message: "云端与本机数据已清空，回到全新的匿名状态；下一次同步会创建新的匿名账号。"
+                        title: L10n.t("profile.deleteAccountDone"),
+                        message: L10n.t("profile.deleteAccountDoneMessage")
                     )
                 case .failure(let error):
                     let alert = UIAlertController(
-                        title: "注销失败",
-                        message: error.errorDescription ?? "请稍后重试。",
+                        title: L10n.t("profile.deleteAccountFailed"),
+                        message: error.errorDescription ?? L10n.t("common.tryAgainLater"),
                         preferredStyle: .alert
                     )
                     if error.isRetryable {
-                        alert.addAction(UIAlertAction(title: "重试", style: .default) { [weak self] _ in
+                        alert.addAction(UIAlertAction(title: L10n.t("common.retry"), style: .default) { [weak self] _ in
                             self?.performDeleteAccount()
                         })
                     }
-                    alert.addAction(UIAlertAction(title: "好", style: .cancel))
+                    alert.addAction(UIAlertAction(title: L10n.t("common.ok"), style: .cancel))
                     self.present(alert, animated: true)
                 }
             }
@@ -297,7 +297,7 @@ final class ProfileViewController: UIViewController {
 
     private func presentMessage(title: String, message: String) {
         let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "好", style: .cancel))
+        alert.addAction(UIAlertAction(title: L10n.t("common.ok"), style: .cancel))
         present(alert, animated: true)
     }
 }
@@ -326,14 +326,14 @@ extension ProfileViewController: UITableViewDataSource {
     func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
         guard let section = Section(rawValue: section) else { return nil }
         switch section {
-        case .bluetooth: return "蓝牙权限"
-        case .localData: return "本地数据"
-        case .sync: return "同步"
-        case .account: return "账号与数据"
-        case .alerts: return "阈值告警"
-        case .appearance: return "外观"
-        case .settings: return "设置"
-        case .about: return "关于"
+        case .bluetooth: return L10n.t("profile.section.bluetooth")
+        case .localData: return L10n.t("device.detail.sourceLocal")
+        case .sync: return L10n.t("profile.section.sync")
+        case .account: return L10n.t("profile.section.account")
+        case .alerts: return L10n.t("profile.section.alerts")
+        case .appearance: return L10n.t("profile.appearance")
+        case .settings: return L10n.t("profile.section.settings")
+        case .about: return L10n.t("profile.aboutShort")
         }
     }
 
@@ -345,15 +345,15 @@ extension ProfileViewController: UITableViewDataSource {
         case .sync:
             return "\(viewModel.syncStatusText)\n\(viewModel.syncDegradationText)"
         case .account:
-            return "接管码一次性有效，10 分钟内失效；导出文件在分享完成后自动删除；注销不可恢复。"
+            return L10n.t("profile.footnote.transfer")
         case .alerts:
             return viewModel.notificationGuidance
         case .appearance:
-            return "深色模式使用动态语义色，图表、区间带与卡片会自动适配。"
+            return L10n.t("profile.footnote.appearance")
         case .settings:
             return "\(viewModel.backgroundCollectionStatusText)\n\(viewModel.backgroundCollectionGuidance)"
         case .about:
-            return viewModel.startupWarning ?? "行为口径与 Android 端共用 docs/consistency.md。"
+            return viewModel.startupWarning ?? L10n.t("profile.footnote.consistency")
         case .localData:
             return nil
         }
@@ -366,12 +366,12 @@ extension ProfileViewController: UITableViewDataSource {
         case .bluetooth:
             switch indexPath.row {
             case 0:
-                return makeValueCell(title: "授权状态", value: viewModel.authorizationText)
+                return makeValueCell(title: L10n.t("profile.bluetoothAuth"), value: viewModel.authorizationText)
             case 1:
-                return makeValueCell(title: "运行状态", value: viewModel.bluetoothStateText)
+                return makeValueCell(title: L10n.t("profile.bluetoothState"), value: viewModel.bluetoothStateText)
             default:
                 return makeActionCell(
-                    title: "前往系统设置",
+                    title: L10n.t("profile.openSettings"),
                     color: AppTheme.Palette.accent
                 )
             }
@@ -379,31 +379,31 @@ extension ProfileViewController: UITableViewDataSource {
         case .localData:
             if indexPath.row == 0 {
                 return makeValueCell(
-                    title: "本地扫描日志",
-                    value: "\(viewModel.logCount) 条",
+                    title: L10n.t("profile.scanLog"),
+                    value: L10n.f("sync.pendingCount", String(describing: viewModel.logCount)),
                     showsDisclosure: true
                 )
             }
-            return makeActionCell(title: "清空扫描日志", color: AppTheme.Palette.promotion)
+            return makeActionCell(title: L10n.t("profile.clearScanLog"), color: AppTheme.Palette.promotion)
 
         case .sync:
             switch indexPath.row {
             case 0:
-                return makeValueCell(title: "上次同步时间", value: viewModel.lastSyncText)
+                return makeValueCell(title: L10n.t("profile.lastSync"), value: viewModel.lastSyncText)
             case 1:
-                return makeValueCell(title: "待同步", value: viewModel.pendingUploadText)
+                return makeValueCell(title: L10n.t("profile.pending"), value: viewModel.pendingUploadText)
             case 2:
                 return makeActionCell(
-                    title: viewModel.isSyncing ? "同步中…" : "立即同步",
+                    title: viewModel.isSyncing ? L10n.t("profile.syncing") : L10n.t("profile.syncNow"),
                     color: viewModel.isSyncing ? AppTheme.Palette.secondaryText : AppTheme.Palette.accent
                 )
             case 3:
-                return makeValueCell(title: "匿名账号", value: viewModel.accountText)
+                return makeValueCell(title: L10n.t("profile.anonymous"), value: viewModel.accountText)
             case 4:
-                return makeValueCell(title: "会话到期日", value: viewModel.sessionExpiryText)
+                return makeValueCell(title: L10n.t("profile.sessionExpiry"), value: viewModel.sessionExpiryText)
             default:
                 return makeActionCell(
-                    title: viewModel.isSyncing ? "登录中…" : "重新登录",
+                    title: viewModel.isSyncing ? L10n.t("profile.signingIn") : L10n.t("profile.relogin"),
                     color: AppTheme.Palette.accent
                 )
             }
@@ -411,13 +411,13 @@ extension ProfileViewController: UITableViewDataSource {
         case .account:
             switch indexPath.row {
             case 0:
-                return makeValueCell(title: "迁移到新设备", value: "生成接管码", showsDisclosure: true)
+                return makeValueCell(title: L10n.t("transfer.code.title"), value: L10n.t("profile.generateTransferCode"), showsDisclosure: true)
             case 1:
-                return makeValueCell(title: "从旧设备接管", value: "输入 8 位接管码", showsDisclosure: true)
+                return makeValueCell(title: L10n.t("transfer.claim.title"), value: L10n.t("profile.enterTransferCode"), showsDisclosure: true)
             case 2:
-                return makeActionCell(title: "导出我的数据", color: AppTheme.Palette.accent)
+                return makeActionCell(title: L10n.t("profile.exportData"), color: AppTheme.Palette.accent)
             default:
-                return makeActionCell(title: "注销账号", color: AppTheme.Palette.promotion)
+                return makeActionCell(title: L10n.t("profile.deleteAccount"), color: AppTheme.Palette.promotion)
             }
 
         case .alerts:
@@ -429,7 +429,7 @@ extension ProfileViewController: UITableViewDataSource {
                     return UITableViewCell()
                 }
                 cell.configure(
-                    title: "阈值告警通知",
+                    title: L10n.t("profile.alertNotifications"),
                     isOn: viewModel.ruleAlertsEnabled
                 ) { [weak self] isOn in
                     self?.viewModel.ruleAlertsEnabled = isOn
@@ -438,20 +438,20 @@ extension ProfileViewController: UITableViewDataSource {
             }
             if indexPath.row == 1 {
                 return makeValueCell(
-                    title: "节流窗口",
+                    title: L10n.t("profile.throttleWindow"),
                     value: viewModel.ruleAlertThrottleText,
                     showsDisclosure: true
                 )
             }
             return makeValueCell(
-                title: "通知权限",
+                title: L10n.t("profile.notificationPermission"),
                 value: viewModel.notificationAuthorizationText,
                 showsDisclosure: viewModel.needsNotificationSettings
             )
 
         case .appearance:
             return makeValueCell(
-                title: "外观",
+                title: L10n.t("profile.appearance"),
                 value: viewModel.appearanceText,
                 showsDisclosure: true
             )
@@ -465,21 +465,21 @@ extension ProfileViewController: UITableViewDataSource {
             }
             if indexPath.row == 0 {
                 cell.configure(
-                    title: "自动保存最近扫描设备",
+                    title: L10n.t("profile.autoSaveScanned"),
                     isOn: viewModel.autoSaveRecentDevices
                 ) { [weak self] isOn in
                     self?.viewModel.autoSaveRecentDevices = isOn
                 }
             } else if indexPath.row == 1 {
                 cell.configure(
-                    title: "进入首页自动开始扫描",
+                    title: L10n.t("profile.autoScanOnHome"),
                     isOn: viewModel.autoScanOnLaunch
                 ) { [weak self] isOn in
                     self?.viewModel.autoScanOnLaunch = isOn
                 }
             } else {
                 cell.configure(
-                    title: "后台采集",
+                    title: L10n.t("profile.backgroundCollection"),
                     isOn: viewModel.backgroundCollectionEnabled
                 ) { [weak self] isOn in
                     self?.viewModel.backgroundCollectionEnabled = isOn
@@ -490,11 +490,11 @@ extension ProfileViewController: UITableViewDataSource {
         case .about:
             switch indexPath.row {
             case 0:
-                return makeValueCell(title: "应用版本", value: viewModel.appVersionText)
+                return makeValueCell(title: L10n.t("profile.appVersion"), value: viewModel.appVersionText)
             case 1:
-                return makeValueCell(title: "接口地址（BASE_URL）", value: viewModel.baseURLText)
+                return makeValueCell(title: L10n.t("profile.baseURL"), value: viewModel.baseURLText)
             default:
-                return makeValueCell(title: "关于与权限说明", value: "", showsDisclosure: true)
+                return makeValueCell(title: L10n.t("profile.about"), value: "", showsDisclosure: true)
             }
         }
     }

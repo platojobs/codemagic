@@ -67,7 +67,7 @@ final class HomeDashboardViewModel {
                 self.groupFilter = nil
             }
         } catch {
-            lastError = .database("读取本地数据失败：\(error)")
+            lastError = .database(L10n.f("home.loadFailed", String(describing: error)))
         }
         onChange?()
     }
@@ -75,11 +75,11 @@ final class HomeDashboardViewModel {
     // MARK: - 告警摘要
 
     var alertSummaryText: String {
-        todayAlertCount > 0 ? "今日 \(todayAlertCount) 条告警" : "今日无告警"
+        todayAlertCount > 0 ? L10n.f("home.alertsToday", String(describing: todayAlertCount)) : L10n.t("home.alertsNoneToday")
     }
 
     var alertSummaryDetail: String {
-        todayAlertCount > 0 ? "规则已触发，点击查看智能页" : "所有规则运行正常"
+        todayAlertCount > 0 ? L10n.t("home.rulesTriggered") : L10n.t("home.rulesNormal")
     }
 
     var alertSummaryKind: StatusChipView.Kind {
@@ -148,7 +148,7 @@ final class HomeDashboardViewModel {
     }
 
     func readingText(for device: SavedDevice) -> String {
-        guard let reading = latestReadings[device.id] else { return "暂无读数" }
+        guard let reading = latestReadings[device.id] else { return L10n.t("device.detail.noReadings") }
         return "\(reading.metric.displayName) \(reading.displayText)"
     }
 
@@ -227,7 +227,7 @@ final class HomeDashboardViewModel {
             try savedDeviceStore.upsert(device)
             reload()
         } catch {
-            lastError = .database("保存设备失败：\(error)")
+            lastError = .database(L10n.f("devices.saveFailed", String(describing: error)))
             onChange?()
         }
     }
@@ -237,7 +237,7 @@ final class HomeDashboardViewModel {
             try savedDeviceStore.softDelete(id: id)
             reload()
         } catch {
-            lastError = .database("删除设备失败：\(error)")
+            lastError = .database(L10n.f("devices.deleteFailed", String(describing: error)))
             onChange?()
         }
     }

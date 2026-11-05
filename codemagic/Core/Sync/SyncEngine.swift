@@ -107,7 +107,7 @@ final class SyncEngine {
 
     func sync(completion: ((Result<Summary, AppError>) -> Void)? = nil) {
         guard !isSyncing else {
-            completion?(.failure(.sync("上一次同步尚未结束")))
+            completion?(.failure(.sync(L10n.t("sync.busy"))))
             return
         }
         isSyncing = true
@@ -140,7 +140,7 @@ final class SyncEngine {
         completion: ((Result<Summary, AppError>) -> Void)? = nil
     ) {
         guard !isSyncing else {
-            completion?(.failure(.sync("上一次同步尚未结束")))
+            completion?(.failure(.sync(L10n.t("sync.busy"))))
             return
         }
         guard let session = tokenStore.load(), !session.token.isEmpty else {
@@ -183,7 +183,7 @@ final class SyncEngine {
     /// 旧账号数据不会自动合并；本机数据保留，只更换云端归属。重复点击由 `isSyncing` 拦截。
     func relogin(completion: ((Result<Summary, AppError>) -> Void)? = nil) {
         guard !isSyncing else {
-            completion?(.failure(.sync("上一次同步尚未结束")))
+            completion?(.failure(.sync(L10n.t("sync.busy"))))
             return
         }
         isSyncing = true
@@ -202,9 +202,9 @@ final class SyncEngine {
 
         do {
             let requeued = try deviceStore.markAllPendingForRelogin()
-            recordLog("重新登录：本地 \(requeued) 条设备将上传到新匿名账号")
+            recordLog(L10n.f("sync.reloginRequeue", String(describing: requeued)))
         } catch {
-            finish(.failure(.database("重新登录前重置同步状态失败：\(error)")), completion: completion)
+            finish(.failure(.database(L10n.f("sync.reloginResetFailed", String(describing: error)))), completion: completion)
             return
         }
 
@@ -221,7 +221,7 @@ final class SyncEngine {
                 do {
                     try self.tokenStore.save(session)
                 } catch {
-                    self.recordLog("重新登录成功，但 token 写入 Keychain 失败：\(error)")
+                    self.recordLog(L10n.f("sync.reloginKeychainFailed", String(describing: error)))
                 }
                 self.metadataStore.userID = session.userID
                 self.metadataStore.sessionExpiresAt = session.expiresAt
@@ -241,7 +241,7 @@ final class SyncEngine {
         }
         // token 已失效且用户尚未确认重新登录：禁止静默新建匿名账号，避免设备归属漂移。
         guard !metadataStore.reloginRequired else {
-            completion(.failure(.sync("匿名登录已失效，请在「我的」页重新登录")))
+            completion(.failure(.sync(L10n.t("sync.reloginRequired"))))
             return
         }
         api.createAnonymousSession { [weak self] result in
@@ -252,7 +252,7 @@ final class SyncEngine {
                     try self.tokenStore.save(session)
                 } catch {
                     // Keychain 偶发失败不应阻断本次同步，但下次启动需重新匿名登录。
-                    self.recordLog("匿名登录成功，但 token 写入 Keychain 失败：\(error)")
+                    self.recordLog(L10n.f("sync.loginKeychainFailed", String(describing: error)))
                 }
                 self.metadataStore.userID = session.userID
                 self.metadataStore.sessionExpiresAt = session.expiresAt
@@ -327,7 +327,7 @@ final class SyncEngine {
                     summary.conflicts += applied.conflicts.count
                     self.sessionConflictMessages.append(contentsOf: applied.conflicts)
                 } catch {
-                    completion(.failure(.database("应用增量变更失败：\(error)")))
+                    completion(.failure(.database(L10n.f("sync.applyChangesFailed", String(describing: error)))))
                     return
                 }
                 self.metadataStore.cursor = pageResult.nextCursor
@@ -362,7 +362,7 @@ final class SyncEngine {
     ) {
         didFullResync = true
         metadataStore.resetCursor()
-        recordLog("同步游标已过期（410 RESYNC_REQUIRED）：已清空游标，从 0 全量重新同步", level: .warning)
+        recordLog(L10n.t("sync.cursorExpired"), level: .warning)
         pull(
             cursor: 0,
             token: token,
@@ -392,7 +392,7 @@ final class SyncEngine {
                 if existing.syncState != .synced, existing.updatedAt > deletedAt {
                     let message = self.conflictMessage(
                         name: existing.displayName,
-                        reason: "本地修改较新，云端删除未生效"
+                        reason: L10n.t("sync.conflict.localNewer")
                     )
                     conflicts.append(message)
                     recordLog(message, level: .warning)
@@ -426,7 +426,7 @@ final class SyncEngine {
                 // 本地有未上传修改，但云端版本更新：服务端获胜，必须提示而非静默覆盖。
                 let message = conflictMessage(
                     name: existing.displayName,
-                    reason: "同一台设备在另一台设备上被改过"
+                    reason: L10n.t("sync.conflict.changedElsewhere")
                 )
                 conflicts.append(message)
                 recordLog(message, level: .warning)
@@ -461,7 +461,7 @@ final class SyncEngine {
             pendingDevices = try deviceStore.fetchPending(limit: deviceLimit)
             pendingReadings = try readingsStore.fetchPending(limit: readingsLimit)
         } catch {
-            completion(.failure(.database("读取待上传数据失败：\(error)")))
+            completion(.failure(.database(L10n.f("sync.readPendingFailed", String(describing: error)))))
             return
         }
 
@@ -542,7 +542,7 @@ final class SyncEngine {
                         self.sessionConflictMessages.append(message)
                     }
                 } catch {
-                    completion(.failure(.database("写回同步状态失败：\(error)")))
+                    completion(.failure(.database(L10n.f("sync.writeStatusFailed", String(describing: error)))))
                     return
                 }
 
@@ -586,13 +586,13 @@ final class SyncEngine {
     private func pruneReadings() {
         let cutoff = now().addingTimeInterval(-7 * 24 * 60 * 60)
         guard let removed = try? readingsStore.prune(olderThan: cutoff), removed > 0 else { return }
-        recordLog("本地读数清理：删除 \(removed) 条超过 7 天的记录")
+        recordLog(L10n.f("sync.purgeReadings", String(describing: removed)))
     }
 
     /// 服务端拒绝本地版本时：写回云端版本并返回提示文案，绝不静默丢弃本地修改。
     private func applyPushConflict(_ conflict: SyncConflict) -> String {
         let server = conflict.server
-        let serverName = server.displayName.isEmpty ? "设备 \(conflict.externalID)" : server.displayName
+        let serverName = server.displayName.isEmpty ? L10n.f("sync.conflict.device", String(describing: conflict.externalID)) : server.displayName
         let message = conflictMessage(name: serverName, reason: conflict.reasonText)
         do {
             let remoteID = UUID(uuidString: server.id) ?? UUID(uuidString: conflict.id)
@@ -610,7 +610,7 @@ final class SyncEngine {
             }
             recordLog(message, level: .warning)
         } catch {
-            recordLog("冲突写回失败：\(error)", level: .warning)
+            recordLog(L10n.f("sync.writeConflictFailed", String(describing: error)), level: .warning)
         }
         return message
     }
@@ -657,16 +657,16 @@ final class SyncEngine {
             status.needsRelogin = false
             retryFailureCount = 0
             nextAutomaticRetryAt = nil
-            let base = "同步完成：拉取 \(summary.pulled) 条，同步 \(summary.pushed) 条"
+            let base = L10n.f("sync.summary.synced", String(describing: summary.pulled), String(describing: summary.pushed))
             var message = summary.conflicts > 0
-                ? "\(base)，冲突 \(summary.conflicts) 条（已采用云端版本）"
+                ? L10n.f("sync.summary.conflicts", String(describing: base), String(describing: summary.conflicts))
                 : base
             if summary.pushedReadings > 0 || summary.skippedReadings > 0 {
-                message += "，读数 \(summary.pushedReadings) 条（跳过重复 \(summary.skippedReadings) 条）"
+                message += L10n.f("sync.summary.readings", String(describing: summary.pushedReadings), String(describing: summary.skippedReadings))
             }
             // 410 全量重同步不得静默：结果文案必须明确告知用户。
             status.lastOutcomeMessage = didFullResync
-                ? "云端变更记录已过期，已重新全量同步；\(message)"
+                ? L10n.f("sync.resyncDone", String(describing: message))
                 : message
             status.lastConflictMessages = sessionConflictMessages
             status.sessionExpiresAt = metadataStore.sessionExpiresAt
@@ -680,28 +680,28 @@ final class SyncEngine {
                 status.needsRelogin = true
                 retryFailureCount = 0
                 nextAutomaticRetryAt = nil
-                status.lastOutcomeMessage = "登录已失效：匿名会话 token 已过期，请点「重新登录」；本地数据仍可用"
-                recordLog("登录已失效（HTTP 401）：等待用户重新登录", level: .warning)
+                status.lastOutcomeMessage = L10n.t("sync.sessionExpiredDetail")
+                recordLog(L10n.t("sync.awaitRelogin"), level: .warning)
             } else if error.isResyncRequired {
                 // 已重同步一次仍失败：终态，不进退避、不重复处理。
                 nextAutomaticRetryAt = nil
-                let prefix = didFullResync ? "云端变更记录已过期，重新全量同步失败：" : ""
-                status.lastOutcomeMessage = "\(prefix)\(error.code) \(error.message)；本地数据仍可用"
-                recordLog("游标失效后全量重同步失败：\(error.code) \(error.message)", level: .warning)
+                let prefix = didFullResync ? L10n.t("sync.resyncFailedPrefix") : ""
+                status.lastOutcomeMessage = L10n.f("sync.failureWithLocal", String(describing: prefix), String(describing: error.code), String(describing: error.message))
+                recordLog(L10n.f("sync.resyncError", String(describing: error.code), String(describing: error.message)), level: .warning)
             } else if error.isRetryable {
                 // 503 TIMEOUT / 网络 / 5xx：指数退避，绝对不是 410。
                 retryFailureCount += 1
                 let delay = Self.retryDelay(failureCount: retryFailureCount)
                 nextAutomaticRetryAt = now().addingTimeInterval(delay)
-                let prefix = didFullResync ? "云端变更记录已过期，已重新全量同步；但后续同步失败：" : "同步失败："
-                status.lastOutcomeMessage = "\(prefix)\(error.code) \(error.message)；本地数据仍可用，\(Int(delay)) 秒后自动重试"
-                recordLog("同步失败（可重试，第 \(retryFailureCount) 次）：\(error.code) \(error.message)", level: .warning)
+                let prefix = didFullResync ? L10n.t("sync.resyncThenFail") : L10n.t("sync.failedPrefix")
+                status.lastOutcomeMessage = L10n.f("sync.failureRetry", String(describing: prefix), String(describing: error.code), String(describing: error.message), String(describing: Int(delay)))
+                recordLog(L10n.f("sync.retryAttempt", String(describing: retryFailureCount), String(describing: error.code), String(describing: error.message)), level: .warning)
             } else {
                 retryFailureCount = 0
                 nextAutomaticRetryAt = nil
-                let prefix = didFullResync ? "云端变更记录已过期，已重新全量同步；但后续同步失败：" : "同步失败："
-                status.lastOutcomeMessage = "\(prefix)\(error.code) \(error.message)；本地数据仍可用"
-                recordLog("同步失败：\(error.code) \(error.message)", level: .warning)
+                let prefix = didFullResync ? L10n.t("sync.resyncThenFail") : L10n.t("sync.failedPrefix")
+                status.lastOutcomeMessage = L10n.f("sync.failureWithLocal", String(describing: prefix), String(describing: error.code), String(describing: error.message))
+                recordLog(L10n.f("sync.failed", String(describing: error.code), String(describing: error.message)), level: .warning)
             }
         }
 
@@ -721,7 +721,7 @@ final class SyncEngine {
     }
 
     private func conflictMessage(name: String, reason: String) -> String {
-        "另一台设备改过这条：「\(name)」（\(reason)），已采用云端版本"
+        L10n.f("sync.conflict.message", String(describing: name), String(describing: reason))
     }
 
     private func recordLog(_ message: String, level: ScanLogLevel = .info) {

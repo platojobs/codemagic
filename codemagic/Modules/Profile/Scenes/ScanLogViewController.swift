@@ -20,7 +20,7 @@ final class ScanLogViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = "扫描日志"
+        title = L10n.t("profile.scanLogTitle")
         view.backgroundColor = AppTheme.Palette.background
         configureTableView()
         reload()
@@ -48,8 +48,8 @@ final class ScanLogViewController: UIViewController {
         if entries.isEmpty {
             emptyStateView.configure(
                 symbolName: SymbolName.log,
-                title: "暂无扫描日志",
-                message: "开始扫描或触发规则后，记录会出现在这里。"
+                title: L10n.t("profile.scanLogEmpty"),
+                message: L10n.t("profile.scanLogEmptyMessage")
             )
             tableView.backgroundView = emptyStateView
             tableView.separatorStyle = .none

@@ -4,6 +4,7 @@
 
 | Tag | MARKETING_VERSION | Build | 日期 | 对齐后端 |
 | --- | --- | --- | --- | --- |
+| `v0.12.0` | 0.12.0 | 20 | 2026-11-05 | PJGoIoT v0.9.0（openapi 0.7.0；无契约变更，推荐规则仅本机） |
 | `v0.11.0` | 0.11.0 | 19 | 2026-11-05 | PJGoIoT v0.9.0（openapi 0.7.0；无契约变更，规则仅本机） |
 | `v0.10.0` | 0.10.0 | 18 | 2026-11-05 | PJGoIoT v0.9.0（openapi 0.7.0；410 / 503 TIMEOUT / expiresAt / 分页上限） |
 | `v0.9.0` | 0.9.0 | 17 | 2026-11-05 | PJGoIoT v0.7.0（契约 0.6.0；无后端变更） |
@@ -22,6 +23,18 @@
 | `v0.3.0` | 0.3.0 | 4 | 2026-11-05 | 0.3.0 |
 | `v0.2.0` | 0.2.0 | 3 | 2026-11-05 | 0.2.0 |
 | `v0.1.0` | — | 1 | 2026-11-05 | — |
+
+---
+
+## v0.12.0（build 20）
+
+**主题：推荐规则、中英双语与动态字体**
+
+- **推荐规则**：「智能 → 自动化」首段新增「推荐规则」入口，只根据该设备**真实出现过的指标**生成模板（温度 > 30℃、湿度 > 70%、电量 < 20%、心率 > 120、CO₂ > 1000ppm），不列出设备没有的指标；一键添加立即写入本地并出现在规则列表，复用 `readingThreshold` 规则结构，不新建模型、不改数据库。无设备显示「还没有设备」，有设备无读数显示「连接到设备并采集到读数后可创建推荐规则」。
+- **中英双语**：全部界面文案抽到 `Resources/zh-Hans.lproj/Localizable.strings` 与 `en.lproj/Localizable.strings`（key 集合一致、`%@` 数量一致由单测强制）；`InfoPlist.strings` 双语权限文案；工程 `knownRegions` 含 `zh-Hans`，`CFBundleLocalizations = [en, zh-Hans]`，设置跟随系统语言。术语：Device / Reading / Sync / Scan / Group / Alert / Transfer Code（不使用 `pairing code`）。数字与日期显式 `Locale.current`，CSV 与文件名仍 `en_US_POSIX` + UTC。
+- **动态字体**：字号统一 `AppText`（`UIFontMetrics` 缩放），`adjustsFontForContentSizeCategory = true`；表格行高自适应；图表 Y 轴左侧留白按实际标签宽度计算，超大字号下缩为 3 个刻度且标签不压绘图区。
+- 单测 **277 个，0 失败**（新增 17 个：模板只按真实指标生成 / 空态 / 阈值预设 / 一键写入与设备切换、本地化 key 与占位符一致性 / 硬编码中文审计 / 声明语言、`AppText` 默认与 AX5 字号差 / 布局固有高度）。E2E 151 项无契约变更。
+- 无 SQLite 迁移（v0.11.0 的 v7 结构沿用）。
 
 ---
 

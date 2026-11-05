@@ -17,18 +17,18 @@ enum AccountAPIError: Error, Equatable {
     var userMessage: String {
         switch self {
         case .invalidCode:
-            return "接管码无效或已过期，请重新生成后再试。"
+            return L10n.t("account.transfer.invalid")
         case .unauthorized:
-            return "登录已失效，请先重新登录后再操作。"
+            return L10n.t("account.auth.expired")
         case .rateLimited(let seconds):
             if let seconds {
-                return "尝试过于频繁，请 \(seconds) 秒后再试。"
+                return L10n.f("account.rateLimitedSeconds", String(describing: seconds))
             }
-            return "尝试过于频繁，请稍后再试。"
+            return L10n.t("account.rateLimited")
         case .failure(let error):
             return "\(error.code) \(error.message)"
         case .decoding:
-            return "服务端响应格式与约定不符，请稍后重试。"
+            return L10n.t("account.responseMismatch")
         }
     }
 
@@ -94,7 +94,7 @@ final class AccountAPIClient: AccountAPIServicing {
                     guard payload.code.count == PairingCodeFormatter.codeLength,
                           let expiresAt = SyncDateCodec.parse(payload.expiresAt)
                     else {
-                        self.deliver(.failure(.decoding("配对码响应缺少有效 code / expiresAt")), completion)
+                        self.deliver(.failure(.decoding(L10n.t("account.pairing.missingCode"))), completion)
                         return
                     }
                     self.deliver(
@@ -116,7 +116,7 @@ final class AccountAPIClient: AccountAPIServicing {
         do {
             body = try JSONEncoder().encode(ClaimRequest(code: code))
         } catch {
-            deliver(.failure(.decoding("配对请求编码失败")), completion)
+            deliver(.failure(.decoding(L10n.t("account.pairing.encodeFailed"))), completion)
             return
         }
         let request = HTTPRequest(
@@ -142,7 +142,7 @@ final class AccountAPIClient: AccountAPIServicing {
                 do {
                     let payload = try self.decoder.decode(ClaimPayload.self, from: response.data)
                     guard !payload.userId.isEmpty, !payload.token.isEmpty else {
-                        self.deliver(.failure(.decoding("配对响应缺少 userId / token")), completion)
+                        self.deliver(.failure(.decoding(L10n.t("account.pairing.missingToken"))), completion)
                         return
                     }
                     self.deliver(
@@ -181,7 +181,7 @@ final class AccountAPIClient: AccountAPIServicing {
         }
         components?.queryItems = queryItems
         guard let url = components?.url else {
-            deliver(.failure(.failure(.configuration("无法构造导出 URL"))), completion)
+            deliver(.failure(.failure(.configuration(L10n.t("account.export.urlFailed")))), completion)
             return
         }
         let request = HTTPRequest(url: url, headers: ["Authorization": "Bearer \(token)"])
@@ -293,7 +293,7 @@ final class AccountAPIClient: AccountAPIServicing {
 
 /// BASE_URL 未配置时的降级实现。
 final class UnavailableAccountAPI: AccountAPIServicing {
-    private let error = AccountAPIError.failure(.configuration("BASE_URL 未正确配置，账号功能不可用"))
+    private let error = AccountAPIError.failure(.configuration(L10n.t("account.baseUrlMissing")))
 
     func createPairingCode(token: String, completion: @escaping (Result<PairingCode, AccountAPIError>) -> Void) {
         completion(.failure(error))

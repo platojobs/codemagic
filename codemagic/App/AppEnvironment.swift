@@ -97,7 +97,7 @@ final class AppEnvironment {
                 logStore: scanLogStore
             )
             if startupWarning == nil {
-                startupWarning = "\(AppError.configuration("").code) BASE_URL 未正确配置，产品与市场数据不可用"
+                startupWarning = L10n.f("app.env.productsUnavailable", AppError.configuration("").code)
             }
         }
 
@@ -142,7 +142,7 @@ final class AppEnvironment {
                     engine.sync { result in
                         switch result {
                         case .success(let summary):
-                            completion(.success("同步完成：推送 \(summary.pushed)，拉取 \(summary.pulled)"))
+                            completion(.success(L10n.f("sync.summary.completed", String(describing: summary.pushed), String(describing: summary.pulled))))
                         case .failure(let error):
                             completion(.failure(error))
                         }
@@ -172,9 +172,9 @@ final class AppEnvironment {
             // 磁盘数据库不可用时退回内存库，保证应用仍可打开，但数据不跨启动保留。
             do {
                 let memory = try SQLiteDatabase(path: ":memory:")
-                return (memory, "\(AppError.database("").code) 本地数据库不可用，本次运行数据不会保存")
+                return (memory, L10n.f("app.env.databaseUnavailable", AppError.database("").code))
             } catch {
-                fatalError("SQLite 无法初始化：\(error)")
+                fatalError(L10n.f("app.env.sqliteInitFailed", String(describing: error)))
             }
         }
     }
@@ -183,17 +183,17 @@ final class AppEnvironment {
 /// 当 BASE_URL 配置失败时使用的空实现，让页面显示配置错误而不是崩溃。
 final class UnavailableProductService: ProductServicing {
     func fetchProducts(completion: @escaping (Result<[ProductModel], AppError>) -> Void) {
-        completion(.failure(.configuration("BASE_URL 未正确配置")))
+        completion(.failure(.configuration(L10n.t("app.env.baseUrlMissing"))))
     }
 
     func fetchMarketItems(completion: @escaping (Result<[MarketItem], AppError>) -> Void) {
-        completion(.failure(.configuration("BASE_URL 未正确配置")))
+        completion(.failure(.configuration(L10n.t("app.env.baseUrlMissing"))))
     }
 
     func fetchDeviceInfo(
         peripheralID: UUID,
         completion: @escaping (Result<ProductModel, AppError>) -> Void
     ) {
-        completion(.failure(.configuration("BASE_URL 未正确配置")))
+        completion(.failure(.configuration(L10n.t("app.env.baseUrlMissing"))))
     }
 }

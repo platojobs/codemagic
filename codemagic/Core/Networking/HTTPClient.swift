@@ -79,7 +79,7 @@ final class URLSessionHTTPClient: HTTPClient {
                 return
             }
             guard let httpResponse = response as? HTTPURLResponse else {
-                completion(.failure(.network("未收到 HTTP 响应")))
+                completion(.failure(.network(L10n.t("error.noHTTPResponse"))))
                 return
             }
             var headers: [String: String] = [:]

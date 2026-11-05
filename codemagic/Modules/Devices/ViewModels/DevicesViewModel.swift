@@ -49,7 +49,7 @@ final class DevicesViewModel {
                 self.groupFilter = nil
             }
         } catch {
-            lastError = .database("读取本地设备失败：\(error)")
+            lastError = .database(L10n.f("devices.loadFailed", String(describing: error)))
         }
         onChange?()
     }
@@ -86,8 +86,8 @@ final class DevicesViewModel {
     /// 两种空状态：真的没有设备，与筛选后无结果。
     var emptyStateText: String {
         devices.isEmpty
-            ? "还没有保存的设备，可在首页扫描后保存。"
-            : "没有匹配的设备，试试修改搜索词或切换分组。"
+            ? L10n.t("devices.empty")
+            : L10n.t("devices.filteredEmpty")
     }
 
     var emptyStateSymbol: String {
@@ -166,7 +166,7 @@ final class DevicesViewModel {
             }
             reload()
         } catch {
-            lastError = .database("删除设备失败：\(error)")
+            lastError = .database(L10n.f("devices.deleteFailed", String(describing: error)))
             onChange?()
         }
     }
@@ -188,7 +188,7 @@ final class DevicesViewModel {
             try ruleStore.softDelete(id: id)
             reload()
         } catch {
-            lastError = .database("删除规则失败：\(error)")
+            lastError = .database(L10n.f("devices.deleteRuleFailed", String(describing: error)))
             onChange?()
         }
     }
@@ -198,12 +198,12 @@ final class DevicesViewModel {
     }
 
     var ruleDeviceOptions: [(id: UUID?, name: String)] {
-        [(nil, "全部已保存设备")] + devices.map { ($0.id, $0.displayName) }
+        [(nil, L10n.t("rule.editor.allDevices"))] + devices.map { ($0.id, $0.displayName) }
     }
 
     func deviceName(for id: UUID?) -> String {
-        guard let id else { return "全部已保存设备" }
-        return device(id: id)?.displayName ?? "已删除设备"
+        guard let id else { return L10n.t("rule.editor.allDevices") }
+        return device(id: id)?.displayName ?? L10n.t("devices.deleted")
     }
 
     // MARK: - Private
@@ -234,7 +234,7 @@ final class DevicesViewModel {
             try savedDeviceStore.upsert(device)
             reload()
         } catch {
-            lastError = .database("保存设备失败：\(error)")
+            lastError = .database(L10n.f("devices.saveFailed", String(describing: error)))
             onChange?()
         }
     }
@@ -244,7 +244,7 @@ final class DevicesViewModel {
             try ruleStore.upsert(rule)
             reload()
         } catch {
-            lastError = .database("保存规则失败：\(error)")
+            lastError = .database(L10n.f("devices.saveRuleFailed", String(describing: error)))
             onChange?()
         }
     }

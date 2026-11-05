@@ -8,9 +8,9 @@ enum AppAppearance: String, CaseIterable, Equatable {
 
     var title: String {
         switch self {
-        case .system: return "跟随系统"
-        case .light: return "浅色"
-        case .dark: return "深色"
+        case .system: return L10n.t("appearance.system")
+        case .light: return L10n.t("appearance.light")
+        case .dark: return L10n.t("appearance.dark")
         }
     }
 

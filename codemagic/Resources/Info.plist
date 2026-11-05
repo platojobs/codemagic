@@ -4,6 +4,11 @@
 <dict>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<key>CFBundleLocalizations</key>
+	<array>
+		<string>en</string>
+		<string>zh-Hans</string>
+	</array>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -30,9 +35,9 @@
 		<string>bluetooth-central</string>
 	</array>
 	<key>NSBluetoothAlwaysUsageDescription</key>
-	<string>用于扫描附近的蓝牙设备、显示信号强度，并在设备详情页建立连接读取厂商与固件信息。</string>
+	<string>Used to scan nearby Bluetooth devices, show signal strength, and connect from the device detail page to read vendor and firmware information.</string>
 	<key>NSBluetoothPeripheralUsageDescription</key>
-	<string>用于扫描附近的蓝牙设备并读取设备信息。</string>
+	<string>Used to scan nearby Bluetooth devices and read device information.</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsLocalNetworking</key>

@@ -22,18 +22,18 @@ final class DeviceCardCell: UICollectionViewCell {
             card.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
         ])
 
-        nameLabel.font = AppText.body.font(weight: .semibold)
+        nameLabel.applyFont(AppText.body.font(weight: .semibold))
         nameLabel.textColor = Palette.textPrimary
         nameLabel.numberOfLines = 1
 
-        statusLabel.font = AppText.caption.font(weight: .medium)
+        statusLabel.applyFont(AppText.caption.font(weight: .medium))
         statusLabel.textAlignment = .right
 
-        readingLabel.font = AppText.numericM.font()
+        readingLabel.applyFont(AppText.numericM.font())
         readingLabel.textColor = Palette.textPrimary
         readingLabel.adjustsFontForContentSizeCategory = true
 
-        timeLabel.font = AppText.footnote.font()
+        timeLabel.applyFont(AppText.footnote.font())
         timeLabel.textColor = Palette.textTertiary
 
         signalView.translatesAutoresizingMaskIntoConstraints = false
@@ -83,13 +83,13 @@ final class DeviceCardCell: UICollectionViewCell {
     ) {
         nameLabel.text = device.displayName
         if !device.isConnectable {
-            statusLabel.text = "跨平台"
+            statusLabel.text = L10n.t("home.status.crossPlatform")
             statusLabel.textColor = Palette.textTertiary
         } else if isConnected {
-            statusLabel.text = "已连接"
+            statusLabel.text = L10n.t("home.status.connected")
             statusLabel.textColor = Palette.success
         } else {
-            statusLabel.text = "未连接"
+            statusLabel.text = L10n.t("home.status.disconnected")
             statusLabel.textColor = Palette.textSecondary
         }
         readingLabel.text = readingText
@@ -98,15 +98,15 @@ final class DeviceCardCell: UICollectionViewCell {
         if let lastSeenAt = device.lastSeenAt {
             timeLabel.text = Self.relativeFormatter.localizedString(for: lastSeenAt, relativeTo: Date())
         } else {
-            timeLabel.text = "尚未连接"
+            timeLabel.text = L10n.t("home.status.notConnectedYet")
         }
         card.onTap(onTap)
-        accessibilityLabel = "\(device.displayName)，\(statusLabel.text ?? "")，\(readingText)"
+        accessibilityLabel = L10n.f("home.a11y.card", device.displayName, statusLabel.text ?? "", readingText)
     }
 
     private static let relativeFormatter: RelativeDateTimeFormatter = {
         let formatter = RelativeDateTimeFormatter()
-        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.locale = Locale.current
         formatter.unitsStyle = .short
         return formatter
     }()
@@ -139,11 +139,11 @@ final class QuickScenarioCell: UICollectionViewCell {
             withConfiguration: UIImage.SymbolConfiguration(pointSize: Layout.icon24, weight: .medium)
         )
 
-        nameLabel.font = AppText.body.font(weight: .semibold)
+        nameLabel.applyFont(AppText.body.font(weight: .semibold))
         nameLabel.textColor = Palette.textPrimary
         nameLabel.numberOfLines = 1
 
-        detailLabel.font = AppText.caption.font()
+        detailLabel.applyFont(AppText.caption.font())
         detailLabel.textColor = Palette.textSecondary
         detailLabel.numberOfLines = 2
 
@@ -170,9 +170,9 @@ final class QuickScenarioCell: UICollectionViewCell {
 
     func configure(scenario: Scenario, onTap: @escaping () -> Void) {
         nameLabel.text = scenario.name
-        detailLabel.text = "\(scenario.actions.count) 个动作 · 仅本机"
+        detailLabel.text = L10n.f("scenario.cell.actionsLocal", String(describing: scenario.actions.count))
         card.onTap(onTap)
-        accessibilityLabel = "\(scenario.name)，\(scenario.actions.count) 个动作，仅本机"
+        accessibilityLabel = L10n.f("scenario.cell.a11y", String(describing: scenario.name), String(describing: scenario.actions.count))
     }
 }
 
@@ -199,14 +199,14 @@ final class HomeAlertCell: UICollectionViewCell {
             card.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
         ])
 
-        titleLabel.font = AppText.callout.font(weight: .semibold)
-        titleLabel.text = "今日告警摘要"
+        titleLabel.applyFont(AppText.callout.font(weight: .semibold))
+        titleLabel.text = L10n.t("home.alertSummary")
         titleLabel.textColor = Palette.textPrimary
 
-        detailLabel.font = AppText.caption.font()
+        detailLabel.applyFont(AppText.caption.font())
         detailLabel.textColor = Palette.textSecondary
 
-        countLabel.font = AppText.numericM.font()
+        countLabel.applyFont(AppText.numericM.font())
         countLabel.textColor = Palette.textPrimary
         countLabel.textAlignment = .right
 
@@ -248,7 +248,7 @@ final class HomeAlertCell: UICollectionViewCell {
     func configure(count: Int, summary: String, detail: String, kind: StatusChipView.Kind, onTap: @escaping () -> Void) {
         countLabel.text = "\(count)"
         statusChip?.removeFromSuperview()
-        let chip = StatusChipView(text: count > 0 ? "需关注" : "正常", kind: kind)
+        let chip = StatusChipView(text: count > 0 ? L10n.t("home.alertSummary.needsAttention") : L10n.t("home.alertSummary.normal"), kind: kind)
         statusChip = chip
         rightStack.addArrangedSubview(chip)
         detailLabel.text = "\(summary) · \(detail)"
@@ -312,7 +312,7 @@ final class HomeErrorCell: UICollectionViewCell {
     }
 
     func configure(message: String, retry: @escaping () -> Void) {
-        errorView.configure(title: "加载本地数据失败", message: message, action: retry)
+        errorView.configure(title: L10n.t("home.loadLocalFailed"), message: message, action: retry)
     }
 }
 

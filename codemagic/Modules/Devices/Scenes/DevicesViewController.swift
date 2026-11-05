@@ -12,8 +12,8 @@ final class DevicesViewController: UIViewController {
     private let tableView = UITableView(frame: .zero, style: .insetGrouped)
     private let addRuleButton = UIBarButtonItem()
     private let filterBar = UIStackView()
-    private let sortButton = AppTheme.makePillButton(title: "排序", symbolName: "arrow.up.arrow.down")
-    private let groupButton = AppTheme.makePillButton(title: "分组", symbolName: "line.3.horizontal.decrease.circle")
+    private let sortButton = AppTheme.makePillButton(title: L10n.t("devices.sort"), symbolName: "arrow.up.arrow.down")
+    private let groupButton = AppTheme.makePillButton(title: L10n.t("device.detail.group"), symbolName: "line.3.horizontal.decrease.circle")
     private let searchController = UISearchController(searchResultsController: nil)
     private var filterHeaderHeight: CGFloat = 0
 
@@ -39,14 +39,14 @@ final class DevicesViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = "设备"
+        title = L10n.t("devices.title")
         view.backgroundColor = AppTheme.Palette.background
         configureTableView()
         configureSearchAndFilter()
 
         addRuleButton.target = self
         addRuleButton.action = #selector(handleAddRule)
-        addRuleButton.title = "新增"
+        addRuleButton.title = L10n.t("common.add")
         navigationItem.rightBarButtonItem = addRuleButton
 
         viewModel.onChange = { [weak self] in
@@ -90,7 +90,7 @@ final class DevicesViewController: UIViewController {
     private func configureSearchAndFilter() {
         searchController.searchResultsUpdater = self
         searchController.obscuresBackgroundDuringPresentation = false
-        searchController.searchBar.placeholder = "搜索别名、广播名、型号或标识符"
+        searchController.searchBar.placeholder = L10n.t("devices.searchPlaceholder")
         searchController.searchBar.autocapitalizationType = .none
         navigationItem.searchController = searchController
         navigationItem.hidesSearchBarWhenScrolling = false
@@ -128,8 +128,8 @@ final class DevicesViewController: UIViewController {
     }
 
     private func refreshFilterBar() {
-        sortButton.configuration?.title = "排序：\(viewModel.sort.title)"
-        groupButton.configuration?.title = "分组：\(viewModel.groupFilter ?? "全部")"
+        sortButton.configuration?.title = L10n.f("devices.sortSummary", String(describing: viewModel.sort.title))
+        groupButton.configuration?.title = viewModel.groupFilter.map { L10n.f("devices.groupSummary", $0) } ?? L10n.t("devices.groupSummaryAll")
         groupButton.isHidden = viewModel.availableGroups.isEmpty
         updateFilterHeaderHeight()
     }
@@ -151,7 +151,7 @@ final class DevicesViewController: UIViewController {
     }
 
     @objc private func handleSort() {
-        let sheet = UIAlertController(title: "排序方式", message: nil, preferredStyle: .actionSheet)
+        let sheet = UIAlertController(title: L10n.t("devices.sortOrder"), message: nil, preferredStyle: .actionSheet)
         for option in DeviceSort.allCases {
             let selected = option == viewModel.sort
             sheet.addAction(UIAlertAction(
@@ -161,14 +161,14 @@ final class DevicesViewController: UIViewController {
                 self?.viewModel.updateSort(option)
             })
         }
-        sheet.addAction(UIAlertAction(title: "取消", style: .cancel))
+        sheet.addAction(UIAlertAction(title: L10n.t("common.cancel"), style: .cancel))
         presentSheet(sheet, source: sortButton)
     }
 
     @objc private func handleGroup() {
-        let sheet = UIAlertController(title: "按分组筛选", message: nil, preferredStyle: .actionSheet)
+        let sheet = UIAlertController(title: L10n.t("devices.filterByGroup"), message: nil, preferredStyle: .actionSheet)
         sheet.addAction(UIAlertAction(
-            title: viewModel.groupFilter == nil ? "✓ 全部" : "全部",
+            title: viewModel.groupFilter == nil ? L10n.t("devices.groupAllChecked") : L10n.t("common.all"),
             style: .default
         ) { [weak self] _ in
             self?.viewModel.updateGroupFilter(nil)
@@ -182,7 +182,7 @@ final class DevicesViewController: UIViewController {
                 self?.viewModel.updateGroupFilter(group)
             })
         }
-        sheet.addAction(UIAlertAction(title: "取消", style: .cancel))
+        sheet.addAction(UIAlertAction(title: L10n.t("common.cancel"), style: .cancel))
         presentSheet(sheet, source: groupButton)
     }
 
@@ -206,20 +206,20 @@ final class DevicesViewController: UIViewController {
 
     private func presentEditAlert(for device: SavedDevice) {
         let alert = UIAlertController(
-            title: "编辑设备",
-            message: "备注名用于列表展示，分组用于本地归类。",
+            title: L10n.t("devices.edit"),
+            message: L10n.t("devices.editNote"),
             preferredStyle: .alert
         )
         alert.addTextField { field in
             field.text = device.remark
-            field.placeholder = "备注名"
+            field.placeholder = L10n.t("devices.alias")
         }
         alert.addTextField { field in
             field.text = device.groupName
-            field.placeholder = "分组"
+            field.placeholder = L10n.t("device.detail.group")
         }
-        alert.addAction(UIAlertAction(title: "取消", style: .cancel))
-        alert.addAction(UIAlertAction(title: "保存", style: .default) { [weak self, weak alert] _ in
+        alert.addAction(UIAlertAction(title: L10n.t("common.cancel"), style: .cancel))
+        alert.addAction(UIAlertAction(title: L10n.t("common.save"), style: .default) { [weak self, weak alert] _ in
             let remark = alert?.textFields?.first?.text ?? ""
             let group = alert?.textFields?.last?.text ?? ""
             self?.viewModel.updateDevice(id: device.id, remark: remark, groupName: group)
@@ -229,12 +229,12 @@ final class DevicesViewController: UIViewController {
 
     private func confirmDeleteDevice(_ device: SavedDevice) {
         let alert = UIAlertController(
-            title: "删除设备？",
-            message: "将同时删除该设备关联的本地规则，数据采用软删除以便后续同步。",
+            title: L10n.t("devices.deleteTitle"),
+            message: L10n.t("devices.deleteMessage"),
             preferredStyle: .alert
         )
-        alert.addAction(UIAlertAction(title: "取消", style: .cancel))
-        alert.addAction(UIAlertAction(title: "删除", style: .destructive) { [weak self] _ in
+        alert.addAction(UIAlertAction(title: L10n.t("common.cancel"), style: .cancel))
+        alert.addAction(UIAlertAction(title: L10n.t("common.delete"), style: .destructive) { [weak self] _ in
             self?.viewModel.deleteDevice(id: device.id)
         })
         present(alert, animated: true)
@@ -287,11 +287,11 @@ extension DevicesViewController: UITableViewDataSource {
         switch section {
         case .devices:
             if viewModel.hasActiveFilter {
-                return "已保存设备（\(viewModel.filteredDevices.count) / \(viewModel.devices.count)）"
+                return L10n.f("devices.savedCount", String(describing: viewModel.filteredDevices.count), String(describing: viewModel.devices.count))
             }
-            return "已保存设备（\(viewModel.devices.count)）"
+            return L10n.f("devices.savedCountSingle", String(describing: viewModel.devices.count))
         case .rules:
-            return "本地规则（\(viewModel.rules.count)）"
+            return L10n.f("devices.rulesCount", String(describing: viewModel.rules.count))
         }
     }
 
@@ -319,7 +319,7 @@ extension DevicesViewController: UITableViewDataSource {
         case .rules:
             guard !viewModel.rules.isEmpty else {
                 return makePlaceholderCell(
-                    text: "暂无规则，点击右上角「新增」创建断开或信号阈值规则。",
+                    text: L10n.t("devices.noRules"),
                     symbol: SymbolName.rule
                 )
             }
@@ -380,7 +380,7 @@ extension DevicesViewController: UITableViewDelegate {
         guard let section = Section(rawValue: indexPath.section) else { return nil }
 
         let devices = viewModel.filteredDevices
-        let deleteAction = UIContextualAction(style: .destructive, title: "删除") { [weak self] _, _, completion in
+        let deleteAction = UIContextualAction(style: .destructive, title: L10n.t("common.delete")) { [weak self] _, _, completion in
             guard let self else { return }
             switch section {
             case .devices where devices.indices.contains(indexPath.row):
@@ -393,7 +393,7 @@ extension DevicesViewController: UITableViewDelegate {
             completion(true)
         }
 
-        let editAction = UIContextualAction(style: .normal, title: "编辑") { [weak self] _, _, completion in
+        let editAction = UIContextualAction(style: .normal, title: L10n.t("common.edit")) { [weak self] _, _, completion in
             guard let self, section == .devices, devices.indices.contains(indexPath.row) else {
                 completion(false)
                 return

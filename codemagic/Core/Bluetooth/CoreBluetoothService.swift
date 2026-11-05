@@ -136,7 +136,7 @@ final class CoreBluetoothService: NSObject, BluetoothServicing {
     private func connect(peripheralID: UUID, using manager: CBCentralManager) {
         guard let peripheral = peripheral(for: peripheralID) else {
             connectionHandler?(
-                .failed(peripheralID: peripheralID, errorMessage: "未找到该蓝牙设备")
+                .failed(peripheralID: peripheralID, errorMessage: L10n.t("bluetooth.deviceNotFound"))
             )
             return
         }
@@ -149,7 +149,7 @@ final class CoreBluetoothService: NSObject, BluetoothServicing {
             guard let self, peripheral.state != .connected else { return }
             self.centralManager?.cancelPeripheralConnection(peripheral)
             self.connectionHandler?(
-                .failed(peripheralID: peripheralID, errorMessage: "连接超时")
+                .failed(peripheralID: peripheralID, errorMessage: L10n.t("bluetooth.connectionTimeout"))
             )
         }
         connectTimeoutWorkItem = workItem
@@ -296,7 +296,7 @@ extension CoreBluetoothService: CBCentralManagerDelegate {
         guard shouldEmit(rssi: RSSI.intValue, for: peripheralID, now: now) else { return }
 
         let advertisedName = advertisementData[CBAdvertisementDataLocalNameKey] as? String
-        let name = peripheral.name ?? advertisedName ?? "未命名设备"
+        let name = peripheral.name ?? advertisedName ?? L10n.t("bluetooth.unnamedDevice")
         discoveryHandler?(
             ScannedDevice(
                 peripheralID: peripheralID,
@@ -329,7 +329,7 @@ extension CoreBluetoothService: CBCentralManagerDelegate {
         connectionHandler?(
             .failed(
                 peripheralID: peripheral.identifier,
-                errorMessage: error?.localizedDescription ?? "连接失败"
+                errorMessage: error?.localizedDescription ?? L10n.t("bluetooth.connectionFailed")
             )
         )
     }

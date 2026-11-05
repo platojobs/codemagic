@@ -41,8 +41,8 @@ final class UserNotificationService: LocalNotificationServing {
     func schedule(event: RuleTriggerEvent, completion: ((Error?) -> Void)? = nil) {
         let content = UNMutableNotificationContent()
         content.title = event.kind == .triggered
-            ? "规则告警 · \(event.ruleName)"
-            : "已恢复 · \(event.ruleName)"
+            ? L10n.f("notification.ruleAlert.title", String(describing: event.ruleName))
+            : L10n.f("notification.ruleAlert.recovered", String(describing: event.ruleName))
         content.body = event.message
         content.sound = .default
         content.userInfo = [Self.deviceIDKey: event.deviceID.uuidString]

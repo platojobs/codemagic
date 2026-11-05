@@ -127,7 +127,7 @@ final class HomeViewModel {
             recordLog(
                 category: .session,
                 level: .warning,
-                message: "无法开始扫描：\(bluetooth.state.title)"
+                message: L10n.f("home.scanUnavailable", String(describing: bluetooth.state.title))
             )
             return
         }
@@ -137,7 +137,7 @@ final class HomeViewModel {
         lastRuleEvent = nil
         isScanRequested = true
         status = .scanning
-        recordLog(category: .session, message: "开始扫描附近的蓝牙设备")
+        recordLog(category: .session, message: L10n.t("home.scanStarted"))
         bluetooth.startScanning()
         rebuildRows()
     }
@@ -147,7 +147,7 @@ final class HomeViewModel {
         bluetooth.stopScanning()
         let discovered = liveDevices.count
         status = .idle
-        recordLog(category: .session, message: "结束扫描，本次共发现 \(discovered) 台设备")
+        recordLog(category: .session, message: L10n.f("home.scanFinished", String(describing: discovered)))
         rebuildRows()
     }
 
@@ -171,23 +171,23 @@ final class HomeViewModel {
                 live.isSaved = true
                 liveDevices[row.peripheralID] = live
             }
-            recordLog(category: .device, message: "保存设备「\(device.displayName)」")
+            recordLog(category: .device, message: L10n.f("home.saveDevice", String(describing: device.displayName)))
             rebuildRows()
         } catch {
-            lastError = .database("保存设备失败：\(error)")
+            lastError = .database(L10n.f("devices.saveFailed", String(describing: error)))
         }
     }
 
     var scanActionTitle: String {
-        status == .scanning ? "停止" : "扫描"
+        status == .scanning ? L10n.t("home.stop") : L10n.t("home.scan")
     }
 
     var statusText: String {
         switch status {
         case .idle:
-            return recentDevices.isEmpty ? "尚未扫描，点右上角开始" : "显示最近扫描到的设备"
+            return recentDevices.isEmpty ? L10n.t("home.notScanned") : L10n.t("home.recentScan")
         case .scanning:
-            return "正在扫描附近设备… 已发现 \(liveDevices.count) 台"
+            return L10n.f("home.scanning", String(describing: liveDevices.count))
         case .unavailable(let state):
             return state.title
         case .failed(let message):
@@ -198,17 +198,17 @@ final class HomeViewModel {
     var emptyState: (symbol: String, title: String, message: String, actionTitle: String?) {
         switch status {
         case .scanning:
-            return (SymbolName.bluetooth, "正在扫描", "请让蓝牙设备进入广播状态，扫描结果会自动出现在这里。", nil)
+            return (SymbolName.bluetooth, L10n.t("home.scanningTitle"), L10n.t("home.scanningHint"), nil)
         case .unavailable(.unsupported):
-            return (SymbolName.bluetoothPoweredOff, "当前环境不支持蓝牙", "模拟器不提供真实的蓝牙能力，请使用真机验证扫描。", nil)
+            return (SymbolName.bluetoothPoweredOff, L10n.t("home.unsupportedTitle"), L10n.t("home.unsupportedMessage"), nil)
         case .unavailable(.unauthorized):
-            return (SymbolName.bluetoothPoweredOff, "未获得蓝牙权限", "请到「我的」页跳转系统设置，开启蓝牙权限后重试。", nil)
+            return (SymbolName.bluetoothPoweredOff, L10n.t("bluetooth.state.unauthorized"), L10n.t("home.unauthorizedMessage"), nil)
         case .unavailable(.poweredOff):
-            return (SymbolName.bluetoothPoweredOff, "蓝牙已关闭", "请在系统设置中开启蓝牙后重试。", "开始扫描")
+            return (SymbolName.bluetoothPoweredOff, L10n.t("bluetooth.state.poweredOff"), L10n.t("home.bluetoothOffMessage"), L10n.t("home.empty.action"))
         case .unavailable, .failed:
-            return (SymbolName.bluetoothPoweredOff, "蓝牙暂不可用", "请检查蓝牙状态后重试。", "开始扫描")
+            return (SymbolName.bluetoothPoweredOff, L10n.t("home.bluetoothUnavailableTitle"), L10n.t("home.bluetoothUnavailableMessage"), L10n.t("home.empty.action"))
         case .idle:
-            return (SymbolName.bluetooth, "还没有扫描记录", "点击开始扫描，附近设备会显示在这里，并保留最近一次结果。", "开始扫描")
+            return (SymbolName.bluetooth, L10n.t("home.noScanTitle"), L10n.t("home.noScanMessage"), L10n.t("home.empty.action"))
         }
     }
 
@@ -221,7 +221,7 @@ final class HomeViewModel {
         default:
             status = .unavailable(state)
             if state == .unauthorized {
-                recordLog(category: .session, level: .warning, message: "蓝牙权限未开启")
+                recordLog(category: .session, level: .warning, message: L10n.t("home.bluetoothDeniedTitle"))
             }
         }
     }

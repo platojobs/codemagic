@@ -22,12 +22,12 @@ enum BluetoothState: Equatable {
 
     var title: String {
         switch self {
-        case .unknown: return "正在初始化蓝牙"
-        case .unsupported: return "当前设备不支持蓝牙"
-        case .unauthorized: return "未获得蓝牙权限"
-        case .poweredOff: return "蓝牙已关闭"
-        case .poweredOn: return "蓝牙已就绪"
-        case .resetting: return "蓝牙正在重置"
+        case .unknown: return L10n.t("bluetooth.state.initializing")
+        case .unsupported: return L10n.t("bluetooth.state.unsupported")
+        case .unauthorized: return L10n.t("bluetooth.state.unauthorized")
+        case .poweredOff: return L10n.t("bluetooth.state.poweredOff")
+        case .poweredOn: return L10n.t("bluetooth.state.ready")
+        case .resetting: return L10n.t("bluetooth.state.resetting")
         }
     }
 
@@ -44,11 +44,11 @@ enum BluetoothAuthorization: String, Equatable {
 
     var title: String {
         switch self {
-        case .allowed: return "已允许"
-        case .denied: return "已拒绝"
-        case .restricted: return "受限"
-        case .notDetermined: return "未询问"
-        case .unknown: return "未知"
+        case .allowed: return L10n.t("permission.status.granted")
+        case .denied: return L10n.t("permission.status.denied")
+        case .restricted: return L10n.t("permission.status.restricted")
+        case .notDetermined: return L10n.t("permission.status.notDetermined")
+        case .unknown: return L10n.t("common.unknown")
         }
     }
 }

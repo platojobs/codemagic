@@ -22,7 +22,7 @@ final class RuleEditorViewController: UIViewController {
     private let scrollView = UIScrollView()
     private let contentStack = UIStackView()
     private let nameField = UITextField()
-    private let triggerControl = UISegmentedControl(items: ["设备断开", "信号低于阈值", "读数阈值"])
+    private let triggerControl = UISegmentedControl(items: [L10n.t("rule.trigger.disconnect"), L10n.t("rule.trigger.rssi"), L10n.t("rule.trigger.readingLabel")])
     private let thresholdLabel = AppTheme.makeLabel(style: .subheadline, color: AppTheme.Palette.primaryText)
     private let thresholdSlider = UISlider()
     private let thresholdContainer = UIStackView()
@@ -63,7 +63,7 @@ final class RuleEditorViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = "新增规则"
+        title = L10n.t("rule.editor.newRule")
         view.backgroundColor = AppTheme.Palette.background
         configureNavigationItems()
         configureLayout()
@@ -76,13 +76,13 @@ final class RuleEditorViewController: UIViewController {
 
     private func configureNavigationItems() {
         navigationItem.leftBarButtonItem = UIBarButtonItem(
-            title: "取消",
+            title: L10n.t("common.cancel"),
             style: .plain,
             target: self,
             action: #selector(handleCancel)
         )
         navigationItem.rightBarButtonItem = UIBarButtonItem(
-            title: "保存",
+            title: L10n.t("common.save"),
             style: .done,
             target: self,
             action: #selector(handleSave)
@@ -125,26 +125,26 @@ final class RuleEditorViewController: UIViewController {
         ])
 
         contentStack.addArrangedSubview(makeFieldGroup(
-            title: "规则名称",
+            title: L10n.t("rule.editor.name"),
             content: makeTextInput()
         ))
         contentStack.addArrangedSubview(makeFieldGroup(
-            title: "触发条件",
+            title: L10n.t("rule.editor.trigger"),
             content: makeTriggerControl()
         ))
         contentStack.addArrangedSubview(thresholdContainer)
         contentStack.addArrangedSubview(readingContainer)
         contentStack.addArrangedSubview(makeFieldGroup(
-            title: "生效设备",
+            title: L10n.t("rule.editor.target"),
             content: makeTargetButton()
         ))
 
-        noteLabel.text = "规则只在本地运行：扫描 / 取数时按条件记录日志、发本地通知，不会向设备下发任何指令。"
+        noteLabel.text = L10n.t("rule.editor.localOnlyNote")
         contentStack.addArrangedSubview(noteLabel)
     }
 
     private func makeTextInput() -> UIView {
-        nameField.placeholder = "例如：设备断开提醒"
+        nameField.placeholder = L10n.t("rule.editor.namePlaceholder")
         nameField.borderStyle = .roundedRect
         nameField.clearButtonMode = .whileEditing
         nameField.autocapitalizationType = .none
@@ -161,7 +161,7 @@ final class RuleEditorViewController: UIViewController {
 
     private func makeTargetButton() -> UIView {
         var configuration = UIButton.Configuration.plain()
-        configuration.title = deviceOptions.first?.name ?? "全部已保存设备"
+        configuration.title = deviceOptions.first?.name ?? L10n.t("rule.editor.allDevices")
         configuration.image = UIImage(systemName: SymbolName.disclosure)
         configuration.imagePlacement = .trailing
         configuration.imagePadding = AppTheme.Spacing.small
@@ -188,7 +188,7 @@ final class RuleEditorViewController: UIViewController {
         thresholdContainer.spacing = AppTheme.Spacing.small
 
         let titleLabel = AppTheme.makeLabel(style: .footnote, color: AppTheme.Palette.secondaryText)
-        titleLabel.text = "RSSI 阈值（dBm）"
+        titleLabel.text = L10n.t("rule.editor.rssiThreshold")
 
         thresholdSlider.minimumValue = -100
         thresholdSlider.maximumValue = -30
@@ -207,7 +207,7 @@ final class RuleEditorViewController: UIViewController {
         readingContainer.spacing = AppTheme.Spacing.small
 
         let titleLabel = AppTheme.makeLabel(style: .footnote, color: AppTheme.Palette.secondaryText)
-        titleLabel.text = "指标阈值"
+        titleLabel.text = L10n.t("rule.editor.metricThreshold")
 
         var metricConfiguration = UIButton.Configuration.plain()
         metricConfiguration.title = selectedMetric.displayName
@@ -250,10 +250,10 @@ final class RuleEditorViewController: UIViewController {
         consecutiveRow.alignment = .center
 
         readingContainer.addArrangedSubview(titleLabel)
-        readingContainer.addArrangedSubview(makeFieldGroup(title: "指标", content: metricButton))
-        readingContainer.addArrangedSubview(makeFieldGroup(title: "比较符", content: comparisonControl))
-        readingContainer.addArrangedSubview(makeFieldGroup(title: "阈值", content: thresholdRow))
-        readingContainer.addArrangedSubview(makeFieldGroup(title: "连续满足条数", content: consecutiveRow))
+        readingContainer.addArrangedSubview(makeFieldGroup(title: L10n.t("device.detail.metric"), content: metricButton))
+        readingContainer.addArrangedSubview(makeFieldGroup(title: L10n.t("rule.editor.comparison"), content: comparisonControl))
+        readingContainer.addArrangedSubview(makeFieldGroup(title: L10n.t("rule.editor.threshold"), content: thresholdRow))
+        readingContainer.addArrangedSubview(makeFieldGroup(title: L10n.t("rule.editor.consecutive"), content: consecutiveRow))
         updateReadingUnit()
         updateConsecutiveLabel()
     }
@@ -263,7 +263,7 @@ final class RuleEditorViewController: UIViewController {
     }
 
     private func updateConsecutiveLabel() {
-        consecutiveLabel.text = consecutive > 1 ? "连续 \(consecutive) 条读数才告警" : "单条读数满足即告警"
+        consecutiveLabel.text = consecutive > 1 ? L10n.f("rule.editor.consecutiveAlert", String(describing: consecutive)) : L10n.t("rule.editor.singleAlert")
     }
 
     // MARK: - State
@@ -305,7 +305,7 @@ final class RuleEditorViewController: UIViewController {
     }
 
     @objc private func handleMetricSelection() {
-        let sheet = UIAlertController(title: "选择指标", message: nil, preferredStyle: .actionSheet)
+        let sheet = UIAlertController(title: L10n.t("device.detail.selectMetric"), message: nil, preferredStyle: .actionSheet)
         for metric in Self.editableMetrics {
             sheet.addAction(
                 UIAlertAction(title: metric.displayName, style: .default) { [weak self] _ in
@@ -315,7 +315,7 @@ final class RuleEditorViewController: UIViewController {
                 }
             )
         }
-        sheet.addAction(UIAlertAction(title: "取消", style: .cancel))
+        sheet.addAction(UIAlertAction(title: L10n.t("common.cancel"), style: .cancel))
         if let popover = sheet.popoverPresentationController {
             popover.sourceView = metricButton
             popover.sourceRect = metricButton.bounds
@@ -330,7 +330,7 @@ final class RuleEditorViewController: UIViewController {
     }
 
     @objc private func handleTargetSelection() {
-        let sheet = UIAlertController(title: "选择生效设备", message: nil, preferredStyle: .actionSheet)
+        let sheet = UIAlertController(title: L10n.t("rule.editor.selectTarget"), message: nil, preferredStyle: .actionSheet)
         for (index, option) in deviceOptions.enumerated() {
             sheet.addAction(
                 UIAlertAction(title: option.name, style: .default) { [weak self] _ in
@@ -339,7 +339,7 @@ final class RuleEditorViewController: UIViewController {
                 }
             )
         }
-        sheet.addAction(UIAlertAction(title: "取消", style: .cancel))
+        sheet.addAction(UIAlertAction(title: L10n.t("common.cancel"), style: .cancel))
         if let popover = sheet.popoverPresentationController {
             popover.sourceView = targetButton
             popover.sourceRect = targetButton.bounds
@@ -362,9 +362,9 @@ final class RuleEditorViewController: UIViewController {
         let resolvedName: String
         if trimmedName.isEmpty {
             switch selectedTrigger {
-            case .disconnect: resolvedName = "设备断开提醒"
-            case .rssiBelowThreshold: resolvedName = "信号强度提醒"
-            case .readingThreshold: resolvedName = "\(selectedMetric.displayName)阈值提醒"
+            case .disconnect: resolvedName = L10n.t("rule.editor.disconnectName")
+            case .rssiBelowThreshold: resolvedName = L10n.t("rule.editor.signalName")
+            case .readingThreshold: resolvedName = L10n.f("rule.editor.metricName", String(describing: selectedMetric.displayName))
             }
         } else {
             resolvedName = trimmedName
@@ -397,11 +397,11 @@ final class RuleEditorViewController: UIViewController {
 
     private func presentInvalidThreshold() {
         let alert = UIAlertController(
-            title: "阈值无效",
-            message: "请输入一个有效数字，例如 30 或 30.5。",
+            title: L10n.t("rule.editor.invalidThreshold"),
+            message: L10n.t("rule.editor.invalidThresholdMessage"),
             preferredStyle: .alert
         )
-        alert.addAction(UIAlertAction(title: "好", style: .default) { [weak self] _ in
+        alert.addAction(UIAlertAction(title: L10n.t("common.ok"), style: .default) { [weak self] _ in
             self?.readingThresholdField.becomeFirstResponder()
         })
         present(alert, animated: true)

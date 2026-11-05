@@ -33,7 +33,7 @@ final class ScannedDeviceCell: UITableViewCell {
     func configure(row: HomeDeviceRow, onSave: @escaping () -> Void) {
         self.onSave = onSave
         nameLabel.text = row.name
-        identifierLabel.text = "标识符 \(row.peripheralID.uuidString.prefix(8))…"
+        identifierLabel.text = L10n.f("scanned.identifier", String(describing: row.peripheralID.uuidString.prefix(8)))
 
         if let rssi = row.rssi {
             signalView.isSignalUnavailable = false
@@ -42,11 +42,11 @@ final class ScannedDeviceCell: UITableViewCell {
         } else {
             signalView.isSignalUnavailable = true
             signalView.rssi = -100
-            rssiLabel.text = "上次出现 \(AppDateFormat.relative(row.lastSeenAt))"
+            rssiLabel.text = L10n.f("scanned.lastSeen", String(describing: AppDateFormat.relative(row.lastSeenAt)))
         }
 
         var configuration = UIButton.Configuration.tinted()
-        configuration.title = row.isSaved ? "已保存" : "保存"
+        configuration.title = row.isSaved ? L10n.t("common.saved") : L10n.t("common.save")
         configuration.cornerStyle = .capsule
         configuration.contentInsets = NSDirectionalEdgeInsets(
             top: AppTheme.Spacing.xSmall,
@@ -56,7 +56,7 @@ final class ScannedDeviceCell: UITableViewCell {
         )
         saveButton.configuration = configuration
         saveButton.isEnabled = !row.isSaved
-        saveButton.accessibilityLabel = row.isSaved ? "设备已保存" : "保存设备 \(row.name)"
+        saveButton.accessibilityLabel = row.isSaved ? L10n.t("scanned.saved") : L10n.f("scanned.saveDeviceA11y", String(describing: row.name))
     }
 
     // MARK: - Actions

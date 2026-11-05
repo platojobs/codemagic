@@ -25,12 +25,12 @@ final class MarketViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = "市场"
+        title = L10n.t("tab.market")
         view.backgroundColor = AppTheme.Palette.background
         configureFilterBar()
         configureTableView()
         navigationItem.rightBarButtonItem = UIBarButtonItem(
-            title: "刷新",
+            title: L10n.t("market.refresh"),
             style: .plain,
             target: self,
             action: #selector(handleRefresh)
@@ -54,22 +54,22 @@ final class MarketViewController: UIViewController {
         vendorConfig.cornerStyle = .capsule
         vendorConfig.contentInsets = NSDirectionalEdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12)
         vendorButton.configuration = vendorConfig
-        vendorButton.titleLabel?.font = AppText.callout.font()
+        vendorButton.titleLabel?.applyFont(AppText.callout.font())
         vendorButton.addTarget(self, action: #selector(handleVendorFilter), for: .touchUpInside)
 
         var compatibilityConfig = UIButton.Configuration.gray()
         compatibilityConfig.cornerStyle = .capsule
         compatibilityConfig.contentInsets = NSDirectionalEdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12)
         compatibilityButton.configuration = compatibilityConfig
-        compatibilityButton.titleLabel?.font = AppText.callout.font()
+        compatibilityButton.titleLabel?.applyFont(AppText.callout.font())
         compatibilityButton.addTarget(
             self,
             action: #selector(handleCompatibilityFilter),
             for: .touchUpInside
         )
 
-        resetFilterButton.setTitle("清除", for: .normal)
-        resetFilterButton.titleLabel?.font = AppText.callout.font()
+        resetFilterButton.setTitle(L10n.t("market.clear"), for: .normal)
+        resetFilterButton.titleLabel?.applyFont(AppText.callout.font())
         resetFilterButton.addTarget(self, action: #selector(handleResetFilters), for: .touchUpInside)
 
         filterBar.addArrangedSubview(vendorButton)
@@ -109,7 +109,7 @@ final class MarketViewController: UIViewController {
     private func makeFootnoteView() -> UIView {
         let container = UIView(frame: CGRect(x: 0, y: 0, width: 0, height: 64))
         let label = AppTheme.makeLabel(style: .footnote, color: AppTheme.Palette.tertiaryText)
-        label.text = "以上仅展示配件与固件信息及兼容性，不提供下单、订单或支付功能。"
+        label.text = L10n.t("market.footnote")
         label.numberOfLines = 0
         label.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(label)
@@ -136,8 +136,8 @@ final class MarketViewController: UIViewController {
         case .failed(let error):
             skeletonController.end()
             errorStateView.configure(
-                title: "市场数据加载失败",
-                message: "\(error.localizedDescriptionText)。请检查网络或 BASE_URL 配置。"
+                title: L10n.t("market.loadFailed"),
+                message: L10n.f("market.loadFailedDetail", String(describing: error.localizedDescriptionText))
             ) { [weak self] in
                 self?.viewModel.reload()
             }
@@ -147,9 +147,9 @@ final class MarketViewController: UIViewController {
             skeletonController.end()
             emptyStateView.configure(
                 symbolName: SymbolName.marketTab,
-                title: "没有符合筛选条件的条目",
-                message: "当前筛选：\(filterSummary)。调整厂商或兼容性筛选，或清除筛选。",
-                actionTitle: "清除筛选",
+                title: L10n.t("market.noMatches"),
+                message: L10n.f("market.noMatchesDetail", String(describing: filterSummary)),
+                actionTitle: L10n.t("home.filtered.action"),
                 action: { [weak self] in self?.viewModel.resetFilters() }
             )
             tableView.backgroundView = emptyStateView
@@ -158,9 +158,9 @@ final class MarketViewController: UIViewController {
             skeletonController.end()
             emptyStateView.configure(
                 symbolName: SymbolName.marketTab,
-                title: "暂无市场信息",
-                message: "服务端返回了空列表，新增配件或固件后会显示在这里。",
-                actionTitle: "刷新",
+                title: L10n.t("market.emptyTitle"),
+                message: L10n.t("market.emptyMessage"),
+                actionTitle: L10n.t("market.refresh"),
                 action: { [weak self] in self?.viewModel.reload() }
             )
             tableView.backgroundView = emptyStateView
@@ -179,24 +179,24 @@ final class MarketViewController: UIViewController {
         compatibilityButton.isEnabled = hasData
         resetFilterButton.isHidden = !viewModel.hasActiveFilter
 
-        vendorButton.configuration?.title = viewModel.selectedVendor.map { "厂商：\($0)" } ?? "厂商：全部"
+        vendorButton.configuration?.title = viewModel.selectedVendor.map { L10n.f("market.filter.vendor", String(describing: $0)) } ?? L10n.t("market.filter.vendorAll")
         compatibilityButton.configuration?.title = viewModel.selectedCompatibility.map {
-            "兼容性：\($0)"
-        } ?? "兼容性：全部"
+            L10n.f("market.filter.compatibility", String(describing: $0))
+        } ?? L10n.t("market.filter.compatibilityAll")
     }
 
     private var filterSummary: String {
         [
-            viewModel.selectedVendor.map { "厂商 \($0)" },
-            viewModel.selectedCompatibility.map { "兼容性 \($0)" },
-        ].compactMap { $0 }.joined(separator: "，")
+            viewModel.selectedVendor.map { L10n.f("market.vendorShort", String(describing: $0)) },
+            viewModel.selectedCompatibility.map { L10n.f("market.compatibilityShort", String(describing: $0)) },
+        ].compactMap { $0 }.joined(separator: L10n.t("common.a11ySeparator"))
     }
 
     // MARK: - Actions
 
     @objc private func handleVendorFilter() {
         presentFilterSheet(
-            title: "按厂商筛选",
+            title: L10n.t("market.filterByVendor"),
             options: viewModel.vendors,
             selected: viewModel.selectedVendor,
             sourceView: vendorButton
@@ -207,7 +207,7 @@ final class MarketViewController: UIViewController {
 
     @objc private func handleCompatibilityFilter() {
         presentFilterSheet(
-            title: "按兼容性筛选",
+            title: L10n.t("market.filterByCompatibility"),
             options: viewModel.compatibilityOptions,
             selected: viewModel.selectedCompatibility,
             sourceView: compatibilityButton
@@ -229,12 +229,12 @@ final class MarketViewController: UIViewController {
         onSelect: @escaping (String?) -> Void
     ) {
         let sheet = UIAlertController(title: title, message: nil, preferredStyle: .actionSheet)
-        sheet.addAction(UIAlertAction(title: "全部", style: .default) { _ in onSelect(nil) })
+        sheet.addAction(UIAlertAction(title: L10n.t("common.all"), style: .default) { _ in onSelect(nil) })
         for option in options {
             let actionTitle = option == selected ? "✓ \(option)" : option
             sheet.addAction(UIAlertAction(title: actionTitle, style: .default) { _ in onSelect(option) })
         }
-        sheet.addAction(UIAlertAction(title: "取消", style: .cancel))
+        sheet.addAction(UIAlertAction(title: L10n.t("common.cancel"), style: .cancel))
         sheet.popoverPresentationController?.sourceView = sourceView
         sheet.popoverPresentationController?.sourceRect = sourceView.bounds
         present(sheet, animated: true)

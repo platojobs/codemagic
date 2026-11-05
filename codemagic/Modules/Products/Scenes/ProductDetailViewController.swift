@@ -28,7 +28,7 @@ final class ProductDetailViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = product.deviceType.isEmpty ? "产品详情" : product.deviceType
+        title = product.deviceType.isEmpty ? L10n.t("product.detail.title") : product.deviceType
         view.backgroundColor = AppTheme.Palette.background
         sections = buildSections()
 
@@ -49,40 +49,40 @@ final class ProductDetailViewController: UIViewController {
 
     private func buildSections() -> [SectionModel] {
         var basicRows = [
-            Row(title: "厂商", value: product.vendor.isEmpty ? "—" : product.vendor),
-            Row(title: "型号", value: product.deviceType.isEmpty ? "—" : product.deviceType),
-            Row(title: "固件版本", value: product.firmwareVersion.isEmpty ? "—" : product.firmwareVersion),
+            Row(title: L10n.t("device.detail.vendor"), value: product.vendor.isEmpty ? "—" : product.vendor),
+            Row(title: L10n.t("catalog.model"), value: product.deviceType.isEmpty ? "—" : product.deviceType),
+            Row(title: L10n.t("device.detail.firmwareVersion"), value: product.firmwareVersion.isEmpty ? "—" : product.firmwareVersion),
             Row(title: "MAC", value: product.mac.isEmpty ? "—" : product.mac),
         ]
         if !product.note.isEmpty {
-            basicRows.append(Row(title: "说明", value: product.note))
+            basicRows.append(Row(title: L10n.t("product.detail.description"), value: product.note))
         }
-        let basic = SectionModel(title: "基本信息", rows: basicRows)
+        let basic = SectionModel(title: L10n.t("product.detail.basicInfo"), rows: basicRows)
 
         var gattRows: [Row] = []
         if product.gattServices.isEmpty {
-            gattRows = [Row(title: "GATT 服务", value: "暂无数据")]
+            gattRows = [Row(title: L10n.t("product.detail.gatt"), value: L10n.t("common.noData"))]
         } else {
             for service in product.gattServices {
                 gattRows.append(Row(
-                    title: service.name.isEmpty ? "未命名服务" : service.name,
+                    title: service.name.isEmpty ? L10n.t("device.detail.unnamedService") : service.name,
                     value: service.uuid
                 ))
                 for characteristic in service.characteristics {
-                    gattRows.append(Row(title: "  特征", value: characteristic))
+                    gattRows.append(Row(title: L10n.t("product.detail.characteristics"), value: characteristic))
                 }
             }
         }
-        let gatt = SectionModel(title: "GATT 服务与特征", rows: gattRows)
+        let gatt = SectionModel(title: L10n.t("device.detail.gatt"), rows: gattRows)
 
         let compatibility = SectionModel(
-            title: "兼容性",
+            title: L10n.t("device.detail.compatibility"),
             rows: [
                 Row(
-                    title: "兼容设备 / 固件",
+                    title: L10n.t("device.detail.compatibleDevices"),
                     value: product.compatibility.isEmpty
-                        ? "暂无兼容性说明"
-                        : product.compatibility.joined(separator: "、")
+                        ? L10n.t("device.detail.noCompatibility")
+                        : product.compatibility.joined(separator: L10n.t("common.listSeparator"))
                 )
             ]
         )

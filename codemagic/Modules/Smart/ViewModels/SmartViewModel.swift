@@ -41,7 +41,7 @@ final class SmartViewModel {
                 .map { $0 }
             lastError = nil
         } catch {
-            lastError = .database("读取智能页数据失败：\(error)")
+            lastError = .database(L10n.f("smart.loadFailed", String(describing: error)))
         }
         onChange?()
     }
@@ -49,8 +49,8 @@ final class SmartViewModel {
     // MARK: - 自动化
 
     func deviceName(for rule: DeviceRule) -> String {
-        guard let id = rule.deviceID else { return "全部设备" }
-        return savedDevices.first { $0.id == id }?.displayName ?? "已删除的设备"
+        guard let id = rule.deviceID else { return L10n.t("smart.allDevices") }
+        return savedDevices.first { $0.id == id }?.displayName ?? L10n.t("common.deviceDeleted")
     }
 
     func triggerText(for entry: ScanLogEntry) -> String {
@@ -58,7 +58,7 @@ final class SmartViewModel {
     }
 
     var deviceOptionsForRule: [(id: UUID?, name: String)] {
-        [(nil, "全部设备")] + savedDevices.map { ($0.id, $0.displayName) }
+        [(nil, L10n.t("smart.allDevices"))] + savedDevices.map { ($0.id, $0.displayName) }
     }
 
     func addRule(_ rule: DeviceRule) {
@@ -66,7 +66,7 @@ final class SmartViewModel {
             try ruleStore.upsert(rule)
             reload()
         } catch {
-            lastError = .database("保存规则失败：\(error)")
+            lastError = .database(L10n.f("devices.saveRuleFailed", String(describing: error)))
             onChange?()
         }
     }
@@ -80,7 +80,7 @@ final class SmartViewModel {
             try ruleStore.upsert(rule)
             reload()
         } catch {
-            lastError = .database("更新规则失败：\(error)")
+            lastError = .database(L10n.f("smart.updateRuleFailed", String(describing: error)))
             onChange?()
         }
     }
@@ -90,7 +90,7 @@ final class SmartViewModel {
             try ruleStore.softDelete(id: id)
             reload()
         } catch {
-            lastError = .database("删除规则失败：\(error)")
+            lastError = .database(L10n.f("devices.deleteRuleFailed", String(describing: error)))
             onChange?()
         }
     }
@@ -106,7 +106,7 @@ final class SmartViewModel {
             try scenarioStore.upsert(scenario)
             reload()
         } catch {
-            lastError = .database("保存场景失败：\(error)")
+            lastError = .database(L10n.f("smart.saveScenarioFailed", String(describing: error)))
             onChange?()
         }
     }
@@ -116,14 +116,14 @@ final class SmartViewModel {
             try scenarioStore.delete(id: id)
             reload()
         } catch {
-            lastError = .database("删除场景失败：\(error)")
+            lastError = .database(L10n.f("smart.deleteScenarioFailed", String(describing: error)))
             onChange?()
         }
     }
 
     func actionDescription(_ action: ScenarioAction) -> String {
         action.detail { id in
-            savedDevices.first { $0.id == id }?.displayName ?? "已删除的设备"
+            savedDevices.first { $0.id == id }?.displayName ?? L10n.t("common.deviceDeleted")
         }
     }
 
@@ -133,7 +133,7 @@ final class SmartViewModel {
 
     private static let relativeFormatter: RelativeDateTimeFormatter = {
         let formatter = RelativeDateTimeFormatter()
-        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.locale = Locale.current
         formatter.unitsStyle = .short
         return formatter
     }()

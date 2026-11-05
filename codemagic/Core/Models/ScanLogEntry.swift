@@ -10,11 +10,11 @@ enum ScanLogCategory: String, Codable, CaseIterable {
 
     var title: String {
         switch self {
-        case .session: return "扫描"
-        case .device: return "设备"
-        case .rule: return "规则"
-        case .sync: return "同步"
-        case .reading: return "读数"
+        case .session: return L10n.t("log.category.scan")
+        case .device: return L10n.t("log.category.device")
+        case .rule: return L10n.t("log.category.rule")
+        case .sync: return L10n.t("log.category.sync")
+        case .reading: return L10n.t("log.category.reading")
         }
     }
 }

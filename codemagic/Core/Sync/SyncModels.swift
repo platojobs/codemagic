@@ -521,9 +521,9 @@ struct SyncConflict: Decodable, Equatable {
 
     var reasonText: String {
         switch reason {
-        case "server_newer": return "云端版本更新"
-        case "clock_clamped": return "本地时间超前，已按服务端时间纠正"
-        case "key_taken": return "设备唯一键已被占用"
+        case "server_newer": return L10n.t("sync.conflict.cloudUpdated")
+        case "clock_clamped": return L10n.t("sync.conflict.clockAdjusted")
+        case "key_taken": return L10n.t("sync.conflict.uniqueKeyTaken")
         default: return reason
         }
     }

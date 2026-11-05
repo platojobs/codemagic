@@ -14,9 +14,9 @@ enum ReadingCharacteristic: String, CaseIterable, Equatable {
 
     var title: String {
         switch self {
-        case .heartRate: return "心率"
-        case .battery: return "电量"
-        case .temperature: return "温度"
+        case .heartRate: return L10n.t("metric.heartRate")
+        case .battery: return L10n.t("metric.battery")
+        case .temperature: return L10n.t("metric.temperature")
         case .nordicUART: return "Nordic UART"
         }
     }

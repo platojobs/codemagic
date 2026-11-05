@@ -35,7 +35,7 @@ final class MainTabBarController: UITabBarController {
                 ),
                 environment: environment
             ),
-            title: "首页",
+            title: L10n.t("tab.home"),
             imageName: SymbolName.homeTab,
             selectedImageName: SymbolName.homeTabSelected
         )
@@ -51,7 +51,7 @@ final class MainTabBarController: UITabBarController {
                 ),
                 environment: environment
             ),
-            title: "智能",
+            title: L10n.t("tab.smart"),
             imageName: SymbolName.smartTab,
             selectedImageName: SymbolName.smartTab
         )
@@ -60,7 +60,7 @@ final class MainTabBarController: UITabBarController {
             root: ProductsViewController(
                 viewModel: ProductsViewModel(productService: environment.productService)
             ),
-            title: "产品",
+            title: L10n.t("tab.products"),
             imageName: SymbolName.productsTab,
             selectedImageName: SymbolName.productsTabSelected
         )
@@ -69,7 +69,7 @@ final class MainTabBarController: UITabBarController {
             root: MarketViewController(
                 viewModel: MarketViewModel(productService: environment.productService)
             ),
-            title: "市场",
+            title: L10n.t("tab.market"),
             imageName: SymbolName.marketTab,
             selectedImageName: SymbolName.marketTabSelected
         )
@@ -84,13 +84,13 @@ final class MainTabBarController: UITabBarController {
                     pairingService: environment.pairingService,
                     accountExportService: environment.accountExportService,
                     accountDeletionService: environment.accountDeletionService,
-                    baseURLText: environment.apiConfiguration?.displayString ?? "未配置",
+                    baseURLText: environment.apiConfiguration?.displayString ?? L10n.t("tab.unconfigured"),
                     startupWarning: environment.startupWarning,
                     notifications: environment.notificationService
                 ),
                 scanLogStore: environment.scanLogStore
             ),
-            title: "我的",
+            title: L10n.t("tab.profile"),
             imageName: SymbolName.profileTab,
             selectedImageName: SymbolName.profileTabSelected
         )

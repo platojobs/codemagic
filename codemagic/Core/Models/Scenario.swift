@@ -13,12 +13,12 @@ enum ScenarioAction: Equatable, Hashable {
 
     var title: String {
         switch self {
-        case .connectDevice: return "连接设备"
-        case .disconnectDevice: return "断开设备"
-        case .startBackgroundCollection: return "开始后台采集"
-        case .stopBackgroundCollection: return "停止后台采集"
-        case .muteAlerts: return "静音告警"
-        case .syncNow: return "立即同步"
+        case .connectDevice: return L10n.t("scenario.action.connect")
+        case .disconnectDevice: return L10n.t("scenario.action.disconnect")
+        case .startBackgroundCollection: return L10n.t("scenario.action.startBackground")
+        case .stopBackgroundCollection: return L10n.t("scenario.action.stopBackground")
+        case .muteAlerts: return L10n.t("scenario.action.muteAlerts")
+        case .syncNow: return L10n.t("scenario.action.syncNow")
         }
     }
 
@@ -35,12 +35,12 @@ enum ScenarioAction: Equatable, Hashable {
 
     func detail(deviceName: (UUID) -> String) -> String {
         switch self {
-        case .connectDevice(let id): return "连接「\(deviceName(id))」"
-        case .disconnectDevice(let id): return "断开「\(deviceName(id))」"
-        case .startBackgroundCollection: return "开启后台采集"
-        case .stopBackgroundCollection: return "关闭后台采集并断开连接"
-        case .muteAlerts(let minutes): return "静音 \(minutes) 分钟"
-        case .syncNow: return "立即同步一次"
+        case .connectDevice(let id): return L10n.f("scenario.action.connectDevice", String(describing: deviceName(id)))
+        case .disconnectDevice(let id): return L10n.f("scenario.action.disconnectDevice", String(describing: deviceName(id)))
+        case .startBackgroundCollection: return L10n.t("scenario.action.startBackgroundDetail")
+        case .stopBackgroundCollection: return L10n.t("scenario.action.stopBackgroundDetail")
+        case .muteAlerts(let minutes): return L10n.f("scenario.action.muteMinutes", String(describing: minutes))
+        case .syncNow: return L10n.t("scenario.action.syncOnce")
         }
     }
 }
@@ -90,14 +90,14 @@ struct ScenarioRunResult: Equatable {
     var isFullySuccessful: Bool { failedCount == 0 }
 
     var summaryText: String {
-        if actionResults.isEmpty { return "场景没有动作" }
-        if isFullySuccessful { return "已完成 \(succeededCount) 个动作" }
-        return "\(succeededCount) 个成功，\(failedCount) 个失败"
+        if actionResults.isEmpty { return L10n.t("scenario.summary.empty") }
+        if isFullySuccessful { return L10n.f("scenario.summary.completed", String(describing: succeededCount)) }
+        return L10n.f("scenario.summary.partial", String(describing: succeededCount), String(describing: failedCount))
     }
 
     var failureText: String {
         actionResults.filter { !$0.succeeded }
-            .map { "\($0.action.title)：\($0.message)" }
-            .joined(separator: "；")
+            .map { L10n.f("scenario.result.line", $0.action.title, $0.message) }
+            .joined(separator: L10n.t("common.semicolonSeparator"))
     }
 }

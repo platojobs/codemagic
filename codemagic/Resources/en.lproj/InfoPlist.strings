@@ -1,0 +1,2 @@
+"NSBluetoothAlwaysUsageDescription" = "Used to scan nearby Bluetooth devices, show signal strength, and connect from the device detail page to read vendor and firmware information.";
+"NSBluetoothPeripheralUsageDescription" = "Used to scan nearby Bluetooth devices and read device information.";

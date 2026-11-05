@@ -23,25 +23,25 @@ enum APIErrorCatalog {
     }
 
     static let entries: [String: Entry] = [
-        "RESYNC_REQUIRED": Entry(handling: .resyncRequired, message: "云端变更记录已过期，需要全量重新同步"),
-        "TIMEOUT": Entry(handling: .retryWithBackoff, message: "服务端繁忙，稍后重试"),
-        "UNAUTHORIZED": Entry(handling: .reloginRequired, message: "登录已失效，请在「我的」页重新登录"),
-        "IDEMPOTENCY_CONFLICT": Entry(handling: .terminal, message: "同步请求与已有幂等键冲突，请稍后重试"),
-        "RATE_LIMITED": Entry(handling: .retryWithBackoff, message: "请求过于频繁，稍后重试"),
-        "UNAVAILABLE": Entry(handling: .retryWithBackoff, message: "服务暂时不可用，稍后重试"),
-        "INTERNAL": Entry(handling: .retryWithBackoff, message: "服务端内部错误，稍后重试"),
-        "BAD_REQUEST": Entry(handling: .terminal, message: "请求参数不符合约定"),
-        "INVALID_MAC": Entry(handling: .terminal, message: "设备地址格式不合法"),
-        "INVALID_JSON": Entry(handling: .terminal, message: "请求 JSON 不合法"),
-        "NOT_FOUND": Entry(handling: .terminal, message: "资源不存在或无权访问"),
-        "METHOD_NOT_ALLOWED": Entry(handling: .terminal, message: "接口不支持该请求方法"),
-        "CONFLICT": Entry(handling: .terminal, message: "数据版本冲突"),
-        "PAYLOAD_TOO_LARGE": Entry(handling: .terminal, message: "请求体超过服务端上限"),
-        "NOT_IMPLEMENTED": Entry(handling: .terminal, message: "服务端未实现该能力"),
+        "RESYNC_REQUIRED": Entry(handling: .resyncRequired, message: L10n.t("error.resyncRequired")),
+        "TIMEOUT": Entry(handling: .retryWithBackoff, message: L10n.t("error.timeout")),
+        "UNAUTHORIZED": Entry(handling: .reloginRequired, message: L10n.t("error.unauthorized")),
+        "IDEMPOTENCY_CONFLICT": Entry(handling: .terminal, message: L10n.t("error.idempotencyConflict")),
+        "RATE_LIMITED": Entry(handling: .retryWithBackoff, message: L10n.t("error.rateLimited")),
+        "UNAVAILABLE": Entry(handling: .retryWithBackoff, message: L10n.t("error.serviceUnavailable")),
+        "INTERNAL": Entry(handling: .retryWithBackoff, message: L10n.t("error.serverError")),
+        "BAD_REQUEST": Entry(handling: .terminal, message: L10n.t("error.badRequest")),
+        "INVALID_MAC": Entry(handling: .terminal, message: L10n.t("error.invalidAddress")),
+        "INVALID_JSON": Entry(handling: .terminal, message: L10n.t("error.invalidJSON")),
+        "NOT_FOUND": Entry(handling: .terminal, message: L10n.t("error.notFound")),
+        "METHOD_NOT_ALLOWED": Entry(handling: .terminal, message: L10n.t("error.methodNotAllowed")),
+        "CONFLICT": Entry(handling: .terminal, message: L10n.t("error.conflict")),
+        "PAYLOAD_TOO_LARGE": Entry(handling: .terminal, message: L10n.t("error.payloadTooLarge")),
+        "NOT_IMPLEMENTED": Entry(handling: .terminal, message: L10n.t("error.notImplemented")),
     ]
 
     static func entry(for code: String) -> Entry {
-        entries[code] ?? Entry(handling: .terminal, message: "服务端返回错误")
+        entries[code] ?? Entry(handling: .terminal, message: L10n.t("error.serverGeneric"))
     }
 }
 

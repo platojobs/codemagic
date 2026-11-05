@@ -38,13 +38,13 @@ final class ScenarioProgressOverlay: UIView {
             card.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
 
-        titleLabel.text = "正在执行「\(scenario.name)」"
-        titleLabel.font = AppText.headline.font(weight: .semibold)
+        titleLabel.text = L10n.f("scenario.progress.running", String(describing: scenario.name))
+        titleLabel.applyFont(AppText.headline.font(weight: .semibold))
         titleLabel.textColor = Palette.textPrimary
         titleLabel.numberOfLines = 2
 
-        subtitleLabel.text = "动作按顺序执行，失败不会阻断后续；场景仅保存在本机。"
-        subtitleLabel.font = AppText.caption.font()
+        subtitleLabel.text = L10n.t("scenario.progress.note")
+        subtitleLabel.applyFont(AppText.caption.font())
         subtitleLabel.textColor = Palette.textSecondary
         subtitleLabel.numberOfLines = 0
 
@@ -65,7 +65,7 @@ final class ScenarioProgressOverlay: UIView {
 
             let label = UILabel()
             label.text = action.title
-            label.font = AppText.callout.font()
+            label.applyFont(AppText.callout.font())
             label.textColor = Palette.textSecondary
             label.numberOfLines = 2
 
@@ -122,8 +122,8 @@ final class ScenarioProgressOverlay: UIView {
         didFinish = true
         spinner.stopAnimating()
         titleLabel.text = result.isFullySuccessful
-            ? "「\(result.scenarioName)」已完成"
-            : "「\(result.scenarioName)」部分失败"
+            ? L10n.f("scenario.progress.completed", String(describing: result.scenarioName))
+            : L10n.f("scenario.progress.partial", String(describing: result.scenarioName))
 
         for actionResult in result.actionResults {
             guard let row = rowViews[actionResult.action] else { continue }
@@ -132,9 +132,7 @@ final class ScenarioProgressOverlay: UIView {
                 withConfiguration: UIImage.SymbolConfiguration(pointSize: Layout.icon16, weight: .semibold)
             )
             row.icon.tintColor = actionResult.succeeded ? Palette.success : Palette.danger
-            row.label.text = actionResult.succeeded
-                ? "\(actionResult.action.title)：\(actionResult.message)"
-                : "\(actionResult.action.title)：\(actionResult.message)"
+            row.label.text = L10n.f("scenario.result.line", actionResult.action.title, actionResult.message)
             row.label.textColor = actionResult.succeeded ? Palette.textSecondary : Palette.danger
         }
 

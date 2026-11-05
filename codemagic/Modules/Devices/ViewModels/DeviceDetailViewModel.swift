@@ -34,14 +34,14 @@ final class DeviceDetailViewModel {
 
         /// 数据来源说明；30 天区间离线时明确标注本地只有 7 天。
         var sourceText: String {
-            if isLoading { return "读取中…" }
-            if isPendingLocalData { return "待同步：本地数据" }
+            if isLoading { return L10n.t("device.detail.loading") }
+            if isPendingLocalData { return L10n.t("device.detail.sourcePending") }
             if isOfflineLocalData {
-                return selectedRange == .day30 ? "离线：仅本地 7 天数据" : "离线：本地数据"
+                return selectedRange == .day30 ? L10n.t("device.detail.sourceOffline7d") : L10n.t("device.detail.sourceOffline")
             }
-            if isSeriesFromCloud { return "云端分桶序列" }
-            if isSummaryFromCloud { return "云端汇总" }
-            return "本地数据"
+            if isSeriesFromCloud { return L10n.t("device.detail.sourceCloudBuckets") }
+            if isSummaryFromCloud { return L10n.t("device.detail.sourceCloudSummary") }
+            return L10n.t("device.detail.sourceLocal")
         }
     }
 
@@ -123,7 +123,7 @@ final class DeviceDetailViewModel {
         }
 
         guard bluetooth.state == .poweredOn else {
-            notice = "蓝牙不可用（\(bluetooth.state.title)），已直接读取设备信息"
+            notice = L10n.f("device.detail.bluetoothUnavailable", String(describing: bluetooth.state.title))
             fetchInfo()
             return
         }
@@ -154,7 +154,7 @@ final class DeviceDetailViewModel {
             return
         }
         guard bluetooth.state == .poweredOn else {
-            notice = "蓝牙不可用（\(bluetooth.state.title)），已直接读取设备信息"
+            notice = L10n.f("device.detail.bluetoothUnavailable", String(describing: bluetooth.state.title))
             fetchInfo()
             return
         }
@@ -167,17 +167,17 @@ final class DeviceDetailViewModel {
     private func handle(_ event: BluetoothConnectionEvent) {
         switch event {
         case .connected(let peripheralID) where peripheralID == device.peripheralID:
-            notice = "蓝牙已连接，正在读取设备信息"
+            notice = L10n.t("device.detail.bluetoothReading")
             bluetooth.startReading(peripheralID: device.peripheralID)
             fetchInfo()
 
         case .failed(let peripheralID, let message) where peripheralID == device.peripheralID:
-            notice = "蓝牙连接失败：\(message)，已尝试读取设备信息"
+            notice = L10n.f("device.detail.bluetoothConnectFailed", String(describing: message))
             fetchInfo()
 
         case .disconnected(let peripheralID, let message) where peripheralID == device.peripheralID:
             if state == .connecting || state == .loadingInfo {
-                notice = "蓝牙连接已断开：\(message ?? "未知原因")"
+                notice = L10n.f("device.detail.bluetoothDisconnected", message ?? L10n.t("common.unknownReason"))
             }
 
         default:
@@ -227,11 +227,11 @@ final class DeviceDetailViewModel {
     var readingsEmptyMessage: String {
         switch bluetooth.currentAuthorization() {
         case .denied, .restricted:
-            return "蓝牙未授权：请到系统设置允许本应用使用蓝牙"
+            return L10n.t("device.detail.bluetoothUnauthorized")
         case .notDetermined:
-            return "连接设备后开始采集（首次连接会请求蓝牙权限）"
+            return L10n.t("device.detail.connectToCollect")
         case .allowed, .unknown:
-            return "连接设备后开始采集"
+            return L10n.t("device.detail.connectToCollectShort")
         }
     }
 
@@ -240,7 +240,7 @@ final class DeviceDetailViewModel {
     /// 指标选择行文案：服务端真值优先，展示「指标名 · N 条」。
     func metricTitle(for metric: ReadingMetric) -> String {
         let count = readings.metricInfos.first { $0.readingMetric == metric }?.count ?? 0
-        return count > 0 ? "\(metric.displayName) · \(count) 条" : metric.displayName
+        return count > 0 ? L10n.f("device.detail.metricCount", String(describing: metric.displayName), String(describing: count)) : metric.displayName
     }
 
     private func observeNewReadings() {
@@ -558,12 +558,12 @@ final class DeviceDetailViewModel {
 
     var statusText: String {
         switch state {
-        case .idle: return "尚未读取设备信息"
-        case .connecting: return "正在连接蓝牙设备…"
-        case .loadingInfo: return "正在读取设备信息…"
-        case .loaded: return "设备信息已更新"
+        case .idle: return L10n.t("device.detail.notRead")
+        case .connecting: return L10n.t("device.detail.connecting")
+        case .loadingInfo: return L10n.t("device.detail.readingInfoProgress")
+        case .loaded: return L10n.t("device.detail.infoUpdated")
         case .cache(_, let fetchedAt, let error):
-            return "\(error.code) 网络读取失败，显示 \(AppDateFormat.absolute(fetchedAt)) 的本地缓存"
+            return L10n.f("device.detail.infoNetworkFallback", String(describing: error.code), String(describing: AppDateFormat.absolute(fetchedAt)))
         case .failed(let error):
             return error.localizedDescriptionText
         }

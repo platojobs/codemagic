@@ -23,7 +23,7 @@ final class AboutViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = "关于"
+        title = L10n.t("profile.about")
         view.backgroundColor = AppTheme.Palette.background
         configureLayout()
         buildContent()
@@ -66,29 +66,29 @@ final class AboutViewController: UIViewController {
     }
 
     private func buildContent() {
-        contentStack.addArrangedSubview(makeTitleLabel("蓝牙设备数据面板"))
-        contentStack.addArrangedSubview(makeBodyLabel("版本 \(versionText)"))
-        contentStack.addArrangedSubview(makeBodyLabel("接口地址 \(baseURLText)"))
+        contentStack.addArrangedSubview(makeTitleLabel(L10n.t("about.appName")))
+        contentStack.addArrangedSubview(makeBodyLabel(L10n.f("about.version", String(describing: versionText))))
+        contentStack.addArrangedSubview(makeBodyLabel(L10n.f("about.baseURL", String(describing: baseURLText))))
 
         if let startupWarning {
             contentStack.addArrangedSubview(makeWarningLabel(startupWarning))
         }
 
-        contentStack.addArrangedSubview(makeSectionTitle("权限说明"))
+        contentStack.addArrangedSubview(makeSectionTitle(L10n.t("about.permissionTitle")))
         contentStack.addArrangedSubview(makeBodyLabel(
-            "蓝牙用于扫描附近设备、读取信号强度并在设备详情页建立连接。iOS 13 及以上由系统弹窗询问权限，未授权时仅能看到历史本地数据。"
+            L10n.t("about.permissionBluetooth")
         ))
         contentStack.addArrangedSubview(makeBodyLabel(
-            "扫描结果与规则只保存在本机，暂未同步到云端；市场页只展示配件与固件信息，不提供下单与支付。"
-        ))
-
-        contentStack.addArrangedSubview(makeSectionTitle("一致性文档"))
-        contentStack.addArrangedSubview(makeBodyLabel(
-            "五模块命名与顺序、字段命名、错误码、空状态与权限行为见仓库 docs/consistency.md，与 Android 端共用。"
+            L10n.t("about.dataPolicy")
         ))
 
+        contentStack.addArrangedSubview(makeSectionTitle(L10n.t("about.consistency")))
         contentStack.addArrangedSubview(makeBodyLabel(
-            "真机验证项：蓝牙扫描与 RSSI、连接后读取设备信息、系统权限弹窗。模拟器不具备真实蓝牙能力。"
+            L10n.t("about.consistencyBody")
+        ))
+
+        contentStack.addArrangedSubview(makeBodyLabel(
+            L10n.t("about.deviceCheck")
         ))
     }
 

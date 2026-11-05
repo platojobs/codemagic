@@ -7,8 +7,8 @@ final class ScenarioCell: UITableViewCell {
     private let container = UIView()
     private let nameLabel = UILabel()
     private let summaryLabel = UILabel()
-    private let localChip = StatusChipView(text: "仅本机", kind: .neutral)
-    private let runButton = AppButton(style: .secondary, title: "执行", symbolName: "play.fill")
+    private let localChip = StatusChipView(text: L10n.t("smart.localOnly"), kind: .neutral)
+    private let runButton = AppButton(style: .secondary, title: L10n.t("smart.run"), symbolName: "play.fill")
     private var onRun: (() -> Void)?
 
     override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
@@ -31,11 +31,11 @@ final class ScenarioCell: UITableViewCell {
             container.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -Layout.space4),
         ])
 
-        nameLabel.font = AppText.body.font(weight: .semibold)
+        nameLabel.applyFont(AppText.body.font(weight: .semibold))
         nameLabel.textColor = Palette.textPrimary
         nameLabel.numberOfLines = 1
 
-        summaryLabel.font = AppText.caption.font()
+        summaryLabel.applyFont(AppText.caption.font())
         summaryLabel.textColor = Palette.textSecondary
         summaryLabel.numberOfLines = 2
 
@@ -74,7 +74,7 @@ final class ScenarioCell: UITableViewCell {
         nameLabel.text = scenario.name
         summaryLabel.text = scenario.summary
         self.onRun = onRun
-        accessibilityLabel = "\(scenario.name)，仅本机，\(scenario.actions.count) 个动作"
+        accessibilityLabel = L10n.f("scenario.cell.a11y.local", String(describing: scenario.name), String(describing: scenario.actions.count))
     }
 
     @objc private func handleRun() {
@@ -94,11 +94,11 @@ final class TriggerCell: UITableViewCell {
         selectionStyle = .none
         backgroundColor = .clear
 
-        messageLabel.font = AppText.callout.font()
+        messageLabel.applyFont(AppText.callout.font())
         messageLabel.textColor = Palette.textPrimary
         messageLabel.numberOfLines = 2
 
-        timeLabel.font = AppText.footnote.font()
+        timeLabel.applyFont(AppText.footnote.font())
         timeLabel.textColor = Palette.textTertiary
 
         let stack = UIStackView(arrangedSubviews: [messageLabel, timeLabel])
@@ -155,7 +155,7 @@ final class StateCell: UITableViewCell {
     func showError(message: String, retry: @escaping () -> Void) {
         replace(with: ErrorStateView(height: 160))
         (stateView as? ErrorStateView)?.configure(
-            title: "加载智能页失败",
+            title: L10n.t("smart.loadSmartFailed"),
             message: message,
             action: retry
         )
@@ -203,7 +203,7 @@ final class TableSectionHeaderView: UITableViewHeaderFooterView {
         header.subviews.forEach { $0.removeFromSuperview() }
         let label = UILabel()
         label.text = title
-        label.font = AppText.callout.font(weight: .semibold)
+        label.applyFont(AppText.callout.font(weight: .semibold))
         label.textColor = Palette.textPrimary
         label.translatesAutoresizingMaskIntoConstraints = false
         header.addSubview(label)

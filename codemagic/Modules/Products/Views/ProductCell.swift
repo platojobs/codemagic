@@ -28,9 +28,17 @@ final class ProductCell: UITableViewCell {
     }
 
     func configure(product: ProductModel) {
-        titleLabel.text = product.deviceType.isEmpty ? "未命名型号" : product.deviceType
-        metaLabel.text = "\(product.vendor.isEmpty ? "未知厂商" : product.vendor) · 固件 \(product.firmwareVersion.isEmpty ? "未知" : product.firmwareVersion)"
-        footnoteLabel.text = "MAC \(product.mac.isEmpty ? "—" : product.mac) · GATT \(product.gattServices.count) 项"
+        titleLabel.text = product.deviceType.isEmpty ? L10n.t("product.cell.unnamed") : product.deviceType
+        metaLabel.text = L10n.f(
+            "product.cell.meta",
+            product.vendor.isEmpty ? L10n.t("product.cell.unknownVendor") : product.vendor,
+            product.firmwareVersion.isEmpty ? L10n.t("common.unknown") : product.firmwareVersion
+        )
+        footnoteLabel.text = L10n.f(
+            "product.cell.macGatt",
+            product.mac.isEmpty ? "—" : product.mac,
+            String(product.gattServices.count)
+        )
     }
 
     private func configureHierarchy() {

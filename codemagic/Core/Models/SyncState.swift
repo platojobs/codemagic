@@ -12,9 +12,9 @@ enum SyncState: String, Codable, CaseIterable {
 
     var title: String {
         switch self {
-        case .pending: return "待同步"
-        case .synced: return "已同步"
-        case .pendingDelete: return "待同步删除"
+        case .pending: return L10n.t("sync.state.pending")
+        case .synced: return L10n.t("sync.state.synced")
+        case .pendingDelete: return L10n.t("sync.state.pendingDelete")
         }
     }
 }

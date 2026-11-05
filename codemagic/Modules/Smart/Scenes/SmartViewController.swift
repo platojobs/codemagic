@@ -8,6 +8,7 @@ final class SmartViewController: UIViewController {
     }
 
     private enum Row {
+        case recommended
         case rule(DeviceRule)
         case trigger(ScanLogEntry)
         case scenario(Scenario)
@@ -16,7 +17,7 @@ final class SmartViewController: UIViewController {
         case error(String)
     }
 
-    private let segmentedControl = UISegmentedControl(items: ["自动化", "场景"])
+    private let segmentedControl = UISegmentedControl(items: [L10n.t("smart.mode.automation"), L10n.t("smart.mode.scenarios")])
     private let tableView = UITableView(frame: .zero, style: .plain)
     private var titleHost: LargeTitleHost?
     private var mode: Mode = .automation
@@ -37,18 +38,18 @@ final class SmartViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = "智能"
+        title = L10n.t("smart.title")
         view.backgroundColor = Palette.canvas
         configureTable()
         configureSegmentedControl()
         configureNavigation()
         titleHost = LargeTitleHost(
-            title: "智能",
+            title: L10n.t("smart.title"),
             viewController: self,
             scrollView: tableView,
             adjustsContentInset: false
         )
-        titleHost?.setSubtitle("自动化规则与仅本机场景")
+        titleHost?.setSubtitle(L10n.t("smart.subtitle"))
 
         segmentedControl.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(segmentedControl)
@@ -82,9 +83,12 @@ final class SmartViewController: UIViewController {
         tableView.dataSource = self
         tableView.delegate = self
         tableView.contentInset.bottom = Layout.space24
+        tableView.rowHeight = UITableView.automaticDimension
+        tableView.estimatedRowHeight = Layout.row2
         tableView.register(RuleCell.self, forCellReuseIdentifier: RuleCell.reuseIdentifier)
         tableView.register(ScenarioCell.self, forCellReuseIdentifier: ScenarioCell.reuseIdentifier)
         tableView.register(TriggerCell.self, forCellReuseIdentifier: TriggerCell.reuseIdentifier)
+        tableView.register(RecommendedEntryCell.self, forCellReuseIdentifier: RecommendedEntryCell.reuseIdentifier)
         tableView.register(StateCell.self, forCellReuseIdentifier: StateCell.reuseIdentifier)
         tableView.register(
             TableSectionHeaderView.self,
@@ -120,7 +124,7 @@ final class SmartViewController: UIViewController {
     }
 
     private func updateAddAccessibility() {
-        navigationItem.rightBarButtonItem?.accessibilityLabel = mode == .automation ? "新建规则" : "新建场景"
+        navigationItem.rightBarButtonItem?.accessibilityLabel = mode == .automation ? L10n.t("smart.newRule") : L10n.t("smart.newScenario")
     }
 
     // MARK: - Data
@@ -132,20 +136,21 @@ final class SmartViewController: UIViewController {
         switch mode {
         case .automation:
             var sections: [(String, [Row])] = []
+            sections.append(("", [.recommended]))
             if viewModel.rules.isEmpty {
-                sections.append(("自动化规则", [.emptyRules]))
+                sections.append((L10n.t("smart.section.rules"), [.emptyRules]))
             } else {
-                sections.append(("自动化规则", viewModel.rules.map { .rule($0) }))
+                sections.append((L10n.t("smart.section.rules"), viewModel.rules.map { .rule($0) }))
             }
             if !viewModel.recentTriggers.isEmpty {
-                sections.append(("最近触发", viewModel.recentTriggers.map { .trigger($0) }))
+                sections.append((L10n.t("smart.section.recentTriggers"), viewModel.recentTriggers.map { .trigger($0) }))
             }
             return sections
         case .scenario:
             if viewModel.scenarios.isEmpty {
-                return [("场景", [.emptyScenarios])]
+                return [(L10n.t("smart.mode.scenarios"), [.emptyScenarios])]
             }
-            return [("场景", viewModel.scenarios.map { .scenario($0) })]
+            return [(L10n.t("smart.mode.scenarios"), viewModel.scenarios.map { .scenario($0) })]
         }
     }
 
@@ -169,6 +174,21 @@ final class SmartViewController: UIViewController {
         }
     }
 
+    /// 推荐规则入口：只使用设备真实出现过的指标，一键写入现有 readingThreshold 规则。
+    private func presentRecommendedRules() {
+        let viewModel = RecommendedRulesViewModel(
+            readingsStore: environment.readingsStore,
+            savedDeviceStore: environment.savedDeviceStore,
+            ruleStore: environment.ruleStore
+        )
+        let controller = RecommendedRulesViewController(viewModel: viewModel) { [weak self] rule in
+            guard let self else { return }
+            self.viewModel.reload()
+            ToastView.show(L10n.f("smart.recommended.added", rule.name), kind: .success, in: self)
+        }
+        present(UINavigationController(rootViewController: controller), animated: true)
+    }
+
     private func presentScenarioEditor(_ scenario: Scenario?) {
         let options = viewModel.savedDevices.map { ($0.id, $0.displayName) }
         let editor = ScenarioEditorViewController(scenario: scenario, deviceOptions: options) { [weak self] scenario in
@@ -182,9 +202,9 @@ final class SmartViewController: UIViewController {
         overlay.onFinish = { [weak self] result in
             guard let self else { return }
             if result.isFullySuccessful {
-                ToastView.show("「\(result.scenarioName)」\(result.summaryText)", kind: .success, in: self)
+                ToastView.show(L10n.f("scenario.result.quoted", result.scenarioName, result.summaryText), kind: .success, in: self)
             } else {
-                ToastView.show("「\(result.scenarioName)」\(result.failureText)", kind: .failure, in: self)
+                ToastView.show(L10n.f("scenario.result.quoted", result.scenarioName, result.failureText), kind: .failure, in: self)
             }
             self.viewModel.reload()
         }
@@ -195,21 +215,21 @@ final class SmartViewController: UIViewController {
     }
 
     private func confirmDeleteRule(_ rule: DeviceRule) {
-        confirm(title: "删除规则「\(rule.name)」？") { [weak self] in
+        confirm(title: L10n.f("smart.deleteRuleTitle", String(describing: rule.name))) { [weak self] in
             self?.viewModel.deleteRule(id: rule.id)
         }
     }
 
     private func confirmDeleteScenario(_ scenario: Scenario) {
-        confirm(title: "删除场景「\(scenario.name)」？") { [weak self] in
+        confirm(title: L10n.f("smart.deleteScenarioTitle", String(describing: scenario.name))) { [weak self] in
             self?.viewModel.deleteScenario(id: scenario.id)
         }
     }
 
     private func confirm(title: String, action: @escaping () -> Void) {
-        let alert = UIAlertController(title: title, message: "删除仅影响本机数据。", preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "取消", style: .cancel))
-        alert.addAction(UIAlertAction(title: "删除", style: .destructive) { _ in action() })
+        let alert = UIAlertController(title: title, message: L10n.t("smart.deleteNote"), preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: L10n.t("common.cancel"), style: .cancel))
+        alert.addAction(UIAlertAction(title: L10n.t("common.delete"), style: .destructive) { _ in action() })
         present(alert, animated: true)
     }
 }
@@ -228,6 +248,12 @@ extension SmartViewController: UITableViewDataSource {
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         let row = sections[indexPath.section].rows[indexPath.row]
         switch row {
+        case .recommended:
+            guard let cell = tableView.dequeueReusableCell(
+                withIdentifier: RecommendedEntryCell.reuseIdentifier, for: indexPath
+            ) as? RecommendedEntryCell else { return UITableViewCell() }
+            return cell
+
         case .rule(let rule):
             guard let cell = tableView.dequeueReusableCell(
                 withIdentifier: RuleCell.reuseIdentifier, for: indexPath
@@ -259,9 +285,9 @@ extension SmartViewController: UITableViewDataSource {
             ) as? StateCell else { return UITableViewCell() }
             cell.showEmpty(
                 symbol: SymbolName.rule,
-                title: "还没有自动化规则",
-                message: "规则会记录设备断开或信号低于阈值，命中后发送本地通知。",
-                actionTitle: "新建规则"
+                title: L10n.t("smart.emptyRules"),
+                message: L10n.t("smart.emptyRulesMessage"),
+                actionTitle: L10n.t("smart.newRule")
             ) { [weak self] in
                 self?.addTapped()
             }
@@ -273,9 +299,9 @@ extension SmartViewController: UITableViewDataSource {
             ) as? StateCell else { return UITableViewCell() }
             cell.showEmpty(
                 symbol: "sparkles",
-                title: "还没有场景",
-                message: "把连接设备、后台采集、静音告警等动作组合成场景，一键执行。",
-                actionTitle: "新建场景"
+                title: L10n.t("home.noScenarios"),
+                message: L10n.t("smart.emptyScenariosMessage"),
+                actionTitle: L10n.t("smart.newScenario")
             ) { [weak self] in
                 self?.presentScenarioEditor(nil)
             }
@@ -305,22 +331,20 @@ extension SmartViewController: UITableViewDelegate {
     }
 
     func tableView(_ tableView: UITableView, heightForHeaderInSection section: Int) -> CGFloat {
-        sections[section].title.isEmpty ? 0 : Layout.sectionHeaderH + Layout.space8
-    }
-
-    func tableView(_ tableView: UITableView, heightForRowAt indexPath: IndexPath) -> CGFloat {
-        switch sections[indexPath.section].rows[indexPath.row] {
-        case .rule: return Layout.row2 + Layout.space8
-        case .trigger: return Layout.row1 + Layout.space8
-        case .scenario: return Layout.row3 + Layout.space16
-        case .emptyRules, .emptyScenarios, .error: return 280
-        }
+        sections[section].title.isEmpty
+            ? 0
+            : UIFontMetrics(forTextStyle: .headline).scaledValue(for: Layout.sectionHeaderH + Layout.space8)
     }
 
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
-        if case .scenario(let scenario) = sections[indexPath.section].rows[indexPath.row] {
+        switch sections[indexPath.section].rows[indexPath.row] {
+        case .recommended:
+            presentRecommendedRules()
+        case .scenario(let scenario):
             presentScenarioEditor(scenario)
+        default:
+            break
         }
     }
 
@@ -330,13 +354,13 @@ extension SmartViewController: UITableViewDelegate {
     ) -> UISwipeActionsConfiguration? {
         switch sections[indexPath.section].rows[indexPath.row] {
         case .rule(let rule):
-            let action = UIContextualAction(style: .destructive, title: "删除") { [weak self] _, _, completion in
+            let action = UIContextualAction(style: .destructive, title: L10n.t("common.delete")) { [weak self] _, _, completion in
                 self?.confirmDeleteRule(rule)
                 completion(true)
             }
             return UISwipeActionsConfiguration(actions: [action])
         case .scenario(let scenario):
-            let action = UIContextualAction(style: .destructive, title: "删除") { [weak self] _, _, completion in
+            let action = UIContextualAction(style: .destructive, title: L10n.t("common.delete")) { [weak self] _, _, completion in
                 self?.confirmDeleteScenario(scenario)
                 completion(true)
             }
@@ -354,14 +378,14 @@ extension SmartViewController: UITableViewDelegate {
         switch sections[indexPath.section].rows[indexPath.row] {
         case .scenario(let scenario):
             return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
-                let edit = UIAction(title: "编辑场景", image: UIImage(systemName: SymbolName.edit)) { _ in
+                let edit = UIAction(title: L10n.t("scenario.editor.editTitle"), image: UIImage(systemName: SymbolName.edit)) { _ in
                     self?.presentScenarioEditor(scenario)
                 }
-                let run = UIAction(title: "执行场景", image: UIImage(systemName: "play.fill")) { _ in
+                let run = UIAction(title: L10n.t("smart.runScenario"), image: UIImage(systemName: "play.fill")) { _ in
                     self?.run(scenario)
                 }
                 let delete = UIAction(
-                    title: "删除场景",
+                    title: L10n.t("smart.deleteScenarioAction"),
                     image: UIImage(systemName: SymbolName.delete),
                     attributes: .destructive
                 ) { _ in

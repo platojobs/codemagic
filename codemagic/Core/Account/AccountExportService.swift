@@ -12,17 +12,17 @@ enum AccountExportError: Error, Equatable, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .unauthorized:
-            return "登录已失效，请先重新登录后再导出。"
+            return L10n.t("account.export.sessionExpired")
         case .network(let error):
-            return "\(error.code) \(error.message)，请检查网络后重试。"
+            return L10n.f("account.export.failed", String(describing: error.code), String(describing: error.message))
         case .decoding(let detail):
-            return "导出响应无法解析：\(detail)"
+            return L10n.f("account.export.parseFailed", String(describing: detail))
         case .invalidCursor:
-            return "服务端返回的分页游标异常，请重试。"
+            return L10n.t("account.export.cursorInvalid")
         case .noData:
-            return "账号暂无可导出的数据。"
+            return L10n.t("account.export.empty")
         case .writeFailed(let detail):
-            return "写入导出文件失败：\(detail)"
+            return L10n.f("account.export.writeFailed", String(describing: detail))
         }
     }
 
@@ -127,7 +127,7 @@ final class AccountExportService {
 
             case .success(let data):
                 guard let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
-                    self.deliver(.failure(.decoding("响应不是 JSON 对象")), completion)
+                    self.deliver(.failure(.decoding(L10n.t("account.export.notJSON"))), completion)
                     return
                 }
 

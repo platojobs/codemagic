@@ -8,9 +8,9 @@ enum MarketItemKind: String, Codable {
 
     var title: String {
         switch self {
-        case .accessory: return "配件"
-        case .firmware: return "固件"
-        case .other: return "其他"
+        case .accessory: return L10n.t("market.kind.accessory")
+        case .firmware: return L10n.t("market.kind.firmware")
+        case .other: return L10n.t("metric.other")
         }
     }
 
@@ -21,9 +21,9 @@ enum MarketItemKind: String, Codable {
 
     /// 兼容 Android 侧 mock 的 `category` 中文分类（如「调试配件」「固件版本」）。
     init(category: String) {
-        if category.contains("固件") {
+        if category.contains(L10n.t("market.kind.firmware")) {
             self = .firmware
-        } else if category.contains("配件") {
+        } else if category.contains(L10n.t("market.kind.accessory")) {
             self = .accessory
         } else {
             self = .other
@@ -99,10 +99,10 @@ struct MarketItem: Identifiable, Decodable, Equatable {
             compatibility = text
             compatibilityTags = []
         } else if let list = try? container.decode([String].self, forKey: .compatibility) {
-            compatibility = list.joined(separator: "、")
+            compatibility = list.joined(separator: L10n.t("common.listSeparator"))
             compatibilityTags = []
         } else if let info = try? container.decode(CompatibilityInfo.self, forKey: .compatibility) {
-            compatibility = info.displayItems.joined(separator: "；")
+            compatibility = info.displayItems.joined(separator: L10n.t("common.semicolonSeparator"))
             compatibilityTags = info.filterTags
         } else {
             compatibility = ""

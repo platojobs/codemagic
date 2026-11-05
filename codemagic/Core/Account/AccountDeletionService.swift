@@ -10,13 +10,13 @@ enum AccountDeletionError: Error, Equatable, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .unauthorized:
-            return "登录已失效，服务端未删除账号；本地数据已保留，请重新登录后重试。"
+            return L10n.t("account.delete.sessionExpired")
         case .network(let error):
-            return "\(error.code) \(error.message)。账号未删除，本地数据已保留，请检查网络后重试。"
+            return L10n.f("account.delete.failed", String(describing: error.code), String(describing: error.message))
         case .api(let error):
-            return "\(error.code) \(error.message)。账号未删除，本地数据已保留。"
+            return L10n.f("account.delete.failedLocal", String(describing: error.code), String(describing: error.message))
         case .localCleanupFailed(let detail):
-            return "账号已在服务端删除，但本地清理失败：\(detail)"
+            return L10n.f("account.delete.localCleanupFailed", String(describing: detail))
         }
     }
 
@@ -74,17 +74,17 @@ final class AccountDeletionService {
             case .failure(.unauthorized):
                 finish(.failure(.unauthorized))
             case .failure(.rateLimited(let seconds)):
-                let detail = seconds.map { "请 \($0) 秒后再试" } ?? "请稍后再试"
+                let detail = seconds.map { L10n.f("account.retryInSeconds", String(describing: $0)) } ?? L10n.t("account.retryLater")
                 finish(.failure(.api(.api(
                     code: "NET-002",
                     statusCode: 429,
-                    message: "尝试过于频繁，\(detail)"
+                    message: L10n.f("account.rateLimitedDetail", String(describing: detail))
                 ))))
             case .failure(.invalidCode):
                 finish(.failure(.api(.api(
                     code: "NET-002",
                     statusCode: 404,
-                    message: "服务端未找到账号注销接口"
+                    message: L10n.t("account.delete.unsupported")
                 ))))
             case .failure(.decoding(let detail)):
                 finish(.failure(.api(.decoding(detail))))
@@ -100,7 +100,7 @@ final class AccountDeletionService {
                 do {
                     try self.database.resetBusinessData()
                 } catch {
-                    finish(.failure(.localCleanupFailed("业务表清理失败（\(error.localizedDescription)）")))
+                    finish(.failure(.localCleanupFailed(L10n.f("account.delete.cleanupFailed", String(describing: error.localizedDescription)))))
                     return
                 }
                 self.metadataStore.resetForAccountDeletion()

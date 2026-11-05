@@ -28,7 +28,7 @@ final class PairingCodeViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = "迁移到新设备"
+        title = L10n.t("transfer.code.title")
         view.backgroundColor = AppTheme.Palette.background
         configureViews()
 
@@ -49,35 +49,35 @@ final class PairingCodeViewController: UIViewController {
     private func configureViews() {
         let description = AppTheme.makeLabel(style: .subheadline, color: AppTheme.Palette.secondaryText)
         description.numberOfLines = 0
-        description.text = "在旧设备上打开「我的」→「从旧设备接管」，输入下方接管码。接管码仅可使用一次。"
+        description.text = L10n.t("transfer.code.message")
 
-        codeLabel.font = AppText.numericXL.font()
+        codeLabel.applyFont(AppText.numericXL.font())
         codeLabel.textColor = AppTheme.Palette.primaryText
         codeLabel.textAlignment = .center
         codeLabel.adjustsFontSizeToFitWidth = true
         codeLabel.minimumScaleFactor = 0.5
         codeLabel.accessibilityIdentifier = "pairing.code"
 
-        countdownLabel.font = .preferredFont(forTextStyle: .headline)
+        countdownLabel.applyFont(.preferredFont(forTextStyle: .headline))
         countdownLabel.textColor = AppTheme.Palette.accent
         countdownLabel.textAlignment = .center
 
-        statusLabel.font = .preferredFont(forTextStyle: .footnote)
+        statusLabel.applyFont(.preferredFont(forTextStyle: .footnote))
         statusLabel.textColor = AppTheme.Palette.secondaryText
         statusLabel.numberOfLines = 0
 
-        feedbackLabel.font = .preferredFont(forTextStyle: .footnote)
+        feedbackLabel.applyFont(.preferredFont(forTextStyle: .footnote))
         feedbackLabel.textColor = AppTheme.Palette.success
         feedbackLabel.numberOfLines = 0
 
         var copyConfiguration = UIButton.Configuration.filled()
-        copyConfiguration.title = "复制接管码"
+        copyConfiguration.title = L10n.t("transfer.code.copy")
         copyConfiguration.cornerStyle = .medium
         copyButton.configuration = copyConfiguration
         copyButton.addTarget(self, action: #selector(copyTapped), for: .touchUpInside)
 
         var regenerateConfiguration = UIButton.Configuration.tinted()
-        regenerateConfiguration.title = "重新生成"
+        regenerateConfiguration.title = L10n.t("transfer.code.regenerate")
         regenerateConfiguration.cornerStyle = .medium
         regenerateButton.configuration = regenerateConfiguration
         regenerateButton.addTarget(self, action: #selector(regenerateTapped), for: .touchUpInside)
@@ -134,17 +134,17 @@ final class PairingCodeViewController: UIViewController {
     @objc private func copyTapped() {
         guard let code = viewModel.rawCode else { return }
         UIPasteboard.general.string = code
-        feedbackLabel.text = "已复制接管码，请在旧设备上粘贴。"
+        feedbackLabel.text = L10n.t("transfer.code.copied")
     }
 
     @objc private func regenerateTapped() {
         let alert = UIAlertController(
-            title: "重新生成接管码？",
-            message: "新码生成后，旧码立即失效，已输入旧码的旧设备将无法接管。",
+            title: L10n.t("transfer.code.regenerateTitle"),
+            message: L10n.t("transfer.code.regenerateMessage"),
             preferredStyle: .alert
         )
-        alert.addAction(UIAlertAction(title: "取消", style: .cancel))
-        alert.addAction(UIAlertAction(title: "重新生成", style: .destructive) { [weak self] _ in
+        alert.addAction(UIAlertAction(title: L10n.t("common.cancel"), style: .cancel))
+        alert.addAction(UIAlertAction(title: L10n.t("transfer.code.regenerate"), style: .destructive) { [weak self] _ in
             self?.feedbackLabel.text = nil
             self?.viewModel.generate()
         })

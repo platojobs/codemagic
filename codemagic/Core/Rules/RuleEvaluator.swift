@@ -56,7 +56,7 @@ final class RuleEvaluator {
                                 deviceID: device.id,
                                 deviceName: device.displayName,
                                 kind: .triggered,
-                                message: "规则「\(rule.name)」：设备「\(device.displayName)」已从扫描结果中消失",
+                                message: L10n.f("rule.event.disappeared", String(describing: rule.name), String(describing: device.displayName)),
                                 occurredAt: date
                             )
                         )
@@ -69,7 +69,7 @@ final class RuleEvaluator {
                                 deviceID: device.id,
                                 deviceName: device.displayName,
                                 kind: .recovered,
-                                message: "规则「\(rule.name)」：设备「\(device.displayName)」已重新出现在扫描结果中",
+                                message: L10n.f("rule.event.reappeared", String(describing: rule.name), String(describing: device.displayName)),
                                 occurredAt: date
                             )
                         )
@@ -86,7 +86,7 @@ final class RuleEvaluator {
                                     deviceID: device.id,
                                     deviceName: device.displayName,
                                     kind: .triggered,
-                                    message: "规则「\(rule.name)」：设备「\(device.displayName)」信号 \(rssi) dBm 低于阈值 \(rule.threshold) dBm",
+                                    message: L10n.f("rule.event.rssiLow", String(describing: rule.name), String(describing: device.displayName), String(describing: rssi), String(describing: rule.threshold)),
                                     occurredAt: date,
                                     value: Double(rssi),
                                     threshold: Double(rule.threshold),
@@ -96,7 +96,7 @@ final class RuleEvaluator {
                         }
                     } else if alertedKey.contains(key) {
                         alertedKey.remove(key)
-                        let current = rssi.map { "\($0) dBm" } ?? "已不可见"
+                        let current = rssi.map { "\($0) dBm" } ?? L10n.t("rule.event.invisible")
                         events.append(
                             RuleTriggerEvent(
                                 ruleID: rule.id,
@@ -104,7 +104,7 @@ final class RuleEvaluator {
                                 deviceID: device.id,
                                 deviceName: device.displayName,
                                 kind: .recovered,
-                                message: "规则「\(rule.name)」：设备「\(device.displayName)」信号已恢复（\(current)，阈值 \(rule.threshold) dBm）",
+                                message: L10n.f("rule.event.rssiRecovered", String(describing: rule.name), String(describing: device.displayName), String(describing: current), String(describing: rule.threshold)),
                                 occurredAt: date
                             )
                         )
@@ -160,7 +160,7 @@ final class RuleEvaluator {
                         readingAlertedKey.insert(key)
                         let value = DeviceRule.formatReading(reading.value, unit: unit)
                         let threshold = DeviceRule.formatReading(rule.readingThreshold, unit: unit)
-                        let suffix = rule.consecutive > 1 ? "（连续 \(streak) 条读数）" : ""
+                        let suffix = rule.consecutive > 1 ? L10n.f("rule.event.consecutiveSuffix", String(describing: streak)) : ""
                         events.append(
                             RuleTriggerEvent(
                                 ruleID: rule.id,
@@ -168,7 +168,7 @@ final class RuleEvaluator {
                                 deviceID: device.id,
                                 deviceName: device.displayName,
                                 kind: .triggered,
-                                message: "规则「\(rule.name)」：设备「\(device.displayName)」\(metric.displayName) \(value) \(rule.comparison.symbol) 阈值 \(threshold)\(suffix)",
+                                message: L10n.f("rule.event.readingTriggered", String(describing: rule.name), String(describing: device.displayName), String(describing: metric.displayName), String(describing: value), String(describing: rule.comparison.symbol), String(describing: threshold), String(describing: suffix)),
                                 occurredAt: reading.recordedAt,
                                 value: reading.value,
                                 threshold: rule.readingThreshold,
@@ -190,7 +190,7 @@ final class RuleEvaluator {
                                 deviceID: device.id,
                                 deviceName: device.displayName,
                                 kind: .recovered,
-                                message: "规则「\(rule.name)」：设备「\(device.displayName)」\(metric.displayName)已恢复（当前 \(current)，阈值 \(threshold)，条件 \(condition)）",
+                                message: L10n.f("rule.event.readingRecovered", String(describing: rule.name), String(describing: device.displayName), String(describing: metric.displayName), String(describing: current), String(describing: threshold), String(describing: condition)),
                                 occurredAt: reading.recordedAt,
                                 value: reading.value,
                                 threshold: rule.readingThreshold,

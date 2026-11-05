@@ -39,7 +39,7 @@ final class ReadingsIngestor {
         let parsed = ReadingParser.parse(sample)
         for failure in parsed.failures {
             appendLog(
-                "\(sample.characteristic.title)解析失败：\(failure)",
+                L10n.f("reading.ingest.parseFailed", String(describing: sample.characteristic.title), String(describing: failure)),
                 at: sample.receivedAt
             )
         }
@@ -49,7 +49,7 @@ final class ReadingsIngestor {
               device.deletedAt == nil
         else {
             appendLog(
-                "\(sample.characteristic.title)读数未落库：设备 \(sample.peripheralID.uuidString) 不在已保存列表中",
+                L10n.f("reading.ingest.notSaved", String(describing: sample.characteristic.title), String(describing: sample.peripheralID.uuidString)),
                 at: sample.receivedAt
             )
             return []
@@ -69,7 +69,7 @@ final class ReadingsIngestor {
                 saved.append(reading)
             } catch {
                 appendLog(
-                    "\(sample.characteristic.title)读数写入失败：\(error.localizedDescription)",
+                    L10n.f("reading.ingest.writeFailed", String(describing: sample.characteristic.title), String(describing: error.localizedDescription)),
                     at: now()
                 )
             }

@@ -112,3 +112,18 @@ enum AppTheme {
         UIImage(systemName: name, withConfiguration: UIImage.SymbolConfiguration(textStyle: textStyle))
     }
 }
+
+extension UILabel {
+    /// 统一入口：设置 AppText 字体并跟随动态字体（Dynamic Type）。
+    func applyFont(_ font: UIFont) {
+        self.font = font
+        adjustsFontForContentSizeCategory = true
+    }
+}
+
+extension UITextField {
+    func applyFont(_ font: UIFont) {
+        self.font = font
+        adjustsFontForContentSizeCategory = true
+    }
+}

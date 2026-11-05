@@ -154,7 +154,7 @@ final class SectionHeaderView: UIView {
     init(title: String, trailing: UIView? = nil) {
         super.init(frame: .zero)
         titleLabel.text = title
-        titleLabel.font = AppText.callout.font(weight: .semibold)
+        titleLabel.applyFont(AppText.callout.font(weight: .semibold))
         titleLabel.textColor = Palette.textPrimary
 
         let stack = UIStackView(arrangedSubviews: [titleLabel])
@@ -194,7 +194,7 @@ final class StatusChipView: UIView {
     init(text: String, kind: Kind) {
         super.init(frame: .zero)
         label.text = text
-        label.font = AppText.caption.font(weight: .medium)
+        label.applyFont(AppText.caption.font(weight: .medium))
         label.translatesAutoresizingMaskIntoConstraints = false
         addSubview(label)
         layer.cornerRadius = Radius.sm
@@ -313,13 +313,13 @@ enum NumericText {
     }
 }
 
-/// 数字格式化统一使用 POSIX locale，避免不同地区的小数分隔符影响断言与展示。
+/// 数字格式化跟随系统地区（Locale.current），小数点等符号与用户设置一致。
 final class MeasurementNumberFormatter: NumberFormatter, @unchecked Sendable {
     static let shared = MeasurementNumberFormatter()
 
     private override init() {
         super.init()
-        locale = Locale(identifier: "en_US_POSIX")
+        locale = Locale.current
         numberStyle = .decimal
         usesGroupingSeparator = false
     }

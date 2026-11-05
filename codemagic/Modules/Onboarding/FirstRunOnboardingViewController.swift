@@ -92,9 +92,9 @@ final class FirstRunOnboardingViewController: UIViewController {
     private func configureSubviews() {
         skipButton.setTitle(AppCopy.Onboarding.skip, for: .normal)
         skipButton.setTitleColor(Palette.textSecondary, for: .normal)
-        skipButton.titleLabel?.font = AppText.callout.font()
+        skipButton.titleLabel?.applyFont(AppText.callout.font())
         skipButton.addAction(UIAction { [weak self] _ in self?.finish() }, for: .touchUpInside)
-        skipButton.accessibilityLabel = "跳过首次使用引导"
+        skipButton.accessibilityLabel = L10n.t("onboarding.skipButton")
 
         progressStack.axis = .horizontal
         progressStack.spacing = Layout.space4
@@ -258,7 +258,7 @@ final class FirstRunOnboardingViewController: UIViewController {
         guard !isRequestingAuthorization else { return }
         isRequestingAuthorization = true
         primaryButton.isEnabled = false
-        setPrimaryTitle("等待系统授权…")
+        setPrimaryTitle(L10n.t("onboarding.waitingAuth"))
         environment.bluetooth.activate()
         pollBluetoothAuthorization(attempt: 0)
     }
@@ -292,7 +292,7 @@ final class FirstRunOnboardingViewController: UIViewController {
         guard !isRequestingAuthorization else { return }
         isRequestingAuthorization = true
         primaryButton.isEnabled = false
-        setPrimaryTitle("等待系统授权…")
+        setPrimaryTitle(L10n.t("onboarding.waitingAuth"))
         environment.notificationService.requestAuthorizationIfNeeded { [weak self] granted in
             guard let self else { return }
             self.isRequestingAuthorization = false
@@ -319,7 +319,7 @@ final class FirstRunOnboardingViewController: UIViewController {
             environment.notificationService.authorizationStatus { [weak self] status in
                 guard let self, self.currentStep == 1 else { return }
                 let blocked = status == .denied
-                self.permissionTitleLabel.text = "通知未开启"
+                self.permissionTitleLabel.text = L10n.t("onboarding.notificationsOff")
                 self.permissionMessageLabel.text = AppCopy.Permission.notificationOffMessage
                 self.permissionCard.isHidden = !blocked
             }

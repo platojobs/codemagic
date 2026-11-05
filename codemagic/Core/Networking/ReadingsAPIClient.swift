@@ -146,7 +146,7 @@ final class ReadingsAPIClient: ReadingsAPIServicing {
         completion: @escaping (Result<T, AppError>) -> Void
     ) {
         guard let session = tokenStore?.load(), !session.token.isEmpty else {
-            completion(.failure(.sync("尚未创建匿名会话，无法查询云端读数")))
+            completion(.failure(.sync(L10n.t("readings.noSession"))))
             return
         }
         var components = URLComponents(
@@ -155,7 +155,7 @@ final class ReadingsAPIClient: ReadingsAPIServicing {
         )
         components?.queryItems = queryItems
         guard let url = components?.url else {
-            completion(.failure(.configuration("无法构造读数 URL")))
+            completion(.failure(.configuration(L10n.t("readings.urlFailed"))))
             return
         }
         let request = HTTPRequest(url: url, headers: ["Authorization": "Bearer \(session.token)"])
@@ -217,7 +217,7 @@ final class ReadingsAPIClient: ReadingsAPIServicing {
 
 /// BASE_URL 未配置时的降级实现：读数查询失败，界面回退本地数据。
 final class UnavailableReadingsAPI: ReadingsAPIServicing {
-    private let error = AppError.configuration("BASE_URL 未正确配置，云端读数不可用")
+    private let error = AppError.configuration(L10n.t("readings.baseUrlMissing"))
 
     func fetchReadings(
         platform: String,

@@ -47,7 +47,7 @@ final class KeychainTokenStore: TokenStoring {
         ]
         let status = SecItemAdd(attributes as CFDictionary, nil)
         guard status == errSecSuccess else {
-            throw AppError.sync("Keychain 写入失败（OSStatus \(status)）")
+            throw AppError.sync(L10n.f("sync.keychain.failed", String(describing: status)))
         }
     }
 

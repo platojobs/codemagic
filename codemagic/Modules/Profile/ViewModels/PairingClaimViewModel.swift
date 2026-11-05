@@ -44,16 +44,16 @@ final class PairingClaimViewModel {
     var cooldownText: String? {
         let remaining = cooldownSeconds()
         guard remaining > 0 else { return nil }
-        return "请求过于频繁，请 \(remaining) 秒后再试"
+        return L10n.f("transfer.rateLimited", String(describing: remaining))
     }
 
     var statusText: String {
-        if isClaiming { return "正在校验接管码…" }
+        if isClaiming { return L10n.t("transfer.validating") }
         if let errorMessage { return errorMessage }
         if let cooldownText { return cooldownText }
-        if input.isEmpty { return "请输入旧设备展示的 8 位接管码" }
-        if !isComplete { return "还需 \(PairingCodeFormatter.codeLength - input.count) 位" }
-        return "接管码仅可使用一次；接管后本机设备与读数会重新同步到旧设备账号。"
+        if input.isEmpty { return L10n.t("transfer.claim.hint") }
+        if !isComplete { return L10n.f("transfer.claim.remaining", String(describing: PairingCodeFormatter.codeLength - input.count)) }
+        return L10n.t("transfer.claim.note")
     }
 
     func claim() {

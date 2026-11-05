@@ -58,30 +58,29 @@ final class PairingCodeViewModel {
     }
 
     var countdownText: String {
-        guard let code else { return "生成后可复制到旧设备" }
-        if isExpired { return "已过期，请重新生成" }
-        return "剩余 \(PairingCountdown.text(seconds: remainingSeconds()))"
+        guard let code else { return L10n.t("transfer.code.hint") }
+        if isExpired { return L10n.t("transfer.code.expired") }
+        return L10n.f("transfer.code.remaining", String(describing: PairingCountdown.text(seconds: remainingSeconds())))
     }
 
     var statusText: String {
-        if isGenerating { return "正在生成接管码…" }
+        if isGenerating { return L10n.t("transfer.code.generating") }
         if let errorMessage { return errorMessage }
-        if code == nil { return "点击下方按钮生成一次性接管码" }
-        if isExpired { return "旧接管码已失效，请重新生成。" }
-        return "接管码 10 分钟内有效，仅可使用一次；重新生成后旧码立即失效。"
+        if code == nil { return L10n.t("transfer.code.empty") }
+        if isExpired { return L10n.t("transfer.code.invalidated") }
+        return L10n.t("transfer.code.note")
     }
 
     var canCopy: Bool {
         rawCode != nil && !isGenerating
     }
 
-    /// 过期时间展示，显式固定 UTC 时区与 locale，避免不同设备显示偏差。
+    /// 过期时间展示跟随系统区域与时区。
     var expiryText: String? {
         guard let code else { return nil }
         let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone(identifier: "UTC")
-        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
-        return "UTC \(formatter.string(from: code.expiresAt))"
+        formatter.locale = Locale.current
+        formatter.dateFormat = DateFormatter.dateFormat(fromTemplate: "yMMMdHms", options: 0, locale: Locale.current)
+        return L10n.f("transfer.code.expires", formatter.string(from: code.expiresAt))
     }
 }

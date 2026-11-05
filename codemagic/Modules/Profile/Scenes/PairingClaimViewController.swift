@@ -28,7 +28,7 @@ final class PairingClaimViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = "从旧设备接管"
+        title = L10n.t("transfer.claim.title")
         view.backgroundColor = AppTheme.Palette.background
         configureViews()
 
@@ -49,10 +49,10 @@ final class PairingClaimViewController: UIViewController {
     private func configureViews() {
         let description = AppTheme.makeLabel(style: .subheadline, color: AppTheme.Palette.secondaryText)
         description.numberOfLines = 0
-        description.text = "输入旧设备「迁移到新设备」页展示的 8 位接管码。接管后本机设备与读数会重新同步到旧设备账号。"
+        description.text = L10n.t("transfer.claim.message")
 
-        textField.placeholder = "8 位接管码，如 K7M2QX9P"
-        textField.font = .monospacedSystemFont(ofSize: 22, weight: .medium)
+        textField.placeholder = L10n.t("transfer.claim.placeholder")
+        textField.applyFont(AppText.numericM.font(weight: .medium))
         textField.textColor = AppTheme.Palette.primaryText
         textField.tintColor = AppTheme.Palette.accent
         textField.borderStyle = .roundedRect
@@ -67,12 +67,12 @@ final class PairingClaimViewController: UIViewController {
         textField.addTarget(self, action: #selector(textChanged), for: .editingChanged)
         textField.accessibilityIdentifier = "pairing.claimInput"
 
-        statusLabel.font = .preferredFont(forTextStyle: .footnote)
+        statusLabel.applyFont(.preferredFont(forTextStyle: .footnote))
         statusLabel.textColor = AppTheme.Palette.secondaryText
         statusLabel.numberOfLines = 0
 
         var configuration = UIButton.Configuration.filled()
-        configuration.title = "接管账号"
+        configuration.title = L10n.t("transfer.claim.action")
         configuration.cornerStyle = .medium
         claimButton.configuration = configuration
         claimButton.addTarget(self, action: #selector(claimTapped), for: .touchUpInside)
@@ -112,7 +112,7 @@ final class PairingClaimViewController: UIViewController {
         }
         claimButton.isEnabled = viewModel.canClaim
         claimButton.configuration?.showsActivityIndicator = viewModel.isClaiming
-        claimButton.configuration?.title = viewModel.isClaiming ? "正在接管…" : "接管账号"
+        claimButton.configuration?.title = viewModel.isClaiming ? L10n.t("transfer.claim.progress") : L10n.t("transfer.claim.action")
         statusLabel.text = viewModel.statusText
         statusLabel.textColor = viewModel.errorMessage == nil
             ? AppTheme.Palette.secondaryText
@@ -126,11 +126,11 @@ final class PairingClaimViewController: UIViewController {
 
     private func presentSuccess(_ result: PairingClaimResult) {
         let alert = UIAlertController(
-            title: "接管成功",
-            message: "已切换到账号 \(result.userID)。本机 \(result.deviceCount) 台设备、\(result.readingCount) 条读数已标记待同步，正在同步…",
+            title: L10n.t("transfer.claim.success"),
+            message: L10n.f("transfer.claim.successDetail", String(describing: result.userID), String(describing: result.deviceCount), String(describing: result.readingCount)),
             preferredStyle: .alert
         )
-        alert.addAction(UIAlertAction(title: "好", style: .default) { [weak self] _ in
+        alert.addAction(UIAlertAction(title: L10n.t("common.ok"), style: .default) { [weak self] _ in
             guard let self else { return }
             self.onCompleted()
             self.navigationController?.popViewController(animated: true)

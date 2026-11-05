@@ -13,7 +13,7 @@ final class ToastView: UIView {
         applyElevation(.floating)
 
         label.text = message
-        label.font = AppText.callout.font(weight: .medium)
+        label.applyFont(AppText.callout.font(weight: .medium))
         label.textColor = Palette.toastText
         label.numberOfLines = 2
 

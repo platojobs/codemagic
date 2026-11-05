@@ -16,7 +16,7 @@ enum PairingError: Error, Equatable {
     var userMessage: String {
         switch self {
         case .invalidFormat:
-            return "请输入 8 位接管码（仅字母与数字，已自动过滤易混字符）。"
+            return L10n.t("account.transfer.codeHint")
         case .api(let error):
             return error.userMessage
         case .local(let message):
@@ -97,7 +97,7 @@ final class PairingService: PairingServicing {
                 do {
                     try self.tokenStore.save(session)
                 } catch {
-                    completion(.failure(.local("配对成功，但 token 写入 Keychain 失败：\(error.localizedDescription)")))
+                    completion(.failure(.local(L10n.f("account.pairing.keychainFailed", String(describing: error.localizedDescription)))))
                     return
                 }
 
@@ -111,7 +111,7 @@ final class PairingService: PairingServicing {
                     let deviceCount = try self.deviceStore.markAllPendingForRelogin()
                     let readingCount = try self.readingsStore.markAllPending()
                     self.recordLog(
-                        "从旧设备接管成功：本机 \(deviceCount) 台设备、\(readingCount) 条读数已标记待同步（账号 \(session.userID)）"
+                        L10n.f("account.transfer.completed", String(describing: deviceCount), String(describing: readingCount), String(describing: session.userID))
                     )
                     let claimResult = PairingClaimResult(
                         userID: session.userID,
@@ -120,7 +120,7 @@ final class PairingService: PairingServicing {
                     )
                     DispatchQueue.main.async { completion(.success(claimResult)) }
                 } catch {
-                    completion(.failure(.local("接管成功，但本地待同步标记失败：\(error.localizedDescription)")))
+                    completion(.failure(.local(L10n.f("account.transfer.markFailed", String(describing: error.localizedDescription)))))
                 }
             }
         }

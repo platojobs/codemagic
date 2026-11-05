@@ -104,48 +104,48 @@ final class ProfileViewModel {
     var needsRelogin: Bool { syncStatus.needsRelogin }
 
     var lastSyncText: String {
-        guard let lastSyncAt = syncStatus.lastSyncAt else { return "尚未同步" }
+        guard let lastSyncAt = syncStatus.lastSyncAt else { return L10n.t("sync.notSyncedYet") }
         return AppDateFormat.absolute(lastSyncAt)
     }
 
     var pendingUploadText: String {
-        syncStatus.pendingCount == 0 ? "无待同步" : "\(syncStatus.pendingCount) 条"
+        syncStatus.pendingCount == 0 ? L10n.t("sync.noPending") : L10n.f("sync.pendingCount", String(describing: syncStatus.pendingCount))
     }
 
     var accountText: String {
         if syncStatus.needsRelogin {
-            return "登录已失效"
+            return L10n.t("sync.sessionExpired")
         }
-        guard let userID = syncStatus.userID, !userID.isEmpty else { return "匿名账号尚未创建" }
+        guard let userID = syncStatus.userID, !userID.isEmpty else { return L10n.t("sync.noAnonymousAccount") }
         return userID
     }
 
     /// 会话到期日：只读展示，来自 `/auth/anonymous` 或 claim 返回的 `expiresAt`。
     /// 不用于鉴权判断（是否失效以 401 为准）；旧后端未返回时明确显示"未返回"。
     var sessionExpiryText: String {
-        if syncStatus.needsRelogin { return "登录已失效" }
-        guard let expiresAt = syncStatus.sessionExpiresAt else { return "服务端未返回" }
+        if syncStatus.needsRelogin { return L10n.t("sync.sessionExpired") }
+        guard let expiresAt = syncStatus.sessionExpiresAt else { return L10n.t("common.notProvided") }
         return AppDateFormat.day(expiresAt)
     }
 
     /// 同步区状态：登录失效 / 进行中 / 上次结果 / 失败原因 / 从未同步。
     var syncStatusText: String {
-        if syncStatus.isSyncing { return "正在同步…" }
+        if syncStatus.isSyncing { return L10n.t("sync.syncing") }
         if syncStatus.needsRelogin {
-            return "登录已失效：匿名会话 token 已过期，云端同步已暂停。"
+            return L10n.t("sync.sessionExpiredMessage")
         }
         if let lastOutcome = syncStatus.lastOutcomeMessage { return lastOutcome }
         if let error = syncStatus.lastError { return "\(error.code) \(error.message)" }
-        return "尚未同步。点击「立即同步」或回到前台后自动同步。"
+        return L10n.t("sync.notSyncedMessage")
     }
 
     /// 降级说明：网络/后端不可用时本地功能不受影响；登录失效时说明换号后果。
     var syncDegradationText: String {
         var lines: [String] = []
         if syncStatus.needsRelogin {
-            lines.append("重新登录会创建新的匿名账号，旧账号的云端数据不会自动合并；本机已有设备会重新同步到新账号。")
+            lines.append(L10n.t("sync.reloginNote"))
         }
-        lines.append("断网或后端不可用时同步会自动失败并保留待同步记录；恢复后前后台切换或后台任务会重试，本地功能不受影响。")
+        lines.append(L10n.t("sync.offlineNote"))
         if let conflict = syncStatus.lastConflictMessages.first {
             lines.append(conflict)
         }
@@ -190,9 +190,9 @@ final class ProfileViewModel {
 
     var backgroundCollectionGuidance: String {
         if backgroundCollectionEnabled {
-            return "开启后连接状态下锁屏/切后台仍会接收 notify 并入库；持续 BLE 连接与后台唤醒会增加耗电，系统低电量模式可能延后唤醒。"
+            return L10n.t("profile.backgroundOnNote")
         }
-        return "关闭后进入后台会主动断开蓝牙连接，后台不再接收读数；回到前台后需重新连接设备。"
+        return L10n.t("profile.backgroundOffNote")
     }
 
     // MARK: - Account
@@ -218,7 +218,7 @@ final class ProfileViewModel {
     }
 
     var accountDeletionConfirmationText: String {
-        "设备与读数将永久删除且不可恢复，云端与本机数据都会被清空。注销后将回到全新的匿名状态。"
+        L10n.t("profile.deleteDataNote")
     }
 
     /// 接管后触发一次前台同步，让新账号尽快拿到本机重新标记的数据。
@@ -270,29 +270,29 @@ final class ProfileViewModel {
         }
     }
 
-    var ruleAlertThrottleText: String { "\(ruleAlertThrottleMinutes) 分钟" }
+    var ruleAlertThrottleText: String { L10n.f("profile.minutes", String(describing: ruleAlertThrottleMinutes)) }
 
     var notificationAuthorizationText: String {
         switch notificationAuthorization {
-        case .authorized: return "已允许"
-        case .denied: return "已拒绝"
-        case .provisional: return "临时允许"
-        case .ephemeral: return "临时授权"
-        case .notDetermined: return "尚未询问"
-        @unknown default: return "未知"
+        case .authorized: return L10n.t("permission.status.granted")
+        case .denied: return L10n.t("permission.status.denied")
+        case .provisional: return L10n.t("permission.status.ephemeral")
+        case .ephemeral: return L10n.t("permission.status.provisional")
+        case .notDetermined: return L10n.t("permission.status.notAsked")
+        @unknown default: return L10n.t("common.unknown")
         }
     }
 
     /// 拒绝后给出系统设置入口提示；未询问时说明首次命中才会弹窗。
     var notificationGuidance: String {
-        if !ruleAlertsEnabled { return "阈值告警通知已关闭，规则命中仍会写入本地扫描日志。" }
+        if !ruleAlertsEnabled { return L10n.t("profile.notificationsOffNote") }
         switch notificationAuthorization {
         case .denied:
-            return "通知权限被拒绝，阈值告警不会弹出。请前往系统设置开启通知后返回本页。"
+            return L10n.t("profile.notificationsDeniedNote")
         case .notDetermined:
-            return "首次触发规则命中时会请求通知权限。"
+            return L10n.t("profile.notificationsPromptNote")
         default:
-            return "规则命中时发送本地通知；同一设备同一规则在节流窗口内只提醒一次，恢复时发送「已恢复」。"
+            return L10n.t("profile.notificationsBehavior")
         }
     }
 
@@ -337,20 +337,20 @@ final class ProfileViewModel {
     var appVersionText: String {
         let short = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "—"
-        return "\(short)（build \(build)）"
+        return L10n.f("profile.buildFormat", short, build)
     }
 
     /// 未授权/受限时给出明确的操作引导。
     var permissionGuidance: String {
         switch authorization {
         case .allowed:
-            return "已获得蓝牙权限。首次扫描由系统弹窗询问，之后可在系统设置中修改。"
+            return L10n.t("profile.bluetoothGrantedNote")
         case .notDetermined:
-            return "尚未询问蓝牙权限，开始扫描时会触发系统授权弹窗。"
+            return L10n.t("profile.bluetoothNotAskedNote")
         case .denied, .restricted:
-            return "蓝牙权限被拒绝或受限，扫描与连接不可用。请前往系统设置开启。"
+            return L10n.t("profile.bluetoothDeniedNote")
         case .unknown:
-            return "无法获取蓝牙授权状态，请稍后重试。"
+            return L10n.t("profile.bluetoothUnknownNote")
         }
     }
 }

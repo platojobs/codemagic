@@ -12,15 +12,15 @@ enum ReadingsExportError: Error, Equatable, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .tooManyRows(let limit):
-            return "读数超过 \(limit) 条上限，请缩短导出区间后重试。"
+            return L10n.f("export.tooMany", String(describing: limit))
         case .noData:
-            return "所选区间内没有可导出的读数。"
+            return L10n.t("export.empty")
         case .storeFailed(let message):
-            return "读取本地读数失败：\(message)"
+            return L10n.f("export.readFailed", String(describing: message))
         case .network(let error):
             return "\(error.code) \(error.message)"
         case .writeFailed(let message):
-            return "写入 CSV 文件失败：\(message)"
+            return L10n.f("export.writeFailed", String(describing: message))
         }
     }
 }

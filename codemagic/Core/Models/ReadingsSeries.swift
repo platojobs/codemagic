@@ -33,10 +33,10 @@ enum ReadingsRange: String, CaseIterable, Equatable {
 
     var title: String {
         switch self {
-        case .hour1: return "1 小时"
-        case .hour24: return "24 小时"
-        case .day7: return "7 天"
-        case .day30: return "30 天"
+        case .hour1: return L10n.t("range.hour1")
+        case .hour24: return L10n.t("range.hours24")
+        case .day7: return L10n.t("range.days7")
+        case .day30: return L10n.t("range.days30")
         }
     }
 

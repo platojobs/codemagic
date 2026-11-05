@@ -45,13 +45,13 @@ struct CompatibilityInfo: Decodable, Equatable {
     /// 详情 / 列表展示用文案：只列出真实存在的字段。
     var displayItems: [String] {
         var items: [String] = []
-        if !platforms.isEmpty { items.append("平台：\(platforms.joined(separator: "、"))") }
-        if !protocolName.isEmpty { items.append("协议：\(protocolName)") }
-        if !features.isEmpty { items.append("特性：\(features.joined(separator: "、"))") }
-        if !minAppVersion.isEmpty { items.append("最低 App：\(minAppVersion)") }
+        if !platforms.isEmpty { items.append(L10n.f("catalog.platformItem", platforms.joined(separator: L10n.t("common.listSeparator")))) }
+        if !protocolName.isEmpty { items.append(L10n.f("catalog.protocol", protocolName)) }
+        if !features.isEmpty { items.append(L10n.f("catalog.features", features.joined(separator: L10n.t("common.listSeparator")))) }
+        if !minAppVersion.isEmpty { items.append(L10n.f("catalog.minApp", String(describing: minAppVersion))) }
         items.append(
             contentsOf: extras.map {
-                "\(Self.displayLabel(for: $0.name))：\($0.values.joined(separator: "、"))"
+                L10n.f("catalog.extraField", Self.displayLabel(for: $0.name), $0.values.joined(separator: L10n.t("common.listSeparator")))
             }
         )
         return items
@@ -59,17 +59,17 @@ struct CompatibilityInfo: Decodable, Equatable {
 
     /// 市场筛选取值：来自真实字段，带字段名前缀避免不同维度重名。
     var filterTags: [String] {
-        var tags = platforms.map { "平台：\($0)" }
-        if !protocolName.isEmpty { tags.append("协议：\(protocolName)") }
+        var tags = platforms.map { L10n.f("catalog.platformItem", $0) }
+        if !protocolName.isEmpty { tags.append(L10n.f("catalog.protocol", protocolName)) }
         extras.forEach { field in
-            field.values.forEach { tags.append("\(Self.displayLabel(for: field.name))：\($0)") }
+            field.values.forEach { tags.append(L10n.f("catalog.extraField", Self.displayLabel(for: field.name), $0)) }
         }
         return tags
     }
 
     /// 已文档化的扩展字段使用中文标签，其余保留原字段名（不编造维度）。
     private static func displayLabel(for field: String) -> String {
-        field == "deviceTypes" ? "型号" : field
+        field == "deviceTypes" ? L10n.t("catalog.model") : field
     }
 
     private static func stringValue(

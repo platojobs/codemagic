@@ -69,7 +69,7 @@ struct SavedDevice: Identifiable, Equatable {
     var advertisedNamePatch: Patch<String>
     var groupPatch: Patch<String>
 
-    static let defaultGroupName = "未分组"
+    static let defaultGroupName = L10n.t("device.group.none")
     /// iOS 端固定平台标识，与后端 `platform` 枚举一致。
     static let iosPlatform = "ios"
 
@@ -128,7 +128,7 @@ struct SavedDevice: Identifiable, Equatable {
     /// 跨平台设备的展示文案；本机可连接时为 nil。
     var connectUnavailableText: String? {
         guard !isConnectable else { return nil }
-        return "来自 \(platformDisplayName)，本机不可连接"
+        return L10n.f("device.remoteOnly", String(describing: platformDisplayName))
     }
 
     var platformDisplayName: String {
@@ -151,7 +151,7 @@ struct SavedDevice: Identifiable, Equatable {
         let advertised = advertisedName.trimmingCharacters(in: .whitespacesAndNewlines)
         if !advertised.isEmpty { return advertised }
         let model = deviceType?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return model.isEmpty ? "未命名设备" : model
+        return model.isEmpty ? L10n.t("bluetooth.unnamedDevice") : model
     }
 
     /// 推送时的别名三态：`.set` 使用当前值，避免关联值过期。

@@ -11,9 +11,9 @@ enum RuleTrigger: String, Codable, CaseIterable {
 
     var title: String {
         switch self {
-        case .disconnect: return "设备断开"
-        case .rssiBelowThreshold: return "信号低于阈值"
-        case .readingThreshold: return "读数超过阈值"
+        case .disconnect: return L10n.t("rule.trigger.disconnect")
+        case .rssiBelowThreshold: return L10n.t("rule.trigger.rssi")
+        case .readingThreshold: return L10n.t("rule.trigger.reading")
         }
     }
 }
@@ -38,8 +38,8 @@ enum RuleComparison: String, Codable, CaseIterable, Equatable {
     /// 命中提示里的自然语言关系词。
     var relation: String {
         switch self {
-        case .greaterThan, .greaterOrEqual: return "高于"
-        case .lessThan, .lessOrEqual: return "低于"
+        case .greaterThan, .greaterOrEqual: return L10n.t("rule.relation.above")
+        case .lessThan, .lessOrEqual: return L10n.t("rule.relation.below")
         }
     }
 
@@ -122,13 +122,13 @@ struct DeviceRule: Identifiable, Equatable {
     var triggerDescription: String {
         switch trigger {
         case .disconnect:
-            return "设备从扫描结果中消失时记录"
+            return L10n.t("rule.description.disconnect")
         case .rssiBelowThreshold:
-            return "RSSI ≤ \(threshold) dBm 时记录并提示"
+            return L10n.f("rule.description.rssi", String(describing: threshold))
         case .readingThreshold:
             let text = readingConditionText
-            guard !text.isEmpty else { return "读数阈值未设置" }
-            return consecutive > 1 ? "\(text)，连续 \(consecutive) 条读数时告警" : "\(text) 时告警"
+            guard !text.isEmpty else { return L10n.t("rule.description.readingUnset") }
+            return consecutive > 1 ? L10n.f("rule.description.consecutive", String(describing: text), String(describing: consecutive)) : L10n.f("rule.description.reading", String(describing: text))
         }
     }
 
@@ -138,7 +138,7 @@ struct DeviceRule: Identifiable, Equatable {
         if rounded == rounded.rounded(), abs(rounded) < 1_000_000 {
             return String(Int(rounded))
         }
-        return String(format: "%.1f", rounded)
+        return String(format: "%.1f", locale: Locale.current, rounded)
     }
 
     /// 带单位的读数展示，如「31.5 ℃」；单位为空时不追加空格。

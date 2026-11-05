@@ -188,11 +188,11 @@ enum ReadingsChartGeometry {
         let last = bucket.lastValue.map { DeviceRule.formatReading($0, unit: unit) } ?? "—"
         return [
             "\(start)–\(end)",
-            "最小 \(DeviceRule.formatReading(bucket.minValue, unit: unit))",
-            "最大 \(DeviceRule.formatReading(bucket.maxValue, unit: unit))",
-            "平均 \(DeviceRule.formatReading(bucket.average, unit: unit))",
-            "最新 \(last)",
-            "\(bucket.count) 条",
+            L10n.f("chart.summary.min", String(describing: DeviceRule.formatReading(bucket.minValue, unit: unit))),
+            L10n.f("chart.summary.max", String(describing: DeviceRule.formatReading(bucket.maxValue, unit: unit))),
+            L10n.f("chart.summary.avg", String(describing: DeviceRule.formatReading(bucket.average, unit: unit))),
+            L10n.f("chart.summary.last", String(describing: last)),
+            L10n.f("common.readingsCountShort", String(describing: bucket.count)),
         ].joined(separator: " · ")
     }
 
