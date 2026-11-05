@@ -422,13 +422,13 @@ HTTP/1.1 410 Gone
 - Job `build-test`：`actions/checkout@v7` → 选择 Xcode（优先 `Xcode_16.4`）并打印 `xcodebuild -version` / 可用模拟器 → `xcodebuild build`（`generic/platform=iOS Simulator`）→ `xcodebuild test`（从 `xcrun simctl list devices available` 动态取首个 iPhone 模拟器 UDID）→ `actions/upload-artifact@v7` 上传 `*.xcresult`（`if: always()`）。
 - Job `e2e-contract`（与 build 并行）：`actions/checkout@v7` 拉本仓库 + `platojobs/PJGoIoT`（`repository` + `path: PJGoIoT`）→ `actions/setup-go@v7`（`go-version-file: PJGoIoT/go.mod`）→ `PJGOIOT_DIR=${{ github.workspace }}/PJGoIoT bash scripts/e2e-contract.sh`；失败时 `actions/upload-artifact@v7` 上传 `.build/e2e/` 日志。失败即红，无 `|| true`。
 - 两个 job 均使用 `CODE_SIGNING_ALLOWED=NO`，不需要证书与描述文件。
-- 当前真实运行：[run 42060000856](https://github.com/platojobs/codemagic/actions/runs/42060000856)（`v0.15.0` 提交 `e4f3dc8`，tag push），**success**（Xcode 16.4）：
-  - `Build & Test (iOS Simulator)` **success**（4m49s），`** BUILD SUCCEEDED **` / `Executed 303 tests, with 0 failures` / `** TEST SUCCEEDED **`；
-  - `E2E contract (PJGoIoT fixture)` **success**（1m12s），`通过：260 项，跳过：0 项，失败：0 项` / `结论：PASS`（含家庭 v0.13.0 链路：成员移除 / 退出 409 / 邀请码无明文与撤销 / 整段重排 409）；
-  - 同 sha 的 `main` 运行 [run 42059975519](https://github.com/platojobs/codemagic/actions/runs/42059975519) 被 tag 运行按 `concurrency: ios-${sha}` 取消（结论 `cancelled`）；tag 运行两个 job 均绿。
+- 当前真实运行：[run 42065023214](https://github.com/platojobs/codemagic/actions/runs/42065023214)（`v0.16.0` 提交 `d00d315`，tag push），**success**（Xcode 16.4）：
+  - `Build & Test (iOS Simulator)` **success**，`** BUILD SUCCEEDED **` / `Executed 315 tests, with 0 failures` / `** TEST SUCCEEDED **`；
+  - `E2E contract (PJGoIoT fixture)` **success**，`通过：299 项，跳过：0 项，失败：0 项` / `结论：PASS`（含家庭 v0.14.0 / v0.15.0 链路：`isSelf`、转让、结构变更 change_log、移除后可见性）；
+  - 同 sha 的 `main` 运行 [run 42065001018](https://github.com/platojobs/codemagic/actions/runs/42065001018) 先被 tag 运行按 `concurrency: ios-${sha}` 取消（结论 `cancelled`），手动 `gh run rerun` 后两个 job **success**；
   - 真实 Postgres e2e（`scripts/e2e-postgres.sh`）**不进 CI**：GitHub Actions 的 macOS runner 无 Docker；本机运行 PASS，输出见 `docs/e2e-postgres.md`。
   - 全部 action 已升到 `checkout@v7` / `upload-artifact@v7` / `setup-go@v7`，**Node 20 弃用告警已消除**（仅剩 macOS arm64 队列容量提示）。
-- 上一轮记录：[run 42047411803](https://github.com/platojobs/codemagic/actions/runs/42047411803)（`v0.14.0`，293 单测 / 224 项 E2E，success）；更早：[run 42012100360](https://github.com/platojobs/codemagic/actions/runs/42012100360)（`v0.11.0`，260 单测 / 151 项 E2E，success）、[run 42006790396](https://github.com/platojobs/codemagic/actions/runs/42006790396)（`v0.10.0`，236 单测 / 151 项 E2E，success）、[run 41973731269](https://github.com/platojobs/codemagic/actions/runs/41973731269)（`v0.9.0` 提交 `08f88d6`，226 单测 / 151 项 E2E，success）。
+- 上一轮记录：[run 42060000856](https://github.com/platojobs/codemagic/actions/runs/42060000856)（`v0.15.0`，303 单测 / 260 项 E2E，success）；更早：[run 42047411803](https://github.com/platojobs/codemagic/actions/runs/42047411803)（`v0.14.0`，293 单测 / 224 项 E2E，success）、[run 42012100360](https://github.com/platojobs/codemagic/actions/runs/42012100360)（`v0.11.0`，260 单测 / 151 项 E2E，success）、[run 42006790396](https://github.com/platojobs/codemagic/actions/runs/42006790396)（`v0.10.0`，236 单测 / 151 项 E2E，success）、[run 41973731269](https://github.com/platojobs/codemagic/actions/runs/41973731269)（`v0.9.0` 提交 `08f88d6`，226 单测 / 151 项 E2E，success）。
 - locale 修复记录：v0.6.0 首次 run 41955082837 在英文 CI locale 下因测试用中文别名参与 `localizedCaseInsensitiveCompare` 产生乱序；v0.7.0 新增的倒计时 / 排序断言全部显式 `Locale(identifier: "en_US_POSIX")` 或 ASCII 别名，run 41961761756 一次通过。
 - 失败与修复：首次 workflow 因 `run: |` 块内嵌的多行 Python 未随块缩进，YAML 解析失败（run 无任何 job 直接 failure）；改为单行 `simctl + grep/sed` 提取模拟器 UDID 后通过。v0.4.0 新增读数断言后，本地 e2e 因 ~100 次请求触发服务端限流（429），改为 fixture 启动时 `RATE_LIMIT_PER_MINUTE=0` 后稳定通过。
 - **计费**：macOS runner 按分钟计费且显著高于 Linux，因此该 workflow 只在 `main` 与 tag 触发、不跑 PR，并用 `concurrency` 按 sha 去重；单个提交一次运行约消耗 5–6 个 macOS 分钟。
@@ -467,10 +467,11 @@ HTTP/1.1 410 Gone
 
 - 模拟器无真实蓝牙，状态为 `unsupported`；产品 / 市场 / 详情依赖网络，需运行包含 readings 链路的本地 Go 服务或已更新的 mock。
 - 已实现 GATT 服务发现与四个读数特征的 notify 订阅；**未实现特征写入 / OTA**，GATT 元数据仍来自 catalog。
-- 契约已用本地 fixture 服务端到端验证（260 项断言 PASS，后端 `PJGoIoT` v0.13.0 / openapi 0.9.0，含家庭 v0.12.0 与 v0.13.0 链路）；同一套件在本地真实 Postgres 栈重跑同样 260 项 PASS，并直接 `psql` 校验邀请码只存哈希、成员行清理；410 / series / metrics / export / 注销亦由 `scripts/e2e-postgres.sh` 跑通（不进 CI）。App 内的 Keychain token、BGTask 调度、后台 BLE 采集与真实网络环境仍需真机验证。
-- 后端 `PJGoIoT` 已打 tag **v0.13.0**（成员移除 / 退出 / 邀请码列表与撤销 / 房间整段排序，openapi 0.9.0；v0.12.0 起家庭 / 邀请码 / 房间 / 设备归属 PATCH）；iOS 按该契约实现。CI 直接 checkout 后端 `main`（本次对应 tag `v0.15.0`，向后兼容；`ROOM_SET_MISMATCH` 在新版返回，v0.13.0 为 `CONFLICT`，客户端两者都识别），260 项 E2E 全 PASS；若 checkout 到旧后端，e2e 相关分支会明确 SKIP。
+- 契约已用本地 fixture 服务端到端验证（299 项断言 PASS，后端 `PJGoIoT` v0.15.0 / openapi 0.11.0，含家庭 v0.12.0 / v0.13.0 / v0.14.0 / v0.15.0 链路）；同一套件在本地真实 Postgres 栈重跑同样 299 项 PASS，并直接 `psql` 校验邀请码只存哈希、成员行清理、转让后 `owner_user_id`、删房后 `household_rooms`、`change_log` 结构实体；410 / series / metrics / export / 注销亦由 `scripts/e2e-postgres.sh` 跑通（不进 CI）。App 内的 Keychain token、BGTask 调度、后台 BLE 采集与真实网络环境仍需真机验证。
+- 后端 `PJGoIoT` 已打 tag **v0.15.0**（`isSelf` / 所有权转让 / 家庭与房间结构变更进 `change_log`，openapi 0.11.0；v0.13.0 起成员移除 / 退出 / 邀请码列表与撤销 / 房间整段排序）；iOS 按该契约实现。CI 显式 checkout 后端 tag `v0.15.0`（`ref: v0.15.0`），299 项 E2E 全 PASS；若 checkout 到旧后端，e2e 相关分支会明确 SKIP。
 - [ ] 真机 + 两个真实账号：创建家庭 / 邀请码领取 / 成员共享 / member 403 / 跨家庭 404 的界面表现（服务端契约已由 E2E 覆盖，App 端需实际走查）。
 - [ ] 真机：家庭切换后的首页 / 房间管理刷新、邀请码倒计时与复制、离线房间「未同步」标注。
+- [ ] 真机 + 两个真实账号：成员行「转让所有权 / 移除成员」的互斥与本人行隐藏、二次确认文案、转让后角色与入口即时更新、403 / 404 / 409 提示与刷新。
 - [ ] 真机 + 真实后端：断网 90 天以上游标（改库 + cleanup 构造 410）后的自动全量重同步、pending 保留与 UI 提示。
 - [ ] 真机 + 真实后端：503 `TIMEOUT` 的「服务端繁忙，稍后重试」与退避闸门（手动同步可立即重试）。
 - [ ] 真机：token 过期后的「登录已失效」与「会话到期日」展示、接管 / 注销后的更新与清除。
