@@ -4,7 +4,13 @@ import UIKit
 final class DeviceDetailViewController: UIViewController {
     private enum RowKind: Equatable {
         case value
-        case chart(points: [DeviceReading], unit: String)
+        case range
+        case chart(
+            buckets: [ReadingsChartBucket],
+            interval: DateInterval,
+            unit: String,
+            rangeTitle: String
+        )
         case metricPicker
         case emptyState
     }
@@ -79,6 +85,7 @@ final class DeviceDetailViewController: UIViewController {
         tableView.translatesAutoresizingMaskIntoConstraints = false
         tableView.register(UITableViewCell.self, forCellReuseIdentifier: "DetailCell")
         tableView.register(ReadingsChartCell.self, forCellReuseIdentifier: ReadingsChartCell.reuseIdentifier)
+        tableView.register(ReadingsRangeCell.self, forCellReuseIdentifier: ReadingsRangeCell.reuseIdentifier)
         tableView.dataSource = self
         tableView.delegate = self
         tableView.rowHeight = UITableView.automaticDimension
@@ -195,11 +202,11 @@ final class DeviceDetailViewController: UIViewController {
         return sections
     }
 
-    /// 「数据」区：指标选择 → 最近 60 点折线图 → 24h 汇总 → 最近记录。
+    /// 「数据」区：区间切换 → 指标选择 → 时间比例折线图 → 24h 汇总 → 来源 → 最近记录。
     /// 没有读数时只保留一条真实空状态，不渲染空图表、不造数据。
     private func makeDataSection() -> SectionModel {
         let state = viewModel.readings
-        guard !state.metrics.isEmpty else {
+        guard !state.metricInfos.isEmpty else {
             return SectionModel(
                 title: "数据",
                 rows: [Row(title: "暂无读数", value: viewModel.readingsEmptyMessage, kind: .emptyState)]
@@ -207,20 +214,28 @@ final class DeviceDetailViewController: UIViewController {
         }
 
         var rows: [Row] = [
+            Row(title: "区间", value: state.selectedRange.title, kind: .range),
             Row(
                 title: "指标",
-                value: state.selectedMetric?.displayName ?? "未选择",
+                value: state.selectedMetric.map { viewModel.metricTitle(for: $0) } ?? "未选择",
                 kind: .metricPicker
             ),
             Row(
-                title: "最近 60 点",
-                value: state.hasData ? "\(state.points.count) 点" : "暂无读数",
-                kind: .chart(points: state.points, unit: state.unit)
+                title: "\(state.selectedRange.title) 走势",
+                value: state.hasData
+                    ? "\(state.buckets.count) 个时间桶 · \(state.metricCount) 条"
+                    : "暂无读数",
+                kind: .chart(
+                    buckets: state.buckets,
+                    interval: state.interval,
+                    unit: state.unit,
+                    rangeTitle: state.selectedRange.title
+                )
             ),
         ]
 
         if let summary = state.summary, summary.count > 0 {
-            let unit = summary.unit
+            let unit = summary.unit.isEmpty ? state.unit : summary.unit
             rows.append(Row(title: "24 小时 · 最小", value: formatted(summary.minValue, unit: unit)))
             rows.append(Row(title: "24 小时 · 最大", value: formatted(summary.maxValue, unit: unit)))
             rows.append(Row(title: "24 小时 · 平均", value: formatted(summary.avg, unit: unit)))
@@ -230,13 +245,7 @@ final class DeviceDetailViewController: UIViewController {
             rows.append(Row(title: "24 小时汇总", value: "暂无 24 小时内的读数"))
         }
 
-        if state.isLoading {
-            rows.append(Row(title: "数据来源", value: "读取中…"))
-        } else if state.isOfflineLocalData {
-            rows.append(Row(title: "数据来源", value: "离线：本地数据"))
-        } else if state.isSummaryFromCloud {
-            rows.append(Row(title: "数据来源", value: "云端汇总"))
-        }
+        rows.append(Row(title: "数据来源", value: state.sourceText))
 
         if state.recent.isEmpty {
             rows.append(Row(title: "最近记录", value: "暂无记录"))
@@ -332,14 +341,32 @@ extension DeviceDetailViewController: UITableViewDataSource {
         let row = sections[indexPath.section].rows[indexPath.row]
 
         switch row.kind {
-        case .chart(let points, let unit):
+        case .range:
+            guard let cell = tableView.dequeueReusableCell(
+                withIdentifier: ReadingsRangeCell.reuseIdentifier,
+                for: indexPath
+            ) as? ReadingsRangeCell else {
+                return UITableViewCell()
+            }
+            cell.configure(selected: viewModel.readings.selectedRange)
+            cell.onSelect = { [weak self] range in
+                self?.viewModel.selectReadingsRange(range)
+            }
+            return cell
+
+        case .chart(let buckets, let interval, let unit, let rangeTitle):
             guard let cell = tableView.dequeueReusableCell(
                 withIdentifier: ReadingsChartCell.reuseIdentifier,
                 for: indexPath
             ) as? ReadingsChartCell else {
                 return UITableViewCell()
             }
-            cell.configure(points: points, unit: unit)
+            cell.configure(
+                buckets: buckets,
+                interval: interval,
+                unit: unit,
+                rangeTitle: rangeTitle
+            )
             return cell
 
         case .metricPicker:
@@ -388,8 +415,9 @@ extension DeviceDetailViewController: UITableViewDelegate {
         let sheet = UIAlertController(title: "选择指标", message: nil, preferredStyle: .actionSheet)
         for metric in metrics {
             let isSelected = metric == viewModel.readings.selectedMetric
+            let title = viewModel.metricTitle(for: metric)
             sheet.addAction(
-                UIAlertAction(title: isSelected ? "✓ \(metric.displayName)" : metric.displayName, style: .default) {
+                UIAlertAction(title: isSelected ? "✓ \(title)" : title, style: .default) {
                     [weak self] _ in
                     self?.viewModel.selectReadingsMetric(metric)
                 }

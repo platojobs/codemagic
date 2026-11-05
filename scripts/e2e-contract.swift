@@ -914,6 +914,119 @@ private func run() -> Int32 {
             "非法 NaN 值返回 400",
             "status=\(nanResponse.status) body=\(bodyText(nanResponse.body))"
         )
+
+        // MARK: 7.1 series / metrics（后端 v0.5.0 起）
+
+        // 追加两条温度读数（比心率更新），用于验证指标清单按 lastAt 倒序。
+        let extraReadings = [
+            madeReading(
+                id: "33333333-3333-4333-8333-333333333335",
+                platform: "ios",
+                externalID: iosExternalID,
+                metric: "temperature",
+                value: 22.5,
+                unit: "℃",
+                recordedAt: now.addingTimeInterval(-30)
+            ),
+            madeReading(
+                id: "33333333-3333-4333-8333-333333333336",
+                platform: "ios",
+                externalID: iosExternalID,
+                metric: "temperature",
+                value: 23.5,
+                unit: "℃",
+                recordedAt: now.addingTimeInterval(-10)
+            ),
+        ]
+        let extraPush = client.request(
+            "POST",
+            "sync/push",
+            token: tokenA,
+            idempotencyKey: "\(idempotencyKey)-readings-extra",
+            json: ["clientId": clientID, "devices": [], "readings": extraReadings]
+        )
+        let extraObject = jsonObject(extraPush.body) ?? [:]
+        report.check(
+            extraPush.status == 200 && (extraObject["appliedReadings"] as? NSNumber)?.intValue == 2,
+            "追加 2 条温度读数",
+            "status=\(extraPush.status) body=\(bodyText(extraPush.body))"
+        )
+
+        let seriesFrom = now.addingTimeInterval(-3_600)
+        let seriesTo = now.addingTimeInterval(60)
+        let seriesPath = "\(readingsPath)/series?metric=heart_rate&from=\(rfc3339(seriesFrom))&to=\(rfc3339(seriesTo))&bucket=1m"
+        let seriesResponse = client.request("GET", seriesPath, token: tokenA)
+        let seriesObject = jsonObject(seriesResponse.body) ?? [:]
+        let buckets = list(seriesObject["buckets"])
+        report.check(seriesResponse.status == 200, "series 返回 200", "status=\(seriesResponse.status) body=\(bodyText(seriesResponse.body))")
+        report.check(text(seriesObject, "metric") == "heart_rate", "series metric 为 heart_rate")
+        report.check(text(seriesObject, "unit") == "bpm", "series unit 为 bpm")
+        report.check(text(seriesObject, "bucket") == "1m", "series bucket 回显 1m")
+        let bucketDates = buckets.compactMap { parsedDate($0, "start") }
+        report.check(
+            bucketDates.count == buckets.count && zip(bucketDates, bucketDates.dropFirst()).allSatisfy { $0 < $1 },
+            "桶按 start 升序",
+            "starts=\(bucketDates)"
+        )
+        report.check(
+            buckets.reduce(0) { $0 + Int((($1["count"] as? NSNumber)?.intValue) ?? 0) } == 3,
+            "桶内 count 合计为 3",
+            "buckets=\(buckets.count)"
+        )
+        report.check(
+            buckets.allSatisfy { bucket in
+                guard let min = number(bucket, "min"), let max = number(bucket, "max"),
+                      let avg = number(bucket, "avg") else { return false }
+                return min <= avg && avg <= max
+            },
+            "每个桶满足 min ≤ avg ≤ max"
+        )
+
+        let emptyFrom = now.addingTimeInterval(-60 * 86_400)
+        let emptyTo = now.addingTimeInterval(-59 * 86_400)
+        let emptyPath = "\(readingsPath)/series?metric=heart_rate&from=\(rfc3339(emptyFrom))&to=\(rfc3339(emptyTo))&bucket=1d"
+        let emptyResponse = client.request("GET", emptyPath, token: tokenA)
+        let emptyObject = jsonObject(emptyResponse.body) ?? [:]
+        report.check(emptyResponse.status == 200, "空区间 series 返回 200", "status=\(emptyResponse.status)")
+        report.check(
+            (emptyObject["buckets"] as? [Any])?.isEmpty ?? false,
+            "空区间返回 buckets: []",
+            "body=\(bodyText(emptyResponse.body))"
+        )
+
+        let badBucket = client.request(
+            "GET",
+            "\(readingsPath)/series?metric=heart_rate&from=\(rfc3339(seriesFrom))&to=\(rfc3339(seriesTo))&bucket=5m",
+            token: tokenA
+        )
+        report.check(badBucket.status == 400, "非法 bucket 返回 400", "status=\(badBucket.status)")
+        report.check(errorCode(badBucket.body) == "BAD_REQUEST", "非法 bucket 错误码为 BAD_REQUEST", "code=\(errorCode(badBucket.body))")
+
+        let metricsResponse = client.request("GET", "\(readingsPath)/metrics", token: tokenA)
+        let metricsObject = jsonObject(metricsResponse.body) ?? [:]
+        let metricItems = list(metricsObject["items"])
+        report.check(metricsResponse.status == 200, "metrics 返回 200", "status=\(metricsResponse.status)")
+        report.check(metricItems.count == 2, "指标清单包含 2 个指标", "items=\(metricItems.count)")
+        let metricDates = metricItems.compactMap { parsedDate($0, "lastAt") }
+        report.check(
+            metricDates.count == metricItems.count
+                && zip(metricDates, metricDates.dropFirst()).allSatisfy { $0 > $1 },
+            "指标清单按 lastAt 倒序",
+            "lastAt=\(metricDates)"
+        )
+        report.check(
+            metricItems.first.map { text($0, "metric") == "temperature" } ?? false,
+            "最新的温度指标排在首位",
+            "first=\(metricItems.first.map { text($0, "metric") } ?? "nil")"
+        )
+        report.check(
+            metricItems.contains { item in
+                text(item, "metric") == "heart_rate"
+                    && (item["count"] as? NSNumber)?.intValue == 3
+                    && text(item, "unit") == "bpm"
+            },
+            "心率指标 count 为 3、unit 为 bpm"
+        )
     }
 
     // MARK: 汇总

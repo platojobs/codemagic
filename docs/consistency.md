@@ -4,7 +4,7 @@
 
 - Android 侧口径以 `PKotlinApp/README.md` 与 `PJGoIoT/api/openapi.yaml` 为准。
 - iOS 侧以本仓库 `README.md`、`docs/architecture.md` 为准。
-- 后端 `openapi.yaml` 当前标注版本 **0.3.3**，但 `PJGoIoT` main 已合入读数链路并打了 tag **`v0.4.0`**（提交 `292e493`，tag 指向 `7acab36`）。iOS v0.4.1（`MARKETING_VERSION 0.4.1`，build 12）按冻结的 readings 契约实现：推送 `readings`（≤500/批、按 `id` 幂等）、查询 `readings`（倒序、cursor）、`readings/summary`（24h min/max/avg/last）；服务端保留 90 天，客户端本地保留 7 天。v0.4.1 起两端读数解析以 **3.8 黄金用例表**为唯一口径。0.3.3 的 `advertisedName` 与三态语义保持不变。
+- 后端 `PJGoIoT/api/openapi.yaml` 在 **v0.5.1** 起包含读数链路（v0.4.0 首次引入，v0.5.0 新增 `readings/series` 与 `readings/metrics`）。`v0.5.1` 修正 4 处契约表述：`/readings/metrics` 补 400 响应、`PushReading.unit` 允许空串（0–16）、9 个公共端点补 `security: []`、`compatibility` 的 nullable 写法；这些均不影响客户端逻辑。iOS v0.5.0（`MARKETING_VERSION 0.5.0`，build 13）在此基础上实现：推送 `readings`（≤500/批、按 `id` 幂等）、查询 `readings`（倒序、cursor）、`readings/summary`（24h min/max/avg/last）、**`readings/series`（1m/1h/1d 分桶）与 `readings/metrics`（指标清单）**；服务端保留 90 天，客户端本地保留 7 天。v0.4.1 起两端读数解析以 **3.8 黄金用例表**为唯一口径；v0.5.0 的长周期图表口径见 **3.9**。
 
 ---
 
@@ -208,9 +208,10 @@ iOS 端不再存在“历史端点”调用；唯一保留的旧路径 `/api/v1/
 - 相同 `Idempotency-Key` 重放返回 `Idempotent-Replayed: true`，不新增变更；
 - 旧 `updatedAt` 推送触发 `server_newer` 冲突，服务端保留较新版本；
 - 无 token 返回 401 `UNAUTHORIZED`；第二用户访问他人设备（按 MAC 与复合键）均返回 404 `NOT_FOUND`；
-- 读数：推送 3 条（`appliedReadings=3`）→ 查询按 `recordedAt` 倒序 → `summary` 的 count/min/max/avg/last/unit/window 正确 → 重复 id 推送 `appliedReadings=0`、`skippedReadings=3` → 非法 `NaN` 返回 400。
+- 读数：推送 3 条（`appliedReadings=3`）→ 查询按 `recordedAt` 倒序 → `summary` 的 count/min/max/avg/last/unit/window 正确 → 重复 id 推送 `appliedReadings=0`、`skippedReadings=3` → 非法 `NaN` 返回 400；
+- 长周期（v0.5.0）：`series` 按 `1m` 返回、桶按 `start` 升序且 `count` 合计等于推送条数、每桶 `min ≤ avg ≤ max`；空区间返回 `buckets: []`；非法 `bucket=5m` 返回 400 `BAD_REQUEST`；`metrics` 按 `lastAt` 倒序、最新温度指标在首位、心率指标 `count=3` 且 `unit=bpm`。
 
-当前共 **106 项断言全部通过**（v0.4.0 联调记录，后端 `PJGoIoT` main `7acab36`，已打 tag `v0.4.0`）。
+当前共 **123 项断言全部通过**（v0.5.0 联调记录，后端 `PJGoIoT` **v0.5.1**，`STORE=fixture`）。
 
 运行记录见 `README.md` 第 4.2 节；该脚本已接入 GitHub Actions `ios.yml` 的 `e2e-contract` job（macOS runner，与 build 并行）。v0.4.0 实际 CI 运行 [41941929495](https://github.com/platojobs/codemagic/actions/runs/41941929495) 中 `e2e-contract` 56s、106 项全 PASS（0 SKIP），`build-test` 3m47s、122 单测全绿。若 CI checkout 到的后端尚未包含 readings，第 7 节会输出 `[SKIP]`（能力门控，不计通过、不伪造 PASS），其余断言照常执行。
 
@@ -258,7 +259,7 @@ iOS 端不再存在“历史端点”调用；唯一保留的旧路径 `/api/v1/
 
 解析失败（空帧、NaN/Inf、越界、非 UTF-8、超长）**静默丢弃并写本地日志（分类「读数」）**，不崩溃、不写脏数据。
 
-**展示**：设备详情「数据」区依次为指标选择（仅该设备真实已有指标）→ 最近 60 点自绘折线图（`draw(_:)` 手绘坐标轴/网格/折线/数据点，支持 0/1/60 点）→ 24h 汇总（min/max/avg/last）→ 最近记录。无读数展示「连接设备后开始采集」；蓝牙未授权提示前往系统设置；不展示任何伪造数据。
+**展示（v0.5.0）**：设备详情「数据」区依次为区间切换（1 小时 / 24 小时 / 7 天 / 30 天，默认 24 小时）→ 指标选择（来自服务端 `readings/metrics`，展示「指标名 · N 条」）→ 按时间定位的分桶折线图（`draw(_:)` 手绘坐标轴/网格/折线/数据点/min–max 区间带，不引第三方库）→ 24h 汇总（min/max/avg/last）→ 最近记录。无读数展示「连接设备后开始采集」；蓝牙未授权提示前往系统设置；不展示任何伪造数据。区间、分桶与缺口规则见 3.9。
 
 ### 3.8 读数解析黄金用例（v0.4.1，两端共用）
 
@@ -295,6 +296,32 @@ iOS 用例固化在 `codemagicTests/ReadingsGoldenTests.swift`；新增特征或
 
 > **脚注（v0.4.1 核对发现）**：原黄金表 `00 4A → 20.0` 与 IEEE-754 binary16 不符：位型 `0x4A00` = 1.5 × 2³ = **12.0**，20.0 对应位型 `0x4D00`（字节 `00 4D`）。
 > iOS 按规范解码，未对 `0x4A00` 做任何硬编码；两种位型都已固化为用例。Android 侧联调时请以本表两行为准修正期望值。
+
+### 3.9 长周期分桶序列与指标清单（v0.5.0）
+
+**区间 → bucket 映射**（「数据」区顶部切换，默认 24 小时；切换立即重绘并按新区间重新查询）：
+
+| 区间 | `bucket` | 覆盖桶数 |
+| --- | --- | --- |
+| 1 小时 | `1m` | 60 |
+| 24 小时 | `1h` | 24 |
+| 7 天 | `1h` | 168 |
+| 30 天 | `1d` | 30 |
+
+组合均在服务端 500 桶上限以内。请求为 `GET /api/v1/my/devices/{platform}/{externalId}/readings/series?metric=&from=&to=&bucket=`，`from` / `to` 使用 **UTC RFC3339**；响应 `{metric, unit, bucket, from, to, buckets[{start, end, count, min, max, avg, last}]}`，`buckets` 按 `start` 升序。
+
+**UTC 网格**：桶起点按时段取整对齐到 UTC。1970-01-01T00:00:00Z 同时是 1m / 1h / 1d 的整数倍，因此客户端本地兜底用「绝对秒数向下取整」即可得到与后端（2000-01-01T00:00:00Z 原点）完全一致的桶边界，不受本地时区与夏令时影响。
+
+**只返回有数据的桶，因此必须按时间定位**：
+- X 轴按每个桶 `start` 在查询区间内的**真实时间比例**定位，**不按数组下标等距绘制**；30 天区间只有 24 个桶时，首尾留白如实反映缺数据的天数。
+- 相邻桶 `start - 前一个 end > 1s` 即判定为缺口，折线在缺口处**断开**（区间带同样断开），绝不跨缺口连线。原因：服务端不返回空桶，等距或跨缺口连线会把「设备断采」画成「数值缓慢变化」，属于伪造趋势。
+- 每桶用 `avg` 连线，并叠加该桶 `min`–`max` 的浅色区间带，展示波动幅度。
+- Y 轴按区间内真实 `min` / `max` 自适应（全相等时上下留白），刻度标签带真实单位；NaN / Inf 桶直接丢弃，不污染整条折线。
+- 几何计算独立在 `ReadingsChartGeometry`，单测覆盖 空 / 单桶 / 等距 / 带缺口 / 30 天 24 桶 / 异常值过滤。
+
+**指标清单**：`GET .../readings/metrics` → `{items:[{metric, unit, count, firstAt, lastAt}]}`，按 `lastAt` 倒序（同一时间按指标名升序）。详情页展示「指标名 · N 条」；单位以响应中该指标最近一条读数的单位为准，切换指标时同步更新 Y 轴与 24h 汇总行单位。服务端为空而本地有待同步读数时用本地清单兜底；完全没有指标时展示「连接设备后开始采集」。
+
+**离线降级**：`series` 请求失败时用同一 UTC 网格聚合本地读数并即时重绘；本地只保留 7 天，30 天区间明确标注「离线：仅本地 7 天数据」，时间轴仍按 30 天绘制（缺数据处留白，不拉伸）。24h 汇总请求失败时同样回退本地 24h 窗口。
 
 
 ---
@@ -348,7 +375,7 @@ iOS 用例固化在 `codemagicTests/ReadingsGoldenTests.swift`；新增特征或
 | 设备详情网络失败但有缓存 | **降级显示缓存**，并标注缓存时间与错误码，不白屏 |
 | 设备详情云端型号为空（`deviceType = null`） | 型号显示「型号未知」；厂商 / 固件显示「—」；兼容性显示「暂无兼容性说明」；**alias、分组、最近出现时间照常展示** |
 | 设备详情无读数 | 「数据」区只展示一条真实空状态「连接设备后开始采集」；蓝牙未授权时改为提示前往系统设置；不渲染空图表、不造 0 值 |
-| 设备详情有本地读数但云端汇总失败 | 展示本地 24h 汇总与最近 60 点，并标注「数据来源：离线：本地数据」 |
+| 设备详情有本地读数但云端请求失败 | 按同一 UTC 网格展示本地分桶图表与本地 24h 汇总，并标注「离线：本地数据」；30 天区间标注「离线：仅本地 7 天数据」 |
 | 我的扫描日志为空 | 空状态说明扫描会话会自动记录 |
 | 我的同步未完成 / 失败 | 显示上次同步时间、待上传条数、错误码与降级说明；本地功能不受影响 |
 | 我的同步冲突 | 明确提示「另一台设备改过这条」，并说明已采用云端版本 |

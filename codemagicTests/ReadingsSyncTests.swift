@@ -264,15 +264,20 @@ final class ReadingsSyncTests: XCTestCase {
         )
         viewModel.start()
 
-        XCTAssertEqual(viewModel.readings.metrics, [.temperature, .humidity], "指标来自真实已有读数")
-        XCTAssertEqual(viewModel.readings.selectedMetric, .temperature)
-        XCTAssertEqual(viewModel.readings.points.map(\.value), [22])
-        XCTAssertEqual(viewModel.readings.summary?.count, 1)
-
-        viewModel.selectReadingsMetric(.humidity)
+        XCTAssertEqual(
+            viewModel.readings.metrics,
+            [.humidity, .temperature],
+            "离线兜底时指标清单按 lastAt 倒序"
+        )
         XCTAssertEqual(viewModel.readings.selectedMetric, .humidity)
         XCTAssertEqual(viewModel.readings.points.map(\.value), [55])
-        XCTAssertEqual(viewModel.readings.unit, "%")
+        XCTAssertEqual(viewModel.readings.summary?.count, 1)
+        XCTAssertTrue(viewModel.readings.isOfflineLocalData, "云端不可用标注离线")
+
+        viewModel.selectReadingsMetric(.temperature)
+        XCTAssertEqual(viewModel.readings.selectedMetric, .temperature)
+        XCTAssertEqual(viewModel.readings.points.map(\.value), [22])
+        XCTAssertEqual(viewModel.readings.unit, "℃")
     }
 
     func testDetailViewModelWithoutReadingsShowsGuidanceInsteadOfFakeData() throws {

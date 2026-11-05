@@ -68,6 +68,50 @@ final class ReadingsStore {
         return rows.compactMap(Self.makeReading)
     }
 
+    /// 本地指标清单（离线兜底）：条数、首末时间与最近一条读数的单位，按 `lastAt` 倒序。
+    /// 与 `GET .../readings/metrics` 形状一致，未知指标同样归一为 `other`。
+    func metricInfos(deviceID: UUID) throws -> [ReadingMetricInfo] {
+        let rows = try database.query(
+            """
+            SELECT metric, COUNT(*) AS total, MIN(recorded_at) AS first_at, MAX(recorded_at) AS last_at
+            FROM readings
+            WHERE device_id = ?
+            GROUP BY metric;
+            """,
+            [.text(deviceID.uuidString)]
+        )
+        var merged: [ReadingMetric: (count: Int, first: Date?, last: Date?, unit: String)] = [:]
+        for row in rows {
+            guard let raw = row.text("metric"),
+                  let total = row.integer("total")
+            else { continue }
+            let metric = ReadingMetric.normalized(raw)
+            let first = row.double("first_at").map { Date(timeIntervalSince1970: $0) }
+            let last = row.double("last_at").map { Date(timeIntervalSince1970: $0) }
+            let unit = (try? latestUnit(deviceID: deviceID, rawMetric: raw)) ?? ""
+
+            let existing = merged[metric]
+            let laterExists = (existing?.last ?? .distantPast) >= (last ?? .distantPast)
+            merged[metric] = (
+                count: (existing?.count ?? 0) + Int(total),
+                first: earlier(existing?.first, first),
+                last: later(existing?.last, last),
+                unit: laterExists ? (existing?.unit ?? "") : unit
+            )
+        }
+
+        let infos = merged.map { metric, aggregate in
+            ReadingMetricInfo(
+                metric: metric.rawValue,
+                unit: aggregate.unit,
+                count: aggregate.count,
+                firstAt: aggregate.first,
+                lastAt: aggregate.last
+            )
+        }
+        return ReadingMetricInfo.sortedByLastAt(infos)
+    }
+
     /// 该设备真实已有指标，按白名单顺序返回；没有读数返回空数组。
     func availableMetrics(deviceID: UUID) throws -> [ReadingMetric] {
         let rows = try database.query(
@@ -153,6 +197,36 @@ final class ReadingsStore {
     }
 
     // MARK: - Mapping
+
+    private func latestUnit(deviceID: UUID, rawMetric: String) throws -> String {
+        try database.query(
+            """
+            SELECT unit FROM readings
+            WHERE device_id = ? AND metric = ?
+            ORDER BY recorded_at DESC
+            LIMIT 1;
+            """,
+            [.text(deviceID.uuidString), .text(rawMetric)]
+        ).first?.text("unit") ?? ""
+    }
+
+    private func earlier(_ lhs: Date?, _ rhs: Date?) -> Date? {
+        switch (lhs, rhs) {
+        case let (left?, right?): return min(left, right)
+        case let (left?, nil): return left
+        case let (nil, right?): return right
+        default: return nil
+        }
+    }
+
+    private func later(_ lhs: Date?, _ rhs: Date?) -> Date? {
+        switch (lhs, rhs) {
+        case let (left?, right?): return max(left, right)
+        case let (left?, nil): return left
+        case let (nil, right?): return right
+        default: return nil
+        }
+    }
 
     private static func makeReading(from row: SQLRow) -> DeviceReading? {
         guard let idText = row.text("id"),

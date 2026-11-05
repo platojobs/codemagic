@@ -1,41 +1,18 @@
 import UIKit
 
-/// 纯几何计算，独立于视图，便于单测覆盖 0 / 1 / 60 点。
-enum ReadingsChartGeometry {
-    /// 把数值映射为绘图区坐标。`values` 为空返回空数组。
-    ///
-    /// - 单点或所有值相同（min == max）时纵向居中，避免除零；
-    /// - y 轴向上为增大，坐标原点按 UIKit 规则在左上。
-    static func points(values: [Double], in rect: CGRect) -> [CGPoint] {
-        guard !values.isEmpty else { return [] }
-        guard rect.width > 0, rect.height > 0 else { return [] }
-
-        let minValue = values.min() ?? 0
-        let maxValue = values.max() ?? 0
-        let span = maxValue - minValue
-        let paddedSpan = span == 0 ? max(abs(maxValue) * 0.2, 1) : span
-        let lower = span == 0 ? minValue - paddedSpan / 2 : minValue
-
-        if values.count == 1 {
-            return [CGPoint(x: rect.midX, y: rect.midY)]
-        }
-
-        let step = rect.width / CGFloat(values.count - 1)
-        return values.enumerated().map { index, value in
-            let ratio = (value - lower) / paddedSpan
-            let x = rect.minX + step * CGFloat(index)
-            let y = rect.maxY - rect.height * CGFloat(ratio)
-            return CGPoint(x: x, y: y)
-        }
-    }
-}
-
-/// 自绘折线图：坐标轴、网格、折线、数据点全部由 `draw(_:)` 绘制，不依赖第三方图表库。
+/// 自绘折线图：坐标轴、网格、折线、数据点与 min–max 区间带全部由 `draw(_:)` 绘制，不依赖第三方图表库。
 ///
-/// 支持 0 点（空态文案 + 网格）、1 点（居中单点）、最多 60 点（完整折线）。
+/// 折线按桶 `start` 的真实时间比例定位；服务端只返回有数据的桶，桶间缺口处折线断开。
 final class ReadingsLineChartView: UIView {
-    private var values: [Double] = []
+    private var buckets: [ReadingsChartBucket] = []
+    private var interval = DateInterval(start: Date(timeIntervalSince1970: 0), duration: 0)
     private var unit: String = ""
+    private var rangeTitle: String = ""
+
+    private let leftInset: CGFloat = 56
+    private let rightInset: CGFloat = 14
+    private let topInset: CGFloat = 14
+    private let bottomInset: CGFloat = 30
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -51,37 +28,39 @@ final class ReadingsLineChartView: UIView {
         fatalError("init(coder:) has not been implemented")
     }
 
-    /// 传入按时间升序的数值（最多 60 个）。
-    func configure(values: [Double], unit: String) {
-        self.values = Array(values.suffix(60))
+    /// 传入按时间升序的有数据的桶，以及查询区间（决定 X 轴比例）。
+    func configure(buckets: [ReadingsChartBucket], interval: DateInterval, unit: String, rangeTitle: String) {
+        self.buckets = buckets.sorted { $0.start < $1.start }
+        self.interval = interval
         self.unit = unit
-        accessibilityLabel = self.values.isEmpty
+        self.rangeTitle = rangeTitle
+        accessibilityLabel = self.buckets.isEmpty
             ? "暂无读数"
-            : "最近 \(self.values.count) 个\(unit.isEmpty ? "" : unit)读数"
+            : "\(rangeTitle)走势，共 \(self.buckets.count) 个时间桶"
         setNeedsDisplay()
     }
 
     override func draw(_ rect: CGRect) {
         guard let context = UIGraphicsGetCurrentContext() else { return }
         let plotRect = CGRect(
-            x: rect.minX + 44,
-            y: rect.minY + 12,
-            width: max(rect.width - 60, 1),
-            height: max(rect.height - 36, 1)
+            x: rect.minX + leftInset,
+            y: rect.minY + topInset,
+            width: max(rect.width - leftInset - rightInset, 1),
+            height: max(rect.height - topInset - bottomInset, 1)
         )
         drawGrid(in: plotRect, context: context)
 
-        guard !values.isEmpty else {
+        let layout = ReadingsChartGeometry.layout(buckets: buckets, interval: interval, in: plotRect)
+        guard !layout.isEmpty else {
             drawEmptyText(in: plotRect)
             return
         }
 
-        let points = ReadingsChartGeometry.points(values: values, in: plotRect)
-        guard !points.isEmpty else { return }
-
-        drawYAxisLabels(in: plotRect)
-        drawPolyline(points: points, context: context)
-        drawDots(points: points, context: context)
+        drawYAxisLabels(layout: layout, in: plotRect)
+        drawXAxisLabels(in: plotRect)
+        drawBands(layout: layout, context: context)
+        drawPolylines(layout: layout, context: context)
+        drawDots(layout: layout, context: context)
     }
 
     // MARK: - Drawing
@@ -107,27 +86,47 @@ final class ReadingsLineChartView: UIView {
         context.restoreGState()
     }
 
-    private func drawPolyline(points: [CGPoint], context: CGContext) {
-        guard points.count > 1 else { return }
+    /// min–max 浅色区间带，让每桶的波动幅度可见。
+    private func drawBands(layout: ReadingsChartLayout, context: CGContext) {
+        guard !layout.bandPolygons.isEmpty else { return }
+        context.saveGState()
+        context.setFillColor(AppTheme.Palette.accent.withAlphaComponent(0.16).cgColor)
+        for polygon in layout.bandPolygons where polygon.count > 2 {
+            context.beginPath()
+            context.move(to: polygon[0])
+            for point in polygon.dropFirst() {
+                context.addLine(to: point)
+            }
+            context.closePath()
+            context.fillPath()
+        }
+        context.restoreGState()
+    }
+
+    /// 每段单独描边：缺口处不跨空缺连线。
+    private func drawPolylines(layout: ReadingsChartLayout, context: CGContext) {
         context.saveGState()
         context.setStrokeColor(AppTheme.Palette.accent.cgColor)
         context.setLineWidth(2)
         context.setLineJoin(.round)
         context.setLineCap(.round)
-        context.move(to: points[0])
-        for point in points.dropFirst() {
-            context.addLine(to: point)
+        for segment in layout.segments where segment.count > 1 {
+            context.move(to: segment[0])
+            for point in segment.dropFirst() {
+                context.addLine(to: point)
+            }
+            context.strokePath()
         }
-        context.strokePath()
         context.restoreGState()
     }
 
-    private func drawDots(points: [CGPoint], context: CGContext) {
+    private func drawDots(layout: ReadingsChartLayout, context: CGContext) {
+        guard !layout.points.isEmpty else { return }
         context.saveGState()
         context.setFillColor(AppTheme.Palette.accent.cgColor)
-        // 60 点时缩小点半径，避免糊成一条线。
-        let radius: CGFloat = points.count > 30 ? 2 : 3
-        for point in points {
+        // 点数多时缩小半径，避免糊成一条线。
+        let radius: CGFloat = layout.points.count > 30 ? 2 : 3
+        for point in layout.points {
             context.fillEllipse(
                 in: CGRect(
                     x: point.x - radius,
@@ -140,11 +139,11 @@ final class ReadingsLineChartView: UIView {
         context.restoreGState()
     }
 
-    private func drawYAxisLabels(in plotRect: CGRect) {
-        guard let minValue = values.min(), let maxValue = values.max() else { return }
+    private func drawYAxisLabels(layout: ReadingsChartLayout, in plotRect: CGRect) {
         let labels: [(text: String, y: CGFloat)] = [
-            (format(maxValue), plotRect.minY),
-            (format(minValue), plotRect.maxY),
+            (format(layout.yMax), plotRect.minY),
+            (format((layout.yMin + layout.yMax) / 2), plotRect.midY),
+            (format(layout.yMin), plotRect.maxY),
         ]
         let attributes: [NSAttributedString.Key: Any] = [
             .font: UIFont.preferredFont(forTextStyle: .caption2),
@@ -160,6 +159,30 @@ final class ReadingsLineChartView: UIView {
         }
     }
 
+    private func drawXAxisLabels(in plotRect: CGRect) {
+        guard interval.duration > 0 else { return }
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: UIFont.preferredFont(forTextStyle: .caption2),
+            .foregroundColor: AppTheme.Palette.secondaryText,
+        ]
+        let positions: [(date: Date, alignment: NSTextAlignment)] = [
+            (interval.start, .left),
+            (interval.start.addingTimeInterval(interval.duration / 2), .center),
+            (interval.end, .right),
+        ]
+        for position in positions {
+            let text = timeText(for: position.date) as NSString
+            let size = text.size(withAttributes: attributes)
+            let x: CGFloat
+            switch position.alignment {
+            case .left: x = plotRect.minX
+            case .right: x = plotRect.maxX - size.width
+            default: x = plotRect.midX - size.width / 2
+            }
+            text.draw(at: CGPoint(x: x, y: plotRect.maxY + 6), withAttributes: attributes)
+        }
+    }
+
     private func drawEmptyText(in plotRect: CGRect) {
         let text = "暂无读数"
         let attributes: [NSAttributedString.Key: Any] = [
@@ -171,9 +194,18 @@ final class ReadingsLineChartView: UIView {
         (text as NSString).draw(at: origin, withAttributes: attributes)
     }
 
+    private func timeText(for date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale.current
+        formatter.timeZone = TimeZone.current
+        // 2 天以内按时刻，长区间按日期；两者都足以表达时间位置。
+        formatter.dateFormat = interval.duration <= 2 * 86_400 ? "HH:mm" : "MM-dd"
+        return formatter.string(from: date)
+    }
+
     private func format(_ value: Double) -> String {
         let rounded = (value * 10).rounded() / 10
-        if rounded == rounded.rounded() { return String(Int(rounded)) }
-        return String(format: "%.1f", rounded)
+        let text = rounded == rounded.rounded() ? String(Int(rounded)) : String(format: "%.1f", rounded)
+        return unit.isEmpty ? text : "\(text) \(unit)"
     }
 }

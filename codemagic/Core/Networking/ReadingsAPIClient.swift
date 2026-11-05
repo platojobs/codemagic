@@ -19,6 +19,20 @@ protocol ReadingsAPIServicing {
         hours: Int,
         completion: @escaping (Result<ReadingSummary, AppError>) -> Void
     )
+    func fetchSeries(
+        platform: String,
+        externalID: String,
+        metric: ReadingMetric,
+        from: Date,
+        to: Date,
+        bucket: ReadingsBucket,
+        completion: @escaping (Result<ReadingsSeries, AppError>) -> Void
+    )
+    func fetchMetrics(
+        platform: String,
+        externalID: String,
+        completion: @escaping (Result<ReadingMetrics, AppError>) -> Void
+    )
 }
 
 /// `GET /api/v1/my/devices/{platform}/{externalId}/readings` 与 `.../readings/summary`。
@@ -79,6 +93,41 @@ final class ReadingsAPIClient: ReadingsAPIServicing {
                 URLQueryItem(name: "hours", value: String(hours)),
             ],
             as: ReadingSummary.self,
+            completion: completion
+        )
+    }
+
+    func fetchSeries(
+        platform: String,
+        externalID: String,
+        metric: ReadingMetric,
+        from: Date,
+        to: Date,
+        bucket: ReadingsBucket,
+        completion: @escaping (Result<ReadingsSeries, AppError>) -> Void
+    ) {
+        send(
+            path: "api/v1/my/devices/\(pathComponent(platform))/\(pathComponent(externalID))/readings/series",
+            queryItems: [
+                URLQueryItem(name: "metric", value: metric.rawValue),
+                URLQueryItem(name: "from", value: SyncDateCodec.string(from: from)),
+                URLQueryItem(name: "to", value: SyncDateCodec.string(from: to)),
+                URLQueryItem(name: "bucket", value: bucket.rawValue),
+            ],
+            as: ReadingsSeries.self,
+            completion: completion
+        )
+    }
+
+    func fetchMetrics(
+        platform: String,
+        externalID: String,
+        completion: @escaping (Result<ReadingMetrics, AppError>) -> Void
+    ) {
+        send(
+            path: "api/v1/my/devices/\(pathComponent(platform))/\(pathComponent(externalID))/readings/metrics",
+            queryItems: [],
+            as: ReadingMetrics.self,
             completion: completion
         )
     }
@@ -188,6 +237,26 @@ final class UnavailableReadingsAPI: ReadingsAPIServicing {
         metric: ReadingMetric,
         hours: Int,
         completion: @escaping (Result<ReadingSummary, AppError>) -> Void
+    ) {
+        completion(.failure(error))
+    }
+
+    func fetchSeries(
+        platform: String,
+        externalID: String,
+        metric: ReadingMetric,
+        from: Date,
+        to: Date,
+        bucket: ReadingsBucket,
+        completion: @escaping (Result<ReadingsSeries, AppError>) -> Void
+    ) {
+        completion(.failure(error))
+    }
+
+    func fetchMetrics(
+        platform: String,
+        externalID: String,
+        completion: @escaping (Result<ReadingMetrics, AppError>) -> Void
     ) {
         completion(.failure(error))
     }
