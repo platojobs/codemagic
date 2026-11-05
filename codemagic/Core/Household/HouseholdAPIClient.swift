@@ -1,18 +1,46 @@
 import Foundation
 
-/// 家庭 / 邀请码 / 房间 / 设备归属接口（`PJGoIoT` openapi 0.8.0）。
+/// 家庭 / 邀请码 / 房间 / 设备归属接口（`PJGoIoT` openapi 0.9.0，后端 v0.13.0）。
 protocol HouseholdAPIServicing {
     func listHouseholds(token: String, completion: @escaping (Result<[Household], HouseholdAPIError>) -> Void)
     func createHousehold(name: String, token: String, completion: @escaping (Result<Household, HouseholdAPIError>) -> Void)
+    func updateHousehold(
+        householdID: String,
+        name: String,
+        token: String,
+        completion: @escaping (Result<Household, HouseholdAPIError>) -> Void
+    )
     func members(
         householdID: String,
         token: String,
         completion: @escaping (Result<[HouseholdMember], HouseholdAPIError>) -> Void
     )
+    func removeMember(
+        householdID: String,
+        userID: String,
+        token: String,
+        completion: @escaping (Result<Void, HouseholdAPIError>) -> Void
+    )
+    func leaveHousehold(
+        householdID: String,
+        token: String,
+        completion: @escaping (Result<Void, HouseholdAPIError>) -> Void
+    )
     func createInvitation(
         householdID: String,
         token: String,
         completion: @escaping (Result<HouseholdInvitation, HouseholdAPIError>) -> Void
+    )
+    func invitations(
+        householdID: String,
+        token: String,
+        completion: @escaping (Result<[HouseholdInvitationInfo], HouseholdAPIError>) -> Void
+    )
+    func revokeInvitation(
+        householdID: String,
+        invitationID: String,
+        token: String,
+        completion: @escaping (Result<Void, HouseholdAPIError>) -> Void
     )
     func claimInvitation(
         code: String,
@@ -38,6 +66,13 @@ protocol HouseholdAPIServicing {
         sortOrder: Int?,
         token: String,
         completion: @escaping (Result<RemoteHouseholdRoom, HouseholdAPIError>) -> Void
+    )
+    /// 整段重排：`roomIDs` 必须恰好覆盖家庭全部房间；409 时返回 `.roomSetMismatch`。
+    func reorderRooms(
+        householdID: String,
+        roomIDs: [String],
+        token: String,
+        completion: @escaping (Result<[RemoteHouseholdRoom], HouseholdAPIError>) -> Void
     )
     func deleteRoom(
         householdID: String,
@@ -123,6 +158,40 @@ final class HouseholdAPIClient: HouseholdAPIServicing {
         }
     }
 
+    func updateHousehold(
+        householdID: String,
+        name: String,
+        token: String,
+        completion: @escaping (Result<Household, HouseholdAPIError>) -> Void
+    ) {
+        let body = (try? JSONEncoder().encode(HouseholdNameBody(name: name))) ?? Data()
+        send(
+            HTTPRequest(
+                url: endpoint("households/\(householdID)"),
+                method: "PATCH",
+                headers: jsonAuthHeaders(token: token),
+                body: body
+            )
+        ) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .failure(let error):
+                self.deliver(.failure(error), completion)
+            case .success(let response):
+                do {
+                    let payload = try self.decoder.decode(HouseholdPayload.self, from: response.data)
+                    guard let household = Self.makeHousehold(payload) else {
+                        self.deliver(.failure(.decoding(L10n.t("household.responseMismatch"))), completion)
+                        return
+                    }
+                    self.deliver(.success(household), completion)
+                } catch {
+                    self.deliver(.failure(.decoding(error.localizedDescription)), completion)
+                }
+            }
+        }
+    }
+
     func members(
         householdID: String,
         token: String,
@@ -150,6 +219,52 @@ final class HouseholdAPIClient: HouseholdAPIServicing {
                 } catch {
                     self.deliver(.failure(.decoding(error.localizedDescription)), completion)
                 }
+            }
+        }
+    }
+
+    func removeMember(
+        householdID: String,
+        userID: String,
+        token: String,
+        completion: @escaping (Result<Void, HouseholdAPIError>) -> Void
+    ) {
+        send(
+            HTTPRequest(
+                url: endpoint("households/\(householdID)/members/\(userID)"),
+                method: "DELETE",
+                headers: authHeaders(token: token)
+            )
+        ) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .failure(let error):
+                self.deliver(.failure(error), completion)
+            case .success:
+                self.deliver(.success(()), completion)
+            }
+        }
+    }
+
+    func leaveHousehold(
+        householdID: String,
+        token: String,
+        completion: @escaping (Result<Void, HouseholdAPIError>) -> Void
+    ) {
+        send(
+            HTTPRequest(
+                url: endpoint("households/\(householdID)/leave"),
+                method: "POST",
+                headers: jsonAuthHeaders(token: token),
+                body: Data("{}".utf8)
+            )
+        ) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .failure(let error):
+                self.deliver(.failure(error), completion)
+            case .success:
+                self.deliver(.success(()), completion)
             }
         }
     }
@@ -189,6 +304,65 @@ final class HouseholdAPIClient: HouseholdAPIServicing {
                 } catch {
                     self.deliver(.failure(.decoding(error.localizedDescription)), completion)
                 }
+            }
+        }
+    }
+
+    func invitations(
+        householdID: String,
+        token: String,
+        completion: @escaping (Result<[HouseholdInvitationInfo], HouseholdAPIError>) -> Void
+    ) {
+        send(
+            HTTPRequest(
+                url: endpoint("households/\(householdID)/invitations"),
+                headers: authHeaders(token: token)
+            )
+        ) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .failure(let error):
+                self.deliver(.failure(error), completion)
+            case .success(let response):
+                do {
+                    let payload = try self.decoder.decode(InvitationListPayload.self, from: response.data)
+                    let items = payload.items.map { item in
+                        HouseholdInvitationInfo(
+                            id: item.id,
+                            codeHashPrefix: item.codeHashPrefix,
+                            status: HouseholdInvitationStatus(rawValue: item.status) ?? .expired,
+                            attempts: item.attempts,
+                            expiresAt: SyncDateCodec.parse(item.expiresAt) ?? Date(timeIntervalSince1970: 0),
+                            createdAt: SyncDateCodec.parse(item.createdAt) ?? Date(timeIntervalSince1970: 0)
+                        )
+                    }
+                    self.deliver(.success(items), completion)
+                } catch {
+                    self.deliver(.failure(.decoding(error.localizedDescription)), completion)
+                }
+            }
+        }
+    }
+
+    func revokeInvitation(
+        householdID: String,
+        invitationID: String,
+        token: String,
+        completion: @escaping (Result<Void, HouseholdAPIError>) -> Void
+    ) {
+        send(
+            HTTPRequest(
+                url: endpoint("households/\(householdID)/invitations/\(invitationID)"),
+                method: "DELETE",
+                headers: authHeaders(token: token)
+            )
+        ) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .failure(let error):
+                self.deliver(.failure(error), completion)
+            case .success:
+                self.deliver(.success(()), completion)
             }
         }
     }
@@ -317,6 +491,37 @@ final class HouseholdAPIClient: HouseholdAPIServicing {
         }
     }
 
+    func reorderRooms(
+        householdID: String,
+        roomIDs: [String],
+        token: String,
+        completion: @escaping (Result<[RemoteHouseholdRoom], HouseholdAPIError>) -> Void
+    ) {
+        let body = (try? JSONEncoder().encode(RoomOrderBody(roomIds: roomIDs))) ?? Data()
+        send(
+            HTTPRequest(
+                url: endpoint("households/\(householdID)/rooms/order"),
+                method: "PUT",
+                headers: jsonAuthHeaders(token: token),
+                body: body
+            ),
+            conflict: .roomSetMismatch
+        ) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .failure(let error):
+                self.deliver(.failure(error), completion)
+            case .success(let response):
+                do {
+                    let payload = try self.decoder.decode(RoomListPayload.self, from: response.data)
+                    self.deliver(.success(payload.items), completion)
+                } catch {
+                    self.deliver(.failure(.decoding(error.localizedDescription)), completion)
+                }
+            }
+        }
+    }
+
     func deleteRoom(
         householdID: String,
         roomID: String,
@@ -381,6 +586,7 @@ final class HouseholdAPIClient: HouseholdAPIServicing {
 
     private func send(
         _ request: HTTPRequest,
+        conflict: HouseholdAPIError = .conflict,
         completion: @escaping (Result<HTTPResponse, HouseholdAPIError>) -> Void
     ) {
         httpClient.send(request) { [weak self] result in
@@ -390,7 +596,7 @@ final class HouseholdAPIClient: HouseholdAPIServicing {
                 self.deliver(.failure(.failure(error)), completion)
             case .success(let response):
                 guard response.isSuccess else {
-                    self.deliver(.failure(self.apiError(response)), completion)
+                    self.deliver(.failure(self.apiError(response, conflict: conflict)), completion)
                     return
                 }
                 self.deliver(.success(response), completion)
@@ -398,7 +604,7 @@ final class HouseholdAPIClient: HouseholdAPIServicing {
         }
     }
 
-    private func apiError(_ response: HTTPResponse) -> HouseholdAPIError {
+    private func apiError(_ response: HTTPResponse, conflict conflictKind: HouseholdAPIError) -> HouseholdAPIError {
         switch response.statusCode {
         case 401:
             return .unauthorized
@@ -406,11 +612,19 @@ final class HouseholdAPIClient: HouseholdAPIServicing {
             return .forbidden
         case 404:
             return .notFound
+        case 409:
+            // 机读判断：`ROOM_SET_MISMATCH` 为重排集合不一致，其余 409 按调用端点语义降级。
+            if let envelope = try? decoder.decode(APIErrorEnvelope.self, from: response.data),
+               envelope.error.code == "ROOM_SET_MISMATCH" {
+                return .roomSetMismatch
+            }
+            return conflictKind
         case 429:
             return .rateLimited(retryAfterSeconds: Self.retryAfterSeconds(response))
         default:
             if let envelope = try? decoder.decode(APIErrorEnvelope.self, from: response.data) {
                 if envelope.error.code == "FORBIDDEN" { return .forbidden }
+                if envelope.error.code == "ROOM_SET_MISMATCH" { return .roomSetMismatch }
                 return .failure(.api(
                     code: envelope.error.code,
                     statusCode: response.statusCode,
@@ -457,6 +671,7 @@ final class HouseholdAPIClient: HouseholdAPIServicing {
             role: HouseholdRole(rawValue: payload.role) ?? .member,
             memberCount: payload.memberCount,
             deviceCount: payload.deviceCount,
+            roomCount: payload.roomCount,
             createdAt: SyncDateCodec.parse(payload.createdAt) ?? Date(timeIntervalSince1970: 0),
             updatedAt: Date()
         )
@@ -473,6 +688,7 @@ final class HouseholdAPIClient: HouseholdAPIServicing {
         let personal: Bool
         let memberCount: Int
         let deviceCount: Int
+        let roomCount: Int
         let createdAt: String
     }
 
@@ -492,6 +708,19 @@ final class HouseholdAPIClient: HouseholdAPIServicing {
         let expiresAt: String
     }
 
+    private struct InvitationListPayload: Decodable {
+        let items: [InvitationInfoPayload]
+    }
+
+    private struct InvitationInfoPayload: Decodable {
+        let id: String
+        let codeHashPrefix: String
+        let status: String
+        let attempts: Int
+        let expiresAt: String
+        let createdAt: String
+    }
+
     private struct RoomListPayload: Decodable {
         let items: [RemoteHouseholdRoom]
     }
@@ -507,6 +736,10 @@ final class HouseholdAPIClient: HouseholdAPIServicing {
     private struct RoomCreateBody: Encodable {
         let name: String
         let sortOrder: Int
+    }
+
+    private struct RoomOrderBody: Encodable {
+        let roomIds: [String]
     }
 
     private struct APIErrorEnvelope: Decodable {
@@ -533,6 +766,15 @@ final class UnavailableHouseholdAPI: HouseholdAPIServicing {
         completion(.failure(error))
     }
 
+    func updateHousehold(
+        householdID: String,
+        name: String,
+        token: String,
+        completion: @escaping (Result<Household, HouseholdAPIError>) -> Void
+    ) {
+        completion(.failure(error))
+    }
+
     func members(
         householdID: String,
         token: String,
@@ -541,10 +783,44 @@ final class UnavailableHouseholdAPI: HouseholdAPIServicing {
         completion(.failure(error))
     }
 
+    func removeMember(
+        householdID: String,
+        userID: String,
+        token: String,
+        completion: @escaping (Result<Void, HouseholdAPIError>) -> Void
+    ) {
+        completion(.failure(error))
+    }
+
+    func leaveHousehold(
+        householdID: String,
+        token: String,
+        completion: @escaping (Result<Void, HouseholdAPIError>) -> Void
+    ) {
+        completion(.failure(error))
+    }
+
     func createInvitation(
         householdID: String,
         token: String,
         completion: @escaping (Result<HouseholdInvitation, HouseholdAPIError>) -> Void
+    ) {
+        completion(.failure(error))
+    }
+
+    func invitations(
+        householdID: String,
+        token: String,
+        completion: @escaping (Result<[HouseholdInvitationInfo], HouseholdAPIError>) -> Void
+    ) {
+        completion(.failure(error))
+    }
+
+    func revokeInvitation(
+        householdID: String,
+        invitationID: String,
+        token: String,
+        completion: @escaping (Result<Void, HouseholdAPIError>) -> Void
     ) {
         completion(.failure(error))
     }
@@ -582,6 +858,15 @@ final class UnavailableHouseholdAPI: HouseholdAPIServicing {
         sortOrder: Int?,
         token: String,
         completion: @escaping (Result<RemoteHouseholdRoom, HouseholdAPIError>) -> Void
+    ) {
+        completion(.failure(error))
+    }
+
+    func reorderRooms(
+        householdID: String,
+        roomIDs: [String],
+        token: String,
+        completion: @escaping (Result<[RemoteHouseholdRoom], HouseholdAPIError>) -> Void
     ) {
         completion(.failure(error))
     }

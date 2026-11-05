@@ -156,6 +156,9 @@ final class SQLiteDatabase {
         if version < 9 {
             try migrateToVersion9()
         }
+        if version < 10 {
+            try migrateToVersion10()
+        }
     }
 
     /// v1：五张业务表，均含 `id / updated_at / deleted_at / sync_state`。
@@ -443,6 +446,18 @@ final class SQLiteDatabase {
         CREATE INDEX IF NOT EXISTS idx_rooms_household ON rooms(household_id, sort_order);
         PRAGMA user_version = 9;
         """
+        try executeScript(script)
+    }
+
+    /// v10：家庭快照补充 `room_count`（服务端真实房间数，不本地计数）。
+    private func migrateToVersion10() throws {
+        let householdColumns = Set(try performQuery("PRAGMA table_info(households);", [])
+            .compactMap { $0.text("name") })
+        var script = ""
+        if !householdColumns.isEmpty && !householdColumns.contains("room_count") {
+            script += "ALTER TABLE households ADD COLUMN room_count INTEGER NOT NULL DEFAULT 0;\n"
+        }
+        script += "PRAGMA user_version = 10;"
         try executeScript(script)
     }
 

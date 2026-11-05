@@ -212,6 +212,16 @@ final class RoomStore {
         )
     }
 
+    /// 整段重排成功后落库服务端顺序（仅影响本地展示，不单独上报）。
+    func applySortOrders(_ orderedIDs: [UUID], at date: Date = Date()) throws {
+        for (index, id) in orderedIDs.enumerated() {
+            try database.execute(
+                "UPDATE rooms SET sort_order = ?, updated_at = ? WHERE id = ? AND deleted = 0;",
+                [.integer(Int64(index + 1)), .double(date.timeIntervalSince1970), .text(id.uuidString)]
+            )
+        }
+    }
+
     func claim(id: UUID, householdID: UUID) throws {
         try database.execute(
             "UPDATE rooms SET household_id = ? WHERE id = ? AND household_id IS NULL;",

@@ -65,9 +65,12 @@ iOS 设备详情页独立于底部导航：`Modules/Devices/Scenes/DeviceDetailV
 | 公共设备元数据（按 MAC） | `GET /api/v1/devices/{mac}` | 同左 | 仍可用，但**仅 Android 使用**；iOS 无 MAC 不走该端点 |
 | 读数查询 | — | `GET /api/v1/my/devices/{platform}/{externalId}/readings?metric=&from=&to=&limit=100&cursor=` | 返回 `{items[], nextCursor, hasMore}`，按 `recordedAt` 倒序 |
 | 读数汇总 | — | `GET /api/v1/my/devices/{platform}/{externalId}/readings/summary?metric=&hours=24` | 返回 `{metric, unit, count, min, max, avg, last, windowStart, windowEnd}` |
-| 家庭（v0.14.0） | — | `GET/POST /api/v1/households`、`GET/PATCH/DELETE /households/{id}` | 返回 `{items}` / 单个家庭；个人家庭不可删（403） |
+| 家庭（v0.14.0） | — | `GET/POST /api/v1/households`、`GET/PATCH/DELETE /households/{id}` | 返回 `{items}` / 单个家庭；个人家庭不可删（403）；v0.15.0 起 `memberCount` / `deviceCount` / `roomCount` 均为服务端真实值 |
 | 家庭成员 / 邀请码（v0.14.0） | — | `GET /households/{id}/members`、`POST /households/{id}/invitations`、`POST /households/invitations/claim` | 邀请码 201 + `{code, expiresAt}`，8 位一次性、大小写不敏感 |
+| 成员移除 / 退出（v0.15.0） | — | `DELETE /households/{id}/members/{userId}`、`POST /households/{id}/leave` | 均 204；owner 还有其他成员时退出 409 `CONFLICT`（可读 message）；被移除成员访问家庭 404，设备回个人家庭、房间清空 |
+| 邀请码管理（v0.15.0） | — | `GET /households/{id}/invitations`、`DELETE .../invitations/{invitationId}` | 列表只返回 `codeHashPrefix` / `status` / `attempts` / `expiresAt`，无明文；撤销 204，撤销后 claim 404 |
 | 家庭房间（v0.14.0） | — | `GET/POST /households/{id}/rooms`、`PATCH/DELETE /rooms/{roomId}` | 仅 owner 可写，member 403 `FORBIDDEN` |
+| 房间整段排序（v0.15.0） | — | `PUT /households/{id}/rooms/order` | 请求 `{roomIds}` 必须是完整集合；缺项 / 多项 / 重复 409（v0.13.0 `CONFLICT`，后续 `ROOM_SET_MISMATCH`） |
 | 设备归属（v0.14.0） | — | `PATCH /api/v1/my/devices/{platform}/{externalId}` | `alias` / `roomId` / `householdId` 三态（缺失 / 空串 / 非空） |
 
 Base URL 均由构建配置注入，**不写死在源码**：
@@ -174,7 +177,7 @@ gattServices: [{ uuid, name, characteristics? }]
 
 ### 3.4 与 `openapi.yaml` 的对齐状态
 
-`PJGoIoT/api/openapi.yaml`（当前标注 v0.8.0，后端 v0.12.0；设备 / 同步等既有端点为 0.7.0 起）提供 `POST /auth/anonymous`、`GET /sync/changes`、`POST /sync/push`、`GET /device-types/{type}/catalog`、`GET /my/devices/{platform}/{externalId}`、`/households*`、`/households/{id}/rooms*`、`PATCH /my/devices/{platform}/{externalId}` 等。逐项核对结果：
+`PJGoIoT/api/openapi.yaml`（v0.15.0 起标注 0.9.0，后端 v0.13.0；设备 / 同步等既有端点为 0.7.0 起）提供 `POST /auth/anonymous`、`GET /sync/changes`、`POST /sync/push`、`GET /device-types/{type}/catalog`、`GET /my/devices/{platform}/{externalId}`、`/households*`、`/households/{id}/rooms*`、`/households/{id}/members/{userId}`、`/households/{id}/leave`、`/households/{id}/invitations*`、`/households/{id}/rooms/order`、`PATCH /my/devices/{platform}/{externalId}` 等。逐项核对结果：
 
 | 项 | 状态 |
 | --- | --- |
@@ -195,6 +198,7 @@ gattServices: [{ uuid, name, characteristics? }]
 | 缺省字段 / 显式清除三态（0.3.3） | **已对齐**：`Patch<String>` 三态 + 自定义 `encode`，absent 省略键、clear 编码 `""`；清空分组上报 `"group": ""` 且再次同步不复活；未修改字段不参与 LWW 与幂等哈希；E2E 覆盖缺省 group 不覆盖原值、显式空串清除、同内容换键不 409 |
 | `GET /api/v1/my/devices` / `GET /api/v1/my/devices/{mac}` | **v0.14.0 起使用**：`GET my/devices` 用于成员可见设备的契约校验；iOS 设备详情仍走复合键；E2E 校验鉴权与越权 |
 | `households` / `invitations` / `rooms` / `PATCH my/devices`（0.8.0） | **已对齐**：家庭落库与当前家庭持久化；邀请码 201 + `expiresAt`；房间以服务端为准（local / pending / synced）；设备归属独立 PATCH，三态（缺失 / 空串 / 非空）；member 403 `FORBIDDEN`、跨家庭 404、个人家庭不可删；E2E 第 9 节覆盖完整链路 |
+| 成员移除 / 退出 / 邀请码管理 / 房间整段排序（0.9.0，v0.15.0） | **已对齐**：`DELETE /households/{id}/members/{userId}` 与 `POST /households/{id}/leave` 均 204；owner 带成员退出 409 `CONFLICT`，客户端按 HTTP 状态 + 端点上下文机读判定并映射为「请先转让所有权或移除其他成员」，不解析 message；`GET /invitations` 只取 `codeHashPrefix` / `status` / `attempts` / `expiresAt`（模型无 `code`），撤销 204 且撤销后 claim 404；`PUT /rooms/order` 整段提交，缺项 / 多项 / 重复 409 后自动重新 GET 并提示「房间列表已变化，已刷新」；`GET /households` 计数直接用服务端值；E2E 第 9 节与真 Postgres 脚本均覆盖 |
 | 产品 / 市场 / 设备详情（iOS） | **已切到新端点**，不再请求 `api/products` / `api/market` / `api/device/{peripheralUUID}` |
 | `GET /api/v1/devices/{mac}` | **仍可用，但仅 Android 使用**；iOS 本机设备没有 MAC，不再调用该端点 |
 
@@ -219,8 +223,9 @@ iOS 端不再存在“历史端点”调用；唯一保留的旧路径 `/api/v1/
 - 读数：推送 3 条（`appliedReadings=3`）→ 查询按 `recordedAt` 倒序 → `summary` 的 count/min/max/avg/last/unit/window 正确 → 重复 id 推送 `appliedReadings=0`、`skippedReadings=3` → 非法 `NaN` 返回 400；
 - 长周期（v0.5.0）：`series` 按 `1m` 返回、桶按 `start` 升序且 `count` 合计等于推送条数、每桶 `min ≤ avg ≤ max`；空区间返回 `buckets: []`；非法 `bucket=5m` 返回 400 `BAD_REQUEST`；`metrics` 按 `lastAt` 倒序、最新温度指标在首位、心率指标 `count=3` 且 `unit=bpm`。
 - 家庭（v0.14.0）：三个匿名账号（owner / member / outsider）——个人家庭自动创建且不可删（403 `FORBIDDEN`）→ 创建家庭 → 邀请码 8 位且 `expiresAt` 为未来、一次性（重复领取 404）→ member 用小写码领取成功（`role=member`、成员数 2）→ 成员列表 owner / member 对应 → owner 建房并 PATCH 设备归属 → member `GET /my/devices` 可见该设备及 `householdId` / `roomId` → member 改房间 / 建房 / 签发邀请码 / 改家庭名均 403 `FORBIDDEN` → 跨家庭读取家庭 / 成员 / 房间均 404 `NOT_FOUND` → 非成员读取与改房间 404 → member 改 owner 设备 404 → 归属三态（缺失不变 / 空串清除 `roomId` 与 `householdId` 回落个人家庭 / 非空覆盖）→ 删除家庭后设备回到个人家庭、`roomId = null`。
+- 家庭管理（v0.15.0）：owner 创建家庭 → 邀请 `member` 领取 → 邀请码列表只含 `codeHashPrefix` / `status` / `expiresAt`（响应无明文字段、响应原文不含明文）→ 撤销 204 后第三人 claim 404 → 建房 3 间 → 整段 `PUT /rooms/order` 成功且顺序生效 → 缺项 / 多项 / 重复均 409（`CONFLICT` 或 `ROOM_SET_MISMATCH`）→ `GET /households` 的 `memberCount=2` / `roomCount=3` / `deviceCount=0` 为真实值 → 成员设备 PATCH 加入家庭 → owner 带成员退出 409 `CONFLICT` 且 message 非空 → owner 移除成员 204 → 被移除成员 `GET /households/{id}` 404、其设备回个人家庭且 `roomId=null` → 移除后 owner 退出 204、家庭 404。
 
-当前共 **224 项断言全部通过**（v0.14.0 联调记录，后端 `PJGoIoT` **v0.12.0**，`STORE=fixture`）。
+当前共 **260 项断言全部通过**（v0.15.0 联调记录，后端 `PJGoIoT` **v0.13.0**，`STORE=fixture`）；真 Postgres 运行同一套契约，并额外直接查库验证邀请码只存 64 位哈希、移除成员后成员行删除、owner 退出后成员行清空。
 
 运行记录见 `README.md` 第 4.2 节；该脚本已接入 GitHub Actions `ios.yml` 的 `e2e-contract` job（macOS runner，与 build 并行）。若 CI checkout 到的后端尚未包含读数链路，第 7 节会输出 `[SKIP]`（能力门控，不计通过、不伪造 PASS）；`series` / `metrics` 自 v0.5.0 起属于必需契约，缺失即真实失败，不会跳过。
 
@@ -474,10 +479,11 @@ iOS 用例固化在 `codemagicTests/ReadingsGoldenTests.swift`；新增特征或
 - **首页分区口径**：房间按 `sort_order, created_at` 升序；未知 / 空 `room_id` 归「未分配」且固定最后。搜索只匹配设备字段（别名 / 广播名 / 型号 / 标识符），有关键字时隐藏无命中的房间；排序（最近出现 / 名称 / 信号 / 添加时间）只在房间内生效，不改变分区顺序。
 - **不改变契约**：本节不涉及网络字段，`openapi 0.7.0` 保持原样；E2E 契约套件不变。
 
-### 3.17 家庭 / 邀请码 / 房间 / 设备归属（v0.14.0，openapi 0.8.0）
+### 3.17 家庭 / 邀请码 / 房间 / 设备归属（v0.14.0 起，v0.15.0 补齐，openapi 0.9.0）
 
-- **数据模型（迁移 v9）**：
-  - `households(id TEXT PK, remote_id TEXT UNIQUE NOT NULL, name TEXT NOT NULL, is_personal INTEGER NOT NULL DEFAULT 0, role TEXT NOT NULL, created_at REAL, updated_at REAL)`，`id` **复用远端 UUID**，避免本地 / 远端双主键映射。
+- **数据模型（迁移 v9 / v10）**：
+  - `households(id TEXT PK, remote_id TEXT UNIQUE NOT NULL, name TEXT NOT NULL, is_personal INTEGER NOT NULL DEFAULT 0, role TEXT NOT NULL, member_count INTEGER NOT NULL DEFAULT 0, device_count INTEGER NOT NULL DEFAULT 0, room_count INTEGER NOT NULL DEFAULT 0, created_at REAL, updated_at REAL)`，`id` **复用远端 UUID**，避免本地 / 远端双主键映射。
+  - `member_count` / `device_count` / `room_count` 只读服务端 `GET /households` 的值，**不在本地重算**，避免成员 / 设备在其他端变化后计数漂移。
   - `rooms` 的 `remote_id` 真正启用，并新增 `household_id TEXT`（可空 = 未归属 / 已脱钩）、`sync_state TEXT NOT NULL DEFAULT 'local'`（`local` / `pending` / `synced`）、`deleted INTEGER NOT NULL DEFAULT 0`（离线删除墓碑）。
   - `saved_devices` 新增 `household_id TEXT`、`remote_room_id TEXT`、`remote_household_id TEXT`；`room_id` 仍为本机房间主键。
   - 新增 `device_assignment_pending(device_id TEXT PK, remote_room_id TEXT, remote_household_id TEXT, created_at REAL)`。
@@ -490,10 +496,14 @@ iOS 用例固化在 `codemagicTests/ReadingsGoldenTests.swift`；新增特征或
   - 顺序：本机先行（`setAssignment`）→ 入 `device_assignment_pending` → 立即 PATCH → 成功出队、`applyRemoteAssignment`；网络失败保留队列下次同步重试。
   - 401 交给同步流程（不进终态）；403 / 404 为**终态**：出队 + 写 `lastAssignmentError` 可读文案，避免无限重试。
   - 拉取时若设备有 pending 归属，**不被远端旧值覆盖**（pending 优先）。
-- **权限降级**：owner 可建 / 改 / 删房间、签发邀请码；member 一律 403 `FORBIDDEN`。客户端 `HouseholdAPIError.userMessage` 统一转文案（「你没有修改该家庭 / 房间的权限」），不展示 `FORBIDDEN` 码、不整页报错；跨家庭 / 非成员由服务端 404（不泄露存在性），客户端提示「家庭不存在或你没有访问权限」。个人家庭不可删（403 `FORBIDDEN`）。
+- **权限降级**：owner 可建 / 改 / 删房间、签发 / 撤销邀请码、移除成员、改家庭名、退出、排序；member 一律 403 `FORBIDDEN`。客户端入口按角色隐藏（member 看不到邀请码分区、成员移除、改名），`HouseholdAPIError.userMessage` 统一转文案（「你没有修改该家庭 / 房间的权限」），不展示 `FORBIDDEN` 码、不整页报错；跨家庭 / 非成员由服务端 404（不泄露存在性），客户端提示「家庭不存在或你没有访问权限」。个人家庭不可删（403 `FORBIDDEN`），也不可退出。
 - **邀请码**：`POST /households/{id}/invitations` 201 返回 8 位一次性明文码 + `expiresAt`；客户端倒计时按服务端时间，过期后「重新生成」；领取 `POST /households/invitations/claim` 复用接管码输入规范化（大写、过滤易混字符），404 统一「邀请码无效或已过期」，429 按 `Retry-After` 冷却。
+- **邀请码管理（v0.15.0）**：`GET /households/{id}/invitations` 只解析 `id` / `codeHashPrefix` / `status`（`active` / `expired` / `locked`）/ `attempts` / `expiresAt` / `createdAt`；本地模型 `HouseholdInvitationInfo` **没有 `code` 字段**，界面只显示哈希前缀与状态，绝不展示明文。`DELETE .../invitations/{id}` 204 后刷新列表；撤销后领取 404。
+- **成员移除 / 退出（v0.15.0）**：`DELETE /households/{id}/members/{userId}` 与 `POST /households/{id}/leave` 成功均 204。成功（或当前账号被移除）时本地回落：设备改挂个人家庭、`room_id` / `remote_room_id` 清空、`remote_household_id` 指向个人家庭、清掉该设备 pending 归属；该家庭房间 `clearHousehold` **脱钩保留**（不删除，标注未同步）；家庭快照删除；当前家庭切回个人家庭；随后 `GET /households` 覆盖真实计数。失败不改本地状态。
+- **退出 409**：owner 还有其他成员时服务端 409 `CONFLICT`；界面先本地拦截并提示「请先转让所有权或移除其他成员」，服务端 409 映射为同一文案；**机读判断只看 HTTP 状态与端点，不解析 message**。
+- **房间整段排序（v0.15.0）**：`PUT /households/{id}/rooms/order`，请求 `{roomIds}` 必须覆盖家庭全部房间；缺项 / 多项 / 重复在客户端先判 `.roomSetMismatch`，不发请求；服务端 409（`ROOM_SET_MISMATCH`；v0.13.0 为 `CONFLICT`）时**不改本地顺序**，自动 `GET /rooms` 重新拉取并提示「房间列表已变化，已刷新」。网络失败同样不落本地顺序，避免与服务端分叉；本地未同步房间不参与整段提交，保持原相对位置。
 - **离线**：保留本机房间与设备，房间 `local / pending` 与设备 pending 归属在首页与房间管理标注「未同步」；恢复网络后由 `prepareForSync` 补报，不丢数据。
-- **契约**：openapi 0.8.0；E2E 第 9 节覆盖创建家庭 → 邀请码 → 领取 → 成员可见设备 → member 403 → 跨家庭 404 → 归属三态 → 删除家庭级联。
+- **契约**：openapi 0.9.0（后端 v0.13.0）；E2E 第 9 节覆盖创建家庭 → 邀请码 → 领取 → 成员可见设备 → member 403 → 跨家庭 404 → 归属三态 → 删除家庭级联，以及 v0.15.0 的成员移除 404、owner 退出 409→移除后可退出、邀请码列表无明文 / 撤销后 404、整段重排成功与 409。
 
 ## 4. 错误码
 

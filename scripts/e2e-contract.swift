@@ -134,6 +134,12 @@ private func errorCode(_ data: Data) -> String {
     return text(error, "code")
 }
 
+private func errorMessage(_ data: Data) -> String {
+    guard let root = jsonObject(data),
+          let error = root["error"] as? [String: Any] else { return "" }
+    return text(error, "message")
+}
+
 private func bodyText(_ data: Data) -> String {
     String(data: data, encoding: .utf8) ?? "<非 UTF-8 响应>"
 }
@@ -1207,6 +1213,8 @@ private func run() -> Int32 {
     report.check(memberHouseholds.status == 200, "成员家庭列表返回 200", "status=\(memberHouseholds.status)")
     report.check(memberItems.count == 2, "成员可见共享家庭与个人家庭", "items=\(memberItems.count)")
     report.check(text(memberShared, "role") == "member", "成员在共享家庭中角色为 member")
+    let memberPersonal = memberItems.first { ($0["personal"] as? Bool) == true } ?? [:]
+    let memberPersonalID = text(memberPersonal, "id")
 
     let membersResponse = client.request("GET", "households/\(householdID)/members", token: memberAccount.token)
     let memberList = list((jsonObject(membersResponse.body) ?? [:])["items"])
@@ -1398,6 +1406,181 @@ private func run() -> Int32 {
         "删除家庭后设备回到个人家庭且房间清空",
         "body=\(bodyText(deviceAfterDelete.body))"
     )
+
+    // 9.10 成员移除 / 退出 / 邀请码管理 / 整段重排（后端 v0.13.0）
+    let managementHousehold = client.request(
+        "POST", "households", token: ownerAccount.token, json: ["name": "e2e-成员管理"]
+    )
+    let managementID = text(jsonObject(managementHousehold.body) ?? [:], "id")
+    report.check(
+        managementHousehold.status == 201 && !managementID.isEmpty,
+        "创建成员管理家庭",
+        "status=\(managementHousehold.status)"
+    )
+
+    let managementInvite = client.request(
+        "POST", "households/\(managementID)/invitations", token: ownerAccount.token, json: [String: Any]()
+    )
+    let managementCode = text(jsonObject(managementInvite.body) ?? [:], "code")
+    let memberClaim = client.request(
+        "POST", "households/invitations/claim", token: memberAccount.token, json: ["code": managementCode]
+    )
+    report.check(memberClaim.status == 200, "成员领取新家庭邀请码", "status=\(memberClaim.status)")
+
+    // 邀请码列表：只返回哈希前缀与状态，绝不出现明文
+    let secondInvite = client.request(
+        "POST", "households/\(managementID)/invitations", token: ownerAccount.token, json: [String: Any]()
+    )
+    let managementSecondCode = text(jsonObject(secondInvite.body) ?? [:], "code")
+    let invitationList = client.request("GET", "households/\(managementID)/invitations", token: ownerAccount.token)
+    let invitationItems = list((jsonObject(invitationList.body) ?? [:])["items"])
+    report.check(invitationList.status == 200, "owner 拉取邀请码列表返回 200", "status=\(invitationList.status)")
+    report.check(invitationItems.count >= 1, "邀请码列表包含未使用邀请码", "items=\(invitationItems.count)")
+    let listedInvitation = invitationItems.first ?? [:]
+    report.check(!text(listedInvitation, "codeHashPrefix").isEmpty, "邀请码列表返回哈希前缀")
+    report.check(listedInvitation["code"] == nil, "邀请码列表不含明文字段")
+    report.check(
+        !bodyText(invitationList.body).uppercased().contains(managementSecondCode.uppercased()),
+        "邀请码列表响应不含明文码"
+    )
+    report.check(text(listedInvitation, "status") == "active", "邀请码状态为 active", "status=\(text(listedInvitation, "status"))")
+    let listedInvitationID = text(listedInvitation, "id")
+
+    let revokeResponse = client.request(
+        "DELETE", "households/\(managementID)/invitations/\(listedInvitationID)", token: ownerAccount.token
+    )
+    report.check(revokeResponse.status == 204, "撤销邀请码返回 204", "status=\(revokeResponse.status)")
+    let claimRevoked = client.request(
+        "POST", "households/invitations/claim", token: outsiderAccount.token, json: ["code": managementSecondCode]
+    )
+    report.check(claimRevoked.status == 404, "撤销后领取返回 404", "status=\(claimRevoked.status)")
+
+    // 整段重排：完整集合成功，缺项 / 多项 / 重复一律 409 ROOM_SET_MISMATCH
+    var orderRoomIDs: [String] = []
+    for (index, name) in ["客厅", "卧室", "书房"].enumerated() {
+        let response = client.request(
+            "POST", "households/\(managementID)/rooms", token: ownerAccount.token,
+            json: ["name": name, "sortOrder": index + 1]
+        )
+        report.check(response.status == 201, "创建排序房间 \(name)", "status=\(response.status)")
+        orderRoomIDs.append(text(jsonObject(response.body) ?? [:], "id"))
+    }
+    let fullOrder = client.request(
+        "PUT", "households/\(managementID)/rooms/order", token: ownerAccount.token,
+        json: ["roomIds": [orderRoomIDs[2], orderRoomIDs[0], orderRoomIDs[1]]]
+    )
+    let fullOrderItems = list((jsonObject(fullOrder.body) ?? [:])["items"])
+    report.check(fullOrder.status == 200, "完整整段重排返回 200", "status=\(fullOrder.status) body=\(bodyText(fullOrder.body))")
+    report.check(text(fullOrderItems.first ?? [:], "id") == orderRoomIDs[2], "整段重排生效（书房置首）")
+    report.check(
+        fullOrderItems.enumerated().allSatisfy { (($0.element["sortOrder"] as? NSNumber)?.intValue ?? -1) == $0.offset },
+        "整段重排 sortOrder 按 0..n-1 连续"
+    )
+
+    let missingOrder = client.request(
+        "PUT", "households/\(managementID)/rooms/order", token: ownerAccount.token,
+        json: ["roomIds": [orderRoomIDs[0], orderRoomIDs[1]]]
+    )
+    report.check(missingOrder.status == 409, "重排缺项返回 409", "status=\(missingOrder.status)")
+    let missingCode = errorCode(missingOrder.body)
+    report.check(
+        missingCode == "ROOM_SET_MISMATCH" || missingCode == "CONFLICT",
+        "重排缺项返回 409 且错误码可机读（v0.13.0=CONFLICT，后续版本=ROOM_SET_MISMATCH）",
+        "code=\(missingCode)"
+    )
+    let extraOrder = client.request(
+        "PUT", "households/\(managementID)/rooms/order", token: ownerAccount.token,
+        json: ["roomIds": orderRoomIDs + ["00000000-0000-4000-8000-000000000000"]]
+    )
+    report.check(extraOrder.status == 409, "重排多项返回 409", "status=\(extraOrder.status)")
+    let duplicateOrder = client.request(
+        "PUT", "households/\(managementID)/rooms/order", token: ownerAccount.token,
+        json: ["roomIds": [orderRoomIDs[0], orderRoomIDs[0], orderRoomIDs[1]]]
+    )
+    report.check(duplicateOrder.status == 409, "重排重复返回 409", "status=\(duplicateOrder.status)")
+
+    // 家庭列表计数为服务端真实数字
+    let managementList = client.request("GET", "households", token: ownerAccount.token)
+    let managementItems = list((jsonObject(managementList.body) ?? [:])["items"])
+    let managementObject = managementItems.first { text($0, "id") == managementID } ?? [:]
+    report.check(managementList.status == 200, "owner 家庭列表返回 200", "status=\(managementList.status)")
+    report.check(
+        (managementObject["memberCount"] as? NSNumber)?.intValue == 2,
+        "memberCount 为服务端真实值 2",
+        "memberCount=\(managementObject["memberCount"] ?? "nil")"
+    )
+    report.check(
+        (managementObject["roomCount"] as? NSNumber)?.intValue == 3,
+        "roomCount 为服务端真实值 3",
+        "roomCount=\(managementObject["roomCount"] ?? "nil")"
+    )
+    report.check(
+        (managementObject["deviceCount"] as? NSNumber)?.intValue == 0,
+        "deviceCount 为服务端真实值 0",
+        "deviceCount=\(managementObject["deviceCount"] ?? "nil")"
+    )
+
+    // 成员设备加入家庭，移除后回个人家庭
+    let memberDeviceID = "66666666-6666-4666-8666-666666666666"
+    let memberExternalID = memberDeviceID.uppercased()
+    let memberPush = client.request(
+        "POST", "sync/push", token: memberAccount.token,
+        idempotencyKey: "e2e-member-device-\(Int(Date().timeIntervalSince1970))",
+        json: [
+            "clientId": clientID,
+            "devices": [madeDevice(
+                id: memberDeviceID,
+                platform: "ios",
+                externalID: memberExternalID,
+                mac: nil,
+                alias: "成员设备",
+                updatedAt: Date(timeIntervalSinceNow: -5)
+            )],
+        ]
+    )
+    report.check(memberPush.status == 200, "成员设备 push 返回 200", "status=\(memberPush.status)")
+    let memberAssign = client.request(
+        "PATCH", "my/devices/ios/\(memberExternalID)", token: memberAccount.token,
+        json: ["householdId": managementID, "roomId": orderRoomIDs[0]]
+    )
+    report.check(memberAssign.status == 200, "成员设备归属家庭", "status=\(memberAssign.status)")
+
+    // owner 还有其他成员时不能退出
+    let ownerLeaveConflict = client.request("POST", "households/\(managementID)/leave", token: ownerAccount.token)
+    report.check(ownerLeaveConflict.status == 409, "owner 带成员退出返回 409", "status=\(ownerLeaveConflict.status)")
+    report.check(
+        errorCode(ownerLeaveConflict.body) == "CONFLICT",
+        "退出冲突错误码为 CONFLICT",
+        "code=\(errorCode(ownerLeaveConflict.body))"
+    )
+    report.check(
+        errorMessage(ownerLeaveConflict.body).isEmpty == false,
+        "退出冲突带可读 message",
+        "body=\(bodyText(ownerLeaveConflict.body))"
+    )
+
+    // 移除成员 → 对方 404，设备回其个人家庭且房间清空
+    let removeMember = client.request(
+        "DELETE", "households/\(managementID)/members/\(memberAccount.userID)", token: ownerAccount.token
+    )
+    report.check(removeMember.status == 204, "owner 移除成员返回 204", "status=\(removeMember.status)")
+    let removedMemberGet = client.request("GET", "households/\(managementID)", token: memberAccount.token)
+    report.check(removedMemberGet.status == 404, "被移除成员访问家庭返回 404", "status=\(removedMemberGet.status)")
+    let memberDeviceAfter = client.request("GET", "my/devices/ios/\(memberExternalID)", token: memberAccount.token)
+    let memberDeviceAfterObject = jsonObject(memberDeviceAfter.body) ?? [:]
+    report.check(memberDeviceAfter.status == 200, "成员设备仍存在", "status=\(memberDeviceAfter.status)")
+    report.check(
+        text(memberDeviceAfterObject, "householdId") == memberPersonalID,
+        "移除后设备回到成员个人家庭",
+        "householdId=\(text(memberDeviceAfterObject, "householdId"))"
+    )
+    report.check(memberDeviceAfterObject["roomId"] is NSNull, "移除后设备房间清空")
+
+    // 移除后 owner 可退出，家庭被删除
+    let ownerLeave = client.request("POST", "households/\(managementID)/leave", token: ownerAccount.token)
+    report.check(ownerLeave.status == 204, "移除成员后 owner 退出返回 204", "status=\(ownerLeave.status)")
+    let managementAfterLeave = client.request("GET", "households/\(managementID)", token: ownerAccount.token)
+    report.check(managementAfterLeave.status == 404, "退出后家庭 404", "status=\(managementAfterLeave.status)")
 
     // MARK: 汇总
 

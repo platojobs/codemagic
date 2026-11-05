@@ -33,8 +33,8 @@ final class HouseholdStore {
         try database.execute(
             """
             INSERT OR REPLACE INTO households
-            (id, remote_id, name, is_personal, role, member_count, device_count, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+            (id, remote_id, name, is_personal, role, member_count, device_count, room_count, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """,
             [
                 .text(household.id.uuidString),
@@ -44,6 +44,7 @@ final class HouseholdStore {
                 .text(household.role.rawValue),
                 .integer(Int64(household.memberCount)),
                 .integer(Int64(household.deviceCount)),
+                .integer(Int64(household.roomCount)),
                 .double(household.createdAt.timeIntervalSince1970),
                 .double(household.updatedAt.timeIntervalSince1970),
             ]
@@ -83,6 +84,7 @@ final class HouseholdStore {
             role: HouseholdRole(rawValue: row.text("role") ?? "member") ?? .member,
             memberCount: Int(row.integer("member_count") ?? 0),
             deviceCount: Int(row.integer("device_count") ?? 0),
+            roomCount: Int(row.integer("room_count") ?? 0),
             createdAt: Date(timeIntervalSince1970: row.double("created_at") ?? 0),
             updatedAt: Date(timeIntervalSince1970: row.double("updated_at") ?? 0)
         )

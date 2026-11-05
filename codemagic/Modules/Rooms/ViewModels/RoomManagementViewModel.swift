@@ -24,6 +24,12 @@ final class RoomManagementViewModel {
         householdService?.currentHousehold()?.canManageRooms ?? true
     }
 
+    /// 仅 owner 且至少两个服务端房间时提供整段排序。
+    var canReorder: Bool {
+        guard canManageRooms else { return false }
+        return rooms.filter { $0.remoteID != nil }.count > 1
+    }
+
     var footnoteText: String {
         canManageRooms ? L10n.t("room.localOnlyNote") : L10n.t("household.permission.memberNote")
     }
@@ -141,5 +147,69 @@ final class RoomManagementViewModel {
                 completion?(false)
             }
         }
+    }
+
+    // MARK: - 整段排序
+
+    /// 拖拽或上 / 下移动：先本地重排，再整段 `PUT /rooms/order`。
+    /// 409 时自动重新拉取并提示「房间列表已变化，已刷新」，不解析 message。
+    func moveRoom(from source: Int, to destination: Int, completion: ((Bool) -> Void)? = nil) {
+        guard canReorder,
+              let householdService,
+              let current = householdService.currentHousehold(),
+              source >= 0, source < rooms.count,
+              rooms[source].remoteID != nil
+        else {
+            completion?(false)
+            return
+        }
+        var reordered = rooms
+        let moved = reordered.remove(at: source)
+        let index = max(0, min(destination, reordered.count))
+        reordered.insert(moved, at: index)
+        // 服务端只接受已同步房间；本地未同步房间保持原相对位置。
+        let orderedIDs = reordered.filter { $0.remoteID != nil }.map(\.id)
+        householdService.reorderRooms(householdID: current.id, orderedRoomIDs: orderedIDs) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success:
+                self.lastError = nil
+                self.lastNotice = nil
+                self.reload()
+                completion?(true)
+            case .failure(.roomSetMismatch):
+                householdService.refreshRooms(householdID: current.id) { [weak self] _ in
+                    guard let self else { return }
+                    self.lastNotice = L10n.t("household.room.orderChanged")
+                    self.lastError = nil
+                    self.reload()
+                    completion?(true)
+                }
+            case .failure(let error):
+                self.lastError = error.userMessage
+                self.reload()
+                completion?(false)
+            }
+        }
+    }
+
+    func moveUp(index: Int, completion: ((Bool) -> Void)? = nil) {
+        guard index > 0 else {
+            completion?(false)
+            return
+        }
+        moveRoom(from: index, to: index - 1, completion: completion)
+    }
+
+    func moveDown(index: Int, completion: ((Bool) -> Void)? = nil) {
+        guard index >= 0, index < rooms.count - 1 else {
+            completion?(false)
+            return
+        }
+        moveRoom(from: index, to: index + 1, completion: completion)
+    }
+
+    func clearNotice() {
+        lastNotice = nil
     }
 }

@@ -76,6 +76,141 @@ log "PG_CONTAINER=$PG_CONTAINER DATABASE_URL=$DATABASE_URL"
 step "跑现有契约套件（复用真实栈）"
 E2E_EXTERNAL_BASE_URL="$BASE_URL" "$SCRIPT_DIR/e2e-contract.sh" || fail "现有契约套件未通过"
 
+step "家庭链路（真 Postgres）：成员移除 / 退出 409 / 邀请码无明文 / 重排 409"
+python3 - "$BASE_URL" >"$TMP_ROOT/artifacts/household.json" <<'PY'
+import hashlib
+import json
+import sys
+import urllib.error
+import urllib.request
+
+base = sys.argv[1]
+
+
+def call(method, path, token=None, body=None):
+    data = None if body is None else json.dumps(body).encode("utf-8")
+    request = urllib.request.Request(base + "/api/v1/" + path, data=data, method=method)
+    if token:
+        request.add_header("Authorization", "Bearer " + token)
+    if data is not None:
+        request.add_header("Content-Type", "application/json")
+    try:
+        with urllib.request.urlopen(request) as response:
+            raw = response.read()
+            return response.status, (json.loads(raw) if raw else None)
+    except urllib.error.HTTPError as error:
+        raw = error.read()
+        try:
+            payload = json.loads(raw) if raw else None
+        except ValueError:
+            payload = None
+        return error.code, payload
+
+
+owner = call("POST", "auth/anonymous")[1]
+member = call("POST", "auth/anonymous")[1]
+outsider = call("POST", "auth/anonymous")[1]
+
+status, household = call("POST", "households", token=owner["token"], body={"name": "pg-家庭"})
+assert status == 201, (status, household)
+hid = household["id"]
+
+status, invite = call("POST", f"households/{hid}/invitations", token=owner["token"], body={})
+assert status == 201, (status, invite)
+code = invite["code"]
+
+# 再签发一个：一个用于列表检查与撤销，一个留给成员领取
+status, invite2 = call("POST", f"households/{hid}/invitations", token=owner["token"], body={})
+assert status == 201, (status, invite2)
+code2 = invite2["code"]
+
+# 邀请码列表：只有哈希前缀，没有明文
+status, listed = call("GET", f"households/{hid}/invitations", token=owner["token"])
+assert status == 200 and listed["items"], (status, listed)
+item = listed["items"][0]
+assert "code" not in item and item["codeHashPrefix"], item
+assert code.upper() not in json.dumps(listed).upper(), "列表响应泄露明文邀请码"
+assert code2.upper() not in json.dumps(listed).upper(), "列表响应泄露明文邀请码"
+
+status, _ = call("POST", "households/invitations/claim", token=member["token"], body={"code": code})
+assert status == 200, status
+status, joinedList = call("GET", "households", token=member["token"])
+assert status == 200 and any(h["id"] == hid for h in joinedList["items"]), joinedList
+
+# 列表只给出哈希前缀：用 SHA-256(code2) 前缀定位要撤销的这一条
+prefix2 = hashlib.sha256(code2.encode("utf-8")).hexdigest()[:8]
+target = next(item for item in listed["items"] if item["codeHashPrefix"] == prefix2)
+assert code2.upper() not in json.dumps(listed).upper(), "列表响应泄露明文邀请码"
+
+status, _ = call("DELETE", f"households/{hid}/invitations/{target['id']}", token=owner["token"])
+assert status == 204, status
+status, _ = call("POST", "households/invitations/claim", token=outsider["token"], body={"code": code2})
+assert status == 404, status
+
+# 整段重排：完整成功，缺项 409 ROOM_SET_MISMATCH
+room_ids = []
+for index, name in enumerate(["客厅", "卧室", "书房"]):
+    status, room = call(
+        "POST", f"households/{hid}/rooms", token=owner["token"],
+        body={"name": name, "sortOrder": index + 1},
+    )
+    assert status == 201, (status, room)
+    room_ids.append(room["id"])
+status, ordered = call(
+    "PUT", f"households/{hid}/rooms/order", token=owner["token"],
+    body={"roomIds": [room_ids[2], room_ids[0], room_ids[1]]},
+)
+assert status == 200, (status, ordered)
+status, mismatch = call(
+    "PUT", f"households/{hid}/rooms/order", token=owner["token"],
+    body={"roomIds": [room_ids[0], room_ids[1]]},
+)
+assert status == 409 and mismatch["error"]["code"] in ("ROOM_SET_MISMATCH", "CONFLICT"), (status, mismatch)
+
+# owner 带成员退出 409（可读 message）
+status, conflict = call("POST", f"households/{hid}/leave", token=owner["token"])
+assert status == 409 and conflict["error"]["code"] == "CONFLICT", (status, conflict)
+assert conflict["error"]["message"], conflict["error"]
+
+# 移除成员 → 对方 404
+status, _ = call("DELETE", f"households/{hid}/members/{member['userId']}", token=owner["token"])
+assert status == 204, status
+status, _ = call("GET", f"households/{hid}", token=member["token"])
+assert status == 404, status
+
+# 留一条邀请码给数据库侧核验（确认只存哈希）
+status, invite3 = call("POST", f"households/{hid}/invitations", token=owner["token"], body={})
+assert status == 201, (status, invite3)
+
+print(json.dumps({
+    "householdId": hid,
+    "ownerToken": owner["token"],
+    "ownerUserId": owner["userId"],
+    "memberUserId": member["userId"],
+    "code": invite3["code"],
+}))
+PY
+hh="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["householdId"])' "$TMP_ROOT/artifacts/household.json")"
+invite_code="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["code"])' "$TMP_ROOT/artifacts/household.json")"
+owner_token="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["ownerToken"])' "$TMP_ROOT/artifacts/household.json")"
+
+# 直接查库：邀请码只存哈希、不存明文；移除成员后只剩 owner
+HASH_CHECK="$(docker exec "$PG_CONTAINER" psql -U "$PG_USER" -d "$PG_DB" -tAc \
+    "SELECT count(*) FROM household_invitations WHERE household_id = '$hh'::uuid AND length(code_hash) = 64 AND code_hash <> '$invite_code';" | tr -d '[:space:]')"
+[ "$HASH_CHECK" = "1" ] || fail "邀请码应只存 64 位哈希且不含明文（got=$HASH_CHECK）"
+MEMBERS_AFTER="$(docker exec "$PG_CONTAINER" psql -U "$PG_USER" -d "$PG_DB" -tAc \
+    "SELECT count(*) FROM household_members WHERE household_id = '$hh'::uuid;" | tr -d '[:space:]')"
+[ "$MEMBERS_AFTER" = "1" ] || fail "移除成员后应只剩 owner（got=$MEMBERS_AFTER）"
+
+# 移除后可退出，家庭与成员行清理
+LEAVE_CODE="$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+    -H "Authorization: Bearer $owner_token" "$BASE_URL/api/v1/households/$hh/leave")"
+[ "$LEAVE_CODE" = "204" ] || fail "移除成员后 owner 退出期望 204，实际 $LEAVE_CODE"
+MEMBERS_FINAL="$(docker exec "$PG_CONTAINER" psql -U "$PG_USER" -d "$PG_DB" -tAc \
+    "SELECT count(*) FROM household_members WHERE household_id = '$hh'::uuid;" | tr -d '[:space:]')"
+[ "$MEMBERS_FINAL" = "0" ] || fail "owner 退出后成员行应清空（got=$MEMBERS_FINAL）"
+log "PASS 真 Postgres：邀请码仅存哈希；移除成员 404；owner 退出 409→移除后可退出"
+
 step "匿名登录"
 LOGIN_JSON="$(curl -fsS -X POST "$BASE_URL/api/v1/auth/anonymous")"
 TOKEN="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])' <<<"$LOGIN_JSON")"

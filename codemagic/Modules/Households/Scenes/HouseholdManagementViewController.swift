@@ -1,13 +1,22 @@
 import UIKit
 
-/// 家庭管理：当前家庭与角色、成员列表、房间、创建 / 邀请 / 加入。
-/// 只读成员隐藏写入口；服务端 403 只展示可读提示。
+/// 家庭管理：当前家庭与角色、成员、邀请码、房间、创建 / 邀请 / 加入 / 改名 / 退出。
+/// owner 与 member 的入口按角色裁剪；服务端 403 / 409 只展示可读提示。
 final class HouseholdManagementViewController: UIViewController {
     private enum Section: Int, CaseIterable {
         case current
         case members
+        case invitations
         case rooms
         case actions
+    }
+
+    private enum RowAction {
+        case create
+        case join
+        case invitation
+        case rename
+        case leave
     }
 
     private let viewModel: HouseholdManagementViewModel
@@ -65,7 +74,17 @@ final class HouseholdManagementViewController: UIViewController {
     }
 
     @objc private func refresh() {
-        viewModel.reload()
+        viewModel.refresh()
+    }
+
+    /// 角色裁剪：member 不显示邀请码分区。
+    private var sections: [Section] {
+        viewModel.showsInvitations ? Section.allCases : Section.allCases.filter { $0 != .invitations }
+    }
+
+    private func sectionType(at index: Int) -> Section? {
+        guard index >= 0, index < sections.count else { return nil }
+        return sections[index]
     }
 
     // MARK: - Actions
@@ -112,6 +131,108 @@ final class HouseholdManagementViewController: UIViewController {
         navigationController?.pushViewController(controller, animated: true)
     }
 
+    private func presentRename() {
+        guard viewModel.canManageHousehold, let current = viewModel.current else {
+            ToastView.show(L10n.t("household.forbidden"), kind: .failure, in: self)
+            return
+        }
+        let alert = UIAlertController(
+            title: L10n.t("household.rename.title"),
+            message: nil,
+            preferredStyle: .alert
+        )
+        alert.addTextField { field in
+            field.text = current.name
+            field.placeholder = L10n.t("household.create.placeholder")
+            field.accessibilityIdentifier = "household.renameName"
+        }
+        alert.addAction(UIAlertAction(title: L10n.t("common.cancel"), style: .cancel))
+        alert.addAction(UIAlertAction(title: L10n.t("common.save"), style: .default) { [weak self, weak alert] _ in
+            let name = alert?.textFields?.first?.text ?? ""
+            self?.viewModel.renameHousehold(name: name) { [weak self] succeeded in
+                guard let self else { return }
+                if succeeded {
+                    ToastView.show(L10n.t("household.rename.done"), kind: .success, in: self)
+                } else {
+                    self.presentErrorIfNeeded()
+                }
+            }
+        })
+        present(alert, animated: true)
+    }
+
+    private func presentLeave() {
+        guard let current = viewModel.current, current.canLeave else {
+            ToastView.show(L10n.t("household.leave.personal"), kind: .info, in: self)
+            return
+        }
+        // owner 且还有其他成员：本地直接给出可读提示，避免只展示服务端 message。
+        if current.role == .owner && current.memberCount > 1 {
+            ToastView.show(L10n.t("household.leave.ownerConflict"), kind: .failure, in: self)
+            return
+        }
+        let isOwner = current.role == .owner
+        let alert = UIAlertController(
+            title: L10n.t("household.leave.title"),
+            message: isOwner ? L10n.t("household.leave.ownerMessage") : L10n.t("household.leave.memberMessage"),
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: L10n.t("common.cancel"), style: .cancel))
+        alert.addAction(UIAlertAction(title: L10n.t("household.leave.action"), style: .destructive) { [weak self] _ in
+            self?.viewModel.leaveHousehold { [weak self] succeeded in
+                guard let self else { return }
+                if succeeded {
+                    ToastView.show(L10n.t("household.leave.done"), kind: .success, in: self)
+                } else {
+                    self.presentErrorIfNeeded()
+                }
+            }
+        })
+        present(alert, animated: true)
+    }
+
+    private func confirmRemoveMember(_ member: HouseholdMember) {
+        let alert = UIAlertController(
+            title: L10n.t("household.member.remove.title"),
+            message: L10n.f("household.member.remove.message", member.shortID),
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: L10n.t("common.cancel"), style: .cancel))
+        alert.addAction(UIAlertAction(title: L10n.t("household.member.remove.action"), style: .destructive) {
+            [weak self] _ in
+            self?.viewModel.removeMember(member) { [weak self] succeeded in
+                guard let self else { return }
+                if succeeded {
+                    ToastView.show(L10n.t("household.member.remove.done"), kind: .success, in: self)
+                } else {
+                    self.presentErrorIfNeeded()
+                }
+            }
+        })
+        present(alert, animated: true)
+    }
+
+    private func confirmRevoke(_ invitation: HouseholdInvitationInfo) {
+        let alert = UIAlertController(
+            title: L10n.t("household.invitation.revoke.title"),
+            message: L10n.f("household.invitation.revoke.message", invitation.codeHashPrefix),
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: L10n.t("common.cancel"), style: .cancel))
+        alert.addAction(UIAlertAction(title: L10n.t("household.invitation.revoke.action"), style: .destructive) {
+            [weak self] _ in
+            self?.viewModel.revokeInvitation(id: invitation.id) { [weak self] succeeded in
+                guard let self else { return }
+                if succeeded {
+                    ToastView.show(L10n.t("household.invitation.revoke.done"), kind: .success, in: self)
+                } else {
+                    self.presentErrorIfNeeded()
+                }
+            }
+        })
+        present(alert, animated: true)
+    }
+
     private func presentSwitch() {
         let sheet = UIAlertController(title: L10n.t("household.switch.title"), message: nil, preferredStyle: .actionSheet)
         for household in viewModel.households {
@@ -151,38 +272,43 @@ final class HouseholdManagementViewController: UIViewController {
 
 extension HouseholdManagementViewController: UITableViewDataSource {
     func numberOfSections(in tableView: UITableView) -> Int {
-        Section.allCases.count
+        sections.count
     }
 
     func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        guard let section = Section(rawValue: section) else { return 0 }
+        guard let section = sectionType(at: section) else { return 0 }
         switch section {
         case .current:
             return viewModel.showsSwitcher ? 2 : 1
         case .members:
             return max(viewModel.members.count, 1)
+        case .invitations:
+            return viewModel.invitations.isEmpty ? 1 : viewModel.invitations.count
         case .rooms:
-            return max(viewModel.rooms.count, 0) + 1
+            return viewModel.rooms.count + 1
         case .actions:
-            return viewModel.canManageRooms ? 2 : 1
+            return actionRows.count
         }
     }
 
     func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
-        guard let section = Section(rawValue: section) else { return nil }
+        guard let section = sectionType(at: section) else { return nil }
         switch section {
         case .current: return L10n.t("household.current")
         case .members: return L10n.t("household.members")
+        case .invitations: return L10n.t("household.invitations")
         case .rooms: return L10n.t("household.rooms")
         case .actions: return nil
         }
     }
 
     func tableView(_ tableView: UITableView, titleForFooterInSection section: Int) -> String? {
-        guard let section = Section(rawValue: section) else { return nil }
+        guard let section = sectionType(at: section) else { return nil }
         switch section {
         case .current:
             return viewModel.hasHousehold ? nil : L10n.t("household.empty")
+        case .invitations:
+            return L10n.t("household.invitations.note")
         case .rooms:
             return viewModel.canManageRooms
                 ? L10n.t("household.rooms.serverNote")
@@ -200,7 +326,7 @@ extension HouseholdManagementViewController: UITableViewDataSource {
         cell.accessoryType = .none
         cell.selectionStyle = .none
 
-        guard let section = Section(rawValue: indexPath.section) else { return cell }
+        guard let section = sectionType(at: indexPath.section) else { return cell }
         switch section {
         case .current:
             if indexPath.row == 0 {
@@ -221,6 +347,21 @@ extension HouseholdManagementViewController: UITableViewDataSource {
                 let member = viewModel.members[indexPath.row]
                 configuration.text = "\(member.shortID) · \(member.role.displayName)"
                 configuration.secondaryText = "\(member.kindDisplayName) · \(Self.dateFormatter.string(from: member.joinedAt))"
+                cell.selectionStyle = .default
+            }
+        case .invitations:
+            if viewModel.invitations.isEmpty {
+                configuration.text = L10n.t("household.invitations.empty")
+                configuration.textProperties.color = AppTheme.Palette.secondaryText
+            } else {
+                let invitation = viewModel.invitations[indexPath.row]
+                // 只展示哈希前缀与状态，界面不可能出现明文。
+                configuration.text = "\(L10n.f("household.invitation.prefix", invitation.codeHashPrefix)) · \(invitation.status.displayName)"
+                configuration.secondaryText = L10n.f(
+                    "household.invitation.expires",
+                    Self.dateTimeFormatter.string(from: invitation.expiresAt)
+                )
+                cell.selectionStyle = .default
             }
         case .rooms:
             if indexPath.row == 0 {
@@ -233,8 +374,8 @@ extension HouseholdManagementViewController: UITableViewDataSource {
                 configuration.secondaryText = viewModel.roomSubtitle(for: room)
             }
         case .actions:
-            let actions = actionTitles()
-            configuration.text = actions[indexPath.row]
+            let action = actionRows[indexPath.row]
+            configuration.text = action.title
             configuration.textProperties.color = AppTheme.Palette.accent
             cell.selectionStyle = .default
         }
@@ -242,18 +383,33 @@ extension HouseholdManagementViewController: UITableViewDataSource {
         return cell
     }
 
-    private func actionTitles() -> [String] {
-        var titles = [L10n.t("household.create"), L10n.t("household.join")]
-        if viewModel.canManageRooms {
-            titles.insert(L10n.t("household.invitation.create"), at: 1)
+    /// 入口可见性：member 只看创建 / 加入；owner 额外有签发邀请码、改名、退出。
+    private var actionRows: [(action: RowAction, title: String)] {
+        var rows: [(RowAction, String)] = [
+            (.create, L10n.t("household.create")),
+            (.join, L10n.t("household.join")),
+        ]
+        if viewModel.canManageHousehold {
+            rows.insert((.invitation, L10n.t("household.invitation.create")), at: 1)
+            rows.append((.rename, L10n.t("household.rename")))
         }
-        return titles
+        if viewModel.current?.canLeave == true {
+            rows.append((.leave, L10n.t("household.leave")))
+        }
+        return rows
     }
 
     private static let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateStyle = .short
         formatter.timeStyle = .none
+        return formatter
+    }()
+
+    private static let dateTimeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .short
+        formatter.timeStyle = .short
         return formatter
     }()
 }
@@ -263,24 +419,47 @@ extension HouseholdManagementViewController: UITableViewDataSource {
 extension HouseholdManagementViewController: UITableViewDelegate {
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
-        guard let section = Section(rawValue: indexPath.section) else { return }
+        guard let section = sectionType(at: indexPath.section) else { return }
         switch section {
         case .current:
             if indexPath.row == 1 { presentSwitch() }
+        case .members:
+            guard !viewModel.members.isEmpty else { return }
+            let member = viewModel.members[indexPath.row]
+            guard viewModel.canRemove(member: member) else { return }
+            confirmRemoveMember(member)
+        case .invitations:
+            guard !viewModel.invitations.isEmpty else { return }
+            confirmRevoke(viewModel.invitations[indexPath.row])
         case .rooms:
             if indexPath.row == 0 { presentRoomManagement() }
         case .actions:
-            let title = actionTitles()[indexPath.row]
-            if title == L10n.t("household.create") {
-                presentCreateHousehold()
-            } else if title == L10n.t("household.invitation.create") {
-                presentInvitation()
-            } else {
-                presentJoin()
+            switch actionRows[indexPath.row].action {
+            case .create: presentCreateHousehold()
+            case .join: presentJoin()
+            case .invitation: presentInvitation()
+            case .rename: presentRename()
+            case .leave: presentLeave()
             }
-        case .members:
-            break
         }
+    }
+
+    /// 成员支持左滑移除（二次确认），与点击同一路径。
+    func tableView(
+        _ tableView: UITableView,
+        trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath
+    ) -> UISwipeActionsConfiguration? {
+        guard let section = sectionType(at: indexPath.section), section == .members,
+              !viewModel.members.isEmpty
+        else { return nil }
+        let member = viewModel.members[indexPath.row]
+        guard viewModel.canRemove(member: member) else { return nil }
+        let action = UIContextualAction(style: .destructive, title: L10n.t("household.member.remove.action")) {
+            [weak self] _, _, completion in
+            self?.confirmRemoveMember(member)
+            completion(true)
+        }
+        return UISwipeActionsConfiguration(actions: [action])
     }
 }
 

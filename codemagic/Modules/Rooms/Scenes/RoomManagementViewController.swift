@@ -24,12 +24,18 @@ final class RoomManagementViewController: UIViewController {
         title = L10n.t("room.manage")
         view.backgroundColor = Palette.canvas
 
-        navigationItem.rightBarButtonItem = UIBarButtonItem(
+        let createItem = UIBarButtonItem(
             image: UIImage(systemName: "plus"),
             primaryAction: UIAction { [weak self] _ in self?.presentCreateAlert() }
         )
-        navigationItem.rightBarButtonItem?.accessibilityLabel = L10n.t("room.create")
-        navigationItem.rightBarButtonItem?.isEnabled = viewModel.canManageRooms
+        createItem.accessibilityLabel = L10n.t("room.create")
+        createItem.isEnabled = viewModel.canManageRooms
+        let sortItem = UIBarButtonItem(
+            title: L10n.t("household.room.sort"),
+            primaryAction: UIAction { [weak self] _ in self?.toggleSorting() }
+        )
+        sortItem.accessibilityIdentifier = "room.sortToggle"
+        navigationItem.rightBarButtonItems = [createItem, sortItem]
         navigationItem.leftBarButtonItem = UIBarButtonItem(
             title: L10n.t("common.done"),
             primaryAction: UIAction { [weak self] _ in self?.dismiss(animated: true) }
@@ -62,7 +68,11 @@ final class RoomManagementViewController: UIViewController {
 
     private func reload() {
         tableView.reloadData()
-        navigationItem.rightBarButtonItem?.isEnabled = viewModel.canManageRooms
+        navigationItem.rightBarButtonItems?.first?.isEnabled = viewModel.canManageRooms
+        navigationItem.rightBarButtonItems?.last?.isEnabled = viewModel.canReorder
+        if !viewModel.canReorder {
+            setSorting(false)
+        }
         emptyView.isHidden = !viewModel.rooms.isEmpty
         emptyView.configure(
             symbolName: "house",
@@ -72,7 +82,31 @@ final class RoomManagementViewController: UIViewController {
         ) { [weak self] in
             self?.presentCreateAlert()
         }
+        presentNoticeIfNeeded()
         onChanged()
+    }
+
+    /// 上下移动 / 拖拽排序入口：进入编辑态后行可拖动，再次点击结束。
+    private func toggleSorting() {
+        guard viewModel.canReorder else {
+            ToastView.show(L10n.t("household.permission.memberNote"), kind: .info, in: self)
+            return
+        }
+        setSorting(!tableView.isEditing)
+    }
+
+    private func setSorting(_ editing: Bool) {
+        tableView.setEditing(editing, animated: true)
+        navigationItem.rightBarButtonItems?.last?.title = editing
+            ? L10n.t("household.room.sortDone")
+            : L10n.t("household.room.sort")
+    }
+
+    /// 409 重排冲突：服务层已重新拉取，这里只提示结果。
+    private func presentNoticeIfNeeded() {
+        guard let notice = viewModel.lastNotice else { return }
+        ToastView.show(notice, kind: .info, in: self)
+        viewModel.clearNotice()
     }
 
     private func presentCreateAlert() {
@@ -201,7 +235,7 @@ extension RoomManagementViewController: UITableViewDataSource {
         _ tableView: UITableView,
         trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath
     ) -> UISwipeActionsConfiguration? {
-        guard viewModel.canManageRooms else { return nil }
+        guard viewModel.canManageRooms, !tableView.isEditing else { return nil }
         let room = viewModel.rooms[indexPath.row]
         let delete = UIContextualAction(style: .destructive, title: L10n.t("common.delete")) { [weak self] _, _, completion in
             self?.confirmDelete(room)
@@ -209,11 +243,57 @@ extension RoomManagementViewController: UITableViewDataSource {
         }
         return UISwipeActionsConfiguration(actions: [delete])
     }
+
+    /// 非拖拽场景的上下移动入口（owner 可见）。
+    func tableView(
+        _ tableView: UITableView,
+        leadingSwipeActionsConfigurationForRowAt indexPath: IndexPath
+    ) -> UISwipeActionsConfiguration? {
+        guard viewModel.canReorder, !tableView.isEditing else { return nil }
+        var actions: [UIContextualAction] = []
+        if indexPath.row > 0 {
+            let up = UIContextualAction(style: .normal, title: L10n.t("household.room.moveUp")) {
+                [weak self] _, _, completion in
+                self?.viewModel.moveUp(index: indexPath.row)
+                completion(true)
+            }
+            up.backgroundColor = AppTheme.Palette.accent
+            actions.append(up)
+        }
+        if indexPath.row < viewModel.rooms.count - 1 {
+            let down = UIContextualAction(style: .normal, title: L10n.t("household.room.moveDown")) {
+                [weak self] _, _, completion in
+                self?.viewModel.moveDown(index: indexPath.row)
+                completion(true)
+            }
+            down.backgroundColor = AppTheme.Palette.secondaryText
+            actions.append(down)
+        }
+        return actions.isEmpty ? nil : UISwipeActionsConfiguration(actions: actions)
+    }
 }
 
 extension RoomManagementViewController: UITableViewDelegate {
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
+        guard !tableView.isEditing else { return }
         presentRenameAlert(for: viewModel.rooms[indexPath.row])
+    }
+
+    func tableView(_ tableView: UITableView, editingStyleForRowAt indexPath: IndexPath) -> UITableViewCell.EditingStyle {
+        .none
+    }
+
+    func tableView(_ tableView: UITableView, canMoveRowAt indexPath: IndexPath) -> Bool {
+        viewModel.canReorder && viewModel.rooms[indexPath.row].remoteID != nil
+    }
+
+    /// 拖拽落位后整段提交；失败 / 409 由服务层与 reload 统一处理。
+    func tableView(_ tableView: UITableView, moveRowAt sourceIndexPath: IndexPath, to destinationIndexPath: IndexPath) {
+        viewModel.moveRoom(from: sourceIndexPath.row, to: destinationIndexPath.row)
+    }
+
+    func tableView(_ tableView: UITableView, shouldIndentWhileEditingRowAt indexPath: IndexPath) -> Bool {
+        false
     }
 }

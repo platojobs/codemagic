@@ -124,6 +124,62 @@ final class HouseholdService {
         }
     }
 
+    /// 重命名家庭：仅 owner 可见入口，member 直接本地拒绝（不依赖服务端 403）。
+    func renameHousehold(
+        id: UUID,
+        name: String,
+        completion: @escaping (Result<Household, HouseholdAPIError>) -> Void
+    ) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            completion(.failure(.failure(.api(code: "BAD_REQUEST", statusCode: 400, message: ""))))
+            return
+        }
+        guard let token else {
+            completion(.failure(.unauthorized))
+            return
+        }
+        guard let household = try? householdStore.fetch(localID: id) else {
+            completion(.failure(.notFound))
+            return
+        }
+        guard household.canManageHousehold else {
+            completion(.failure(.forbidden))
+            return
+        }
+        api.updateHousehold(householdID: household.remoteID, name: trimmed, token: token) { [weak self] result in
+            guard let self else { return }
+            if case .success(let updated) = result {
+                try? self.householdStore.upsert(updated)
+                self.recordLog(L10n.f("household.log.renamed", updated.name))
+            }
+            completion(result)
+        }
+    }
+
+    /// 拉取家庭列表并落库（`memberCount` / `deviceCount` / `roomCount` 均以服务端为准）。
+    func refreshHouseholds(completion: ((Result<[Household], HouseholdAPIError>) -> Void)? = nil) {
+        guard let token else {
+            completion?(.failure(.unauthorized))
+            return
+        }
+        api.listHouseholds(token: token) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .failure(let error):
+                completion?(.failure(error))
+            case .success(let households):
+                try? self.householdStore.merge(households)
+                let stale = (try? self.householdStore.prune(keepingRemoteIDs: Set(households.map(\.remoteID)))) ?? []
+                for household in stale {
+                    try? self.roomStore.clearHousehold(householdID: household.id)
+                }
+                self.pickCurrentHousehold(from: households)
+                completion?(.success(households))
+            }
+        }
+    }
+
     func createInvitation(
         householdID: UUID,
         completion: @escaping (Result<HouseholdInvitation, HouseholdAPIError>) -> Void
@@ -160,6 +216,212 @@ final class HouseholdService {
                 self.recordLog(L10n.f("household.log.joined", household.name))
             }
             completion(result)
+        }
+    }
+
+    // MARK: - 成员 / 退出 / 邀请码管理
+
+    func invitations(
+        householdID: UUID,
+        completion: @escaping (Result<[HouseholdInvitationInfo], HouseholdAPIError>) -> Void
+    ) {
+        guard let token else {
+            completion(.failure(.unauthorized))
+            return
+        }
+        guard let household = try? householdStore.fetch(localID: householdID) else {
+            completion(.failure(.notFound))
+            return
+        }
+        guard household.canManageHousehold else {
+            completion(.failure(.forbidden))
+            return
+        }
+        api.invitations(householdID: household.remoteID, token: token, completion: completion)
+    }
+
+    func revokeInvitation(
+        householdID: UUID,
+        invitationID: String,
+        completion: @escaping (Result<Void, HouseholdAPIError>) -> Void
+    ) {
+        guard let token else {
+            completion(.failure(.unauthorized))
+            return
+        }
+        guard let household = try? householdStore.fetch(localID: householdID) else {
+            completion(.failure(.notFound))
+            return
+        }
+        guard household.canManageHousehold else {
+            completion(.failure(.forbidden))
+            return
+        }
+        api.revokeInvitation(
+            householdID: household.remoteID,
+            invitationID: invitationID,
+            token: token
+        ) { [weak self] result in
+            guard let self else { return }
+            if case .success = result {
+                self.recordLog(L10n.t("household.log.invitationRevoked"))
+            }
+            completion(result)
+        }
+    }
+
+    /// owner 移除成员。成功后会清掉该成员在本地留下的归属痕迹并刷新服务端计数。
+    func removeMember(
+        householdID: UUID,
+        userID: String,
+        completion: @escaping (Result<Void, HouseholdAPIError>) -> Void
+    ) {
+        guard let token else {
+            completion(.failure(.unauthorized))
+            return
+        }
+        guard let household = try? householdStore.fetch(localID: householdID) else {
+            completion(.failure(.notFound))
+            return
+        }
+        guard household.canManageHousehold else {
+            completion(.failure(.forbidden))
+            return
+        }
+        api.removeMember(householdID: household.remoteID, userID: userID, token: token) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .failure(let error):
+                completion(.failure(error))
+            case .success:
+                self.recordLog(L10n.t("household.log.memberRemoved"))
+                // 被移除的是当前用户：本地按「退出家庭」同样回落，避免继续显示已无权限的数据。
+                if userID == self.tokenStore.load()?.userID {
+                    self.applyLocalDeparture(household: household)
+                }
+                self.refreshHouseholds { _ in completion(.success(())) }
+            }
+        }
+    }
+
+    /// 退出家庭。owner 还有其他成员时服务端 409，统一转成可读提示。
+    func leaveHousehold(
+        householdID: UUID,
+        completion: @escaping (Result<Void, HouseholdAPIError>) -> Void
+    ) {
+        guard let token else {
+            completion(.failure(.unauthorized))
+            return
+        }
+        guard let household = try? householdStore.fetch(localID: householdID) else {
+            completion(.failure(.notFound))
+            return
+        }
+        guard household.canLeave else {
+            // 个人家庭不可退出。
+            completion(.failure(.conflict))
+            return
+        }
+        api.leaveHousehold(householdID: household.remoteID, token: token) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .failure(let error):
+                completion(.failure(error))
+            case .success:
+                self.recordLog(L10n.f("household.log.left", household.name))
+                self.applyLocalDeparture(household: household)
+                self.refreshHouseholds { _ in completion(.success(())) }
+            }
+        }
+    }
+
+    /// 本地回落：设备改挂个人家庭并清空房间；房间脱钩保留（不静默丢弃）；切回个人家庭。
+    private func applyLocalDeparture(household: Household) {
+        let personal = households().first(where: \.isPersonal)
+        let devices = (try? deviceStore.devices(householdID: household.id)) ?? []
+        for device in devices {
+            try? pendingStore.remove(deviceID: device.id)
+            try? deviceStore.setAssignment(
+                id: device.id,
+                householdID: personal?.id,
+                roomID: nil,
+                remoteRoomID: nil,
+                remoteHouseholdID: personal?.remoteID
+            )
+        }
+        try? roomStore.clearHousehold(householdID: household.id)
+        try? householdStore.delete(localID: household.id)
+        metadataStore.currentHouseholdRemoteID = personal?.remoteID
+    }
+
+    /// 整段重排：`orderedRoomIDs` 必须覆盖当前家庭全部已同步房间。409 时不改本地顺序。
+    func reorderRooms(
+        householdID: UUID,
+        orderedRoomIDs: [UUID],
+        completion: @escaping (Result<[Room], HouseholdAPIError>) -> Void
+    ) {
+        guard let household = try? householdStore.fetch(localID: householdID) else {
+            completion(.failure(.notFound))
+            return
+        }
+        guard household.canManageRooms else {
+            completion(.failure(.forbidden))
+            return
+        }
+        let currentRooms = ((try? roomStore.fetchAll(householdID: household.id)) ?? [])
+            .filter { !$0.isDeleted }
+        let remoteRooms = currentRooms.filter { $0.remoteID != nil }
+        let orderedRemoteIDs = orderedRoomIDs.compactMap { id in
+            remoteRooms.first(where: { $0.id == id })?.remoteID
+        }
+        guard let token, !household.remoteID.isEmpty else {
+            // 未登录 / 离线：只落本机顺序。
+            try? roomStore.applySortOrders(orderedRoomIDs, at: now())
+            completion(.success((try? roomStore.fetchAll(householdID: household.id)) ?? []))
+            return
+        }
+        guard orderedRemoteIDs.count == remoteRooms.count, Set(orderedRemoteIDs).count == remoteRooms.count else {
+            completion(.failure(.roomSetMismatch))
+            return
+        }
+        api.reorderRooms(householdID: household.remoteID, roomIDs: orderedRemoteIDs, token: token) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .failure(let error):
+                // 网络失败不落本地顺序，避免与服务端真值分叉；409 由界面重新拉取后整段重提。
+                completion(.failure(error))
+            case .success(let remotes):
+                for remote in remotes {
+                    _ = self.upsertRemoteRoom(remote, household: household)
+                }
+                let ids = remotes.compactMap { self.localRoomID(remoteID: $0.id) }
+                try? self.roomStore.applySortOrders(ids, at: self.now())
+                completion(.success(self.visibleRooms()))
+            }
+        }
+    }
+
+    /// 409 后重新拉取当前家庭房间（保留本地未同步房间）。
+    func refreshRooms(
+        householdID: UUID,
+        completion: @escaping (Result<[Room], HouseholdAPIError>) -> Void
+    ) {
+        guard let household = try? householdStore.fetch(localID: householdID) else {
+            completion(.failure(.notFound))
+            return
+        }
+        guard let token else {
+            completion(.success(visibleRooms()))
+            return
+        }
+        fetchRooms(token: token, household: household) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .failure(let error):
+                completion(error == .unauthorized ? .failure(error) : .success(self.visibleRooms()))
+            case .success:
+                completion(.success(self.visibleRooms()))
+            }
         }
     }
 

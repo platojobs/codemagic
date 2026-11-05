@@ -6,6 +6,7 @@ final class HouseholdManagementViewModel {
     private(set) var households: [Household] = []
     private(set) var current: Household?
     private(set) var members: [HouseholdMember] = []
+    private(set) var invitations: [HouseholdInvitationInfo] = []
     private(set) var rooms: [Room] = []
     private(set) var isRefreshing = false
     private(set) var errorMessage: String?
@@ -21,6 +22,10 @@ final class HouseholdManagementViewModel {
 
     var hasHousehold: Bool { current != nil }
     var canManageRooms: Bool { current?.canManageRooms ?? false }
+    var canManageHousehold: Bool { current?.canManageHousehold ?? false }
+    var canLeaveHousehold: Bool { current?.canLeave ?? false }
+    /// 邀请码列表 / 签发 / 撤销入口只对 owner 可见。
+    var showsInvitations: Bool { canManageHousehold }
     var showsSwitcher: Bool { households.count > 1 }
 
     var roleText: String {
@@ -31,7 +36,14 @@ final class HouseholdManagementViewModel {
         guard let current else { return L10n.t("household.empty") }
         let members = L10n.f("household.memberCount", String(describing: current.memberCount))
         let devices = L10n.f("household.deviceCount", String(describing: current.deviceCount))
-        return "\(current.role.displayName) · \(members) · \(devices)"
+        let rooms = L10n.f("household.roomCount", String(describing: current.roomCount))
+        return "\(current.role.displayName) · \(members) · \(devices) · \(rooms)"
+    }
+
+    /// member 不能移除成员；owner 也不能移除自己（owner 转移由服务端另行约束）。
+    func canRemove(member: HouseholdMember) -> Bool {
+        guard canManageHousehold else { return false }
+        return member.role != .owner
     }
 
     func reload() {
@@ -41,6 +53,17 @@ final class HouseholdManagementViewModel {
         errorMessage = nil
         onChange?()
         fetchMembers()
+        fetchInvitations()
+    }
+
+    /// 下拉刷新：先拉服务端家庭快照（真实计数），再刷新本地视图。
+    func refresh() {
+        isRefreshing = true
+        service.refreshHouseholds { [weak self] _ in
+            guard let self else { return }
+            self.isRefreshing = false
+            self.reload()
+        }
     }
 
     private func fetchMembers() {
@@ -65,6 +88,30 @@ final class HouseholdManagementViewModel {
         }
     }
 
+    private func fetchInvitations() {
+        guard showsInvitations, let current else {
+            invitations = []
+            return
+        }
+        service.invitations(householdID: current.id) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success(let items):
+                // 接口层只返回哈希前缀，界面不可能出现明文。
+                self.invitations = items.sorted { $0.expiresAt > $1.expiresAt }
+            case .failure(let error):
+                self.invitations = []
+                if error == .forbidden {
+                    // member 误触时静默降级，不打断页面。
+                    self.errorMessage = nil
+                } else {
+                    self.errorMessage = error.userMessage
+                }
+            }
+            self.onChange?()
+        }
+    }
+
     func switchHousehold(localID: UUID) {
         service.switchHousehold(localID: localID)
         reload()
@@ -82,6 +129,96 @@ final class HouseholdManagementViewModel {
             case .success:
                 self.errorMessage = nil
                 self.reload()
+                completion(true)
+            case .failure(let error):
+                self.errorMessage = error.userMessage
+                self.onChange?()
+                completion(false)
+            }
+        }
+    }
+
+    func renameHousehold(name: String, completion: @escaping (Bool) -> Void) {
+        guard let current else {
+            completion(false)
+            return
+        }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { completion(false); return }
+        service.renameHousehold(id: current.id, name: trimmed) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success:
+                self.errorMessage = nil
+                self.reload()
+                completion(true)
+            case .failure(let error):
+                self.errorMessage = error.userMessage
+                self.onChange?()
+                completion(false)
+            }
+        }
+    }
+
+    func removeMember(_ member: HouseholdMember, completion: @escaping (Bool) -> Void) {
+        guard let current, canRemove(member: member) else {
+            completion(false)
+            return
+        }
+        service.removeMember(householdID: current.id, userID: member.userID) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success:
+                self.errorMessage = nil
+                self.reload()
+                completion(true)
+            case .failure(let error):
+                self.errorMessage = error.userMessage
+                self.onChange?()
+                completion(false)
+            }
+        }
+    }
+
+    /// 退出家庭。owner 且还有其他成员时，界面先本地拦截并给出可读提示；
+    /// 服务端 409 与本地拦截使用同一文案。
+    func leaveHousehold(completion: @escaping (Bool) -> Void) {
+        guard let current else {
+            completion(false)
+            return
+        }
+        if current.role == .owner && current.memberCount > 1 {
+            errorMessage = L10n.t("household.leave.ownerConflict")
+            onChange?()
+            completion(false)
+            return
+        }
+        service.leaveHousehold(householdID: current.id) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success:
+                self.errorMessage = nil
+                self.reload()
+                completion(true)
+            case .failure(let error):
+                self.errorMessage = error.userMessage
+                self.onChange?()
+                completion(false)
+            }
+        }
+    }
+
+    func revokeInvitation(id: String, completion: @escaping (Bool) -> Void) {
+        guard let current else {
+            completion(false)
+            return
+        }
+        service.revokeInvitation(householdID: current.id, invitationID: id) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success:
+                self.errorMessage = nil
+                self.fetchInvitations()
                 completion(true)
             case .failure(let error):
                 self.errorMessage = error.userMessage
