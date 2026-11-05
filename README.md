@@ -20,9 +20,9 @@
 | 网络层 | 已实现（URLSession + Codable；设备/型号对齐 openapi 0.3.3；读数查询与 summary 按冻结的 0.4.0 契约） |
 | 同步 | **已实现**：匿名登录、增量拉取、批量推送（设备 ≤100/批 + 读数 ≤200/批、幂等键含读数）、冲突提示、tombstone、Keychain token、前后台 / BGTask 触发、断网累积补传 |
 | 自绘 RSSI + 自绘折线图 + 代码组装空状态 | 已实现（读数图表纯 `draw(_:)`，无第三方图表库） |
-| 单元测试 | **140 个用例，0 失败**（`** TEST SUCCEEDED **`，2026-11-05，Xcode 27.2 / iPhone 17 模拟器；含 18 条读数解析黄金用例） |
+| 单元测试 | **141 个用例，0 失败**（`** TEST SUCCEEDED **`，2026-11-05，Xcode 27.2 / iPhone 17 模拟器；含 18 条读数解析黄金用例与 1 条 30 天 pending 保留用例） |
 | 模拟器构建 | **通过**（`xcodebuild ... build`，`** BUILD SUCCEEDED **`） |
-| CI | **GitHub Actions 已实际运行 success**：v0.4.0 run [41941929495](https://github.com/platojobs/codemagic/actions/runs/41941929495)（macos-15 + Xcode 16.4），并行 `build-test`（122 单测）与 `e2e-contract`（106 项，0 SKIP）；`codemagic.yaml` 作为可选替代保留但未验证 |
+| CI | **GitHub Actions 已实际运行 success**：v0.4.1 run [41945052635](https://github.com/platojobs/codemagic/actions/runs/41945052635)（macos-15 + Xcode 16.4，tag 提交 `81d8578`），并行 `build-test`（140 单测）与 `e2e-contract`（106 项，0 SKIP）；`codemagic.yaml` 作为可选替代保留但未验证 |
 | 真机 BLE / 签名 | **未验证**：本机无真机与 Apple 开发者账号；读数采集与图表需真机 / 可穿戴设备验证（见第 9 节） |
 | 真实后端同步 | **契约已联调**：`scripts/e2e-contract.sh` 对本地 `PJGoIoT` main `7acab36`（`STORE=fixture`）跑 **106 项断言，全部 PASS**（含读数推送/倒序/summary/重复 id/NaN 400）；App 内同步 UI 仍需真机手动验证 |
 
@@ -98,7 +98,7 @@ Config/
 scripts/
 ├── e2e-contract.sh         # 启动本地 fixture 服务 + 运行联调 runner（CI 的 e2e-contract job 复用）
 └── e2e-contract.swift      # 独立 Swift 可执行 runner，真实 URLSession 直连 localhost
-codemagicTests/             # 140 个 XCTest 用例（含读数解析黄金用例）
+codemagicTests/             # 141 个 XCTest 用例（含读数解析黄金用例）
 docs/
 ├── architecture.md
 ├── consistency.md
@@ -284,12 +284,12 @@ cd /path/to/codemagic
 - Job `build-test`：`actions/checkout@v7` → 选择 Xcode（优先 `Xcode_16.4`）并打印 `xcodebuild -version` / 可用模拟器 → `xcodebuild build`（`generic/platform=iOS Simulator`）→ `xcodebuild test`（从 `xcrun simctl list devices available` 动态取首个 iPhone 模拟器 UDID）→ `actions/upload-artifact@v7` 上传 `*.xcresult`（`if: always()`）。
 - Job `e2e-contract`（与 build 并行）：`actions/checkout@v7` 拉本仓库 + `platojobs/PJGoIoT`（`repository` + `path: PJGoIoT`）→ `actions/setup-go@v7`（`go-version-file: PJGoIoT/go.mod`）→ `PJGOIOT_DIR=${{ github.workspace }}/PJGoIoT bash scripts/e2e-contract.sh`；失败时 `actions/upload-artifact@v7` 上传 `.build/e2e/` 日志。失败即红，无 `|| true`。
 - 两个 job 均使用 `CODE_SIGNING_ALLOWED=NO`，不需要证书与描述文件。
-- 当前真实运行：[run 41941929495](https://github.com/platojobs/codemagic/actions/runs/41941929495)（`v0.4.0` 代码提交 `4926edb`，push `main`），**success**（Xcode 16.4）：
-  - `Build & Test (iOS Simulator)` 3m47s，`** BUILD SUCCEEDED **` / `Executed 122 tests, with 0 failures` / `** TEST SUCCEEDED **`，`xcresult-41941929495.zip` 已上传；
-  - `E2E contract (PJGoIoT fixture)` 56s，`通过：106 项，跳过：0 项，失败：0 项` / `结论：PASS`（第 7 节 readings 19 项全部真实执行，无 SKIP）；
+- 当前真实运行：[run 41945052635](https://github.com/platojobs/codemagic/actions/runs/41945052635)（`v0.4.1` 代码提交 `81d8578`，push `main` + tag `v0.4.1`），**success**（Xcode 16.4）：
+  - `Build & Test (iOS Simulator)` 10m5s（含 macOS arm64 队列等待），`** BUILD SUCCEEDED **` / `Executed 140 tests, with 0 failures` / `** TEST SUCCEEDED **`，`xcresult-41945052635.zip` 已上传；
+  - `E2E contract (PJGoIoT fixture)` 51s，`通过：106 项，跳过：0 项，失败：0 项` / `结论：PASS`（第 7 节 readings 19 项全部真实执行，无 SKIP）；
   - 同 sha 的 main 与 tag 运行按 `concurrency: ios-${sha}` 去重，只保留一轮真实结果。
   - 全部 action 已升到 `checkout@v7` / `upload-artifact@v7` / `setup-go@v7`，**Node 20 弃用告警已消除**（仅剩 macOS arm64 队列容量提示）。
-- 上一轮记录：[run 41913477079](https://github.com/platojobs/codemagic/actions/runs/41913477079)（tag `v0.3.6`，81 单测 / 87 项 E2E，success）。
+- 上一轮记录：[run 41941929495](https://github.com/platojobs/codemagic/actions/runs/41941929495)（tag `v0.4.0`，122 单测 / 106 项 E2E，success）。
 - 失败与修复：首次 workflow 因 `run: |` 块内嵌的多行 Python 未随块缩进，YAML 解析失败（run 无任何 job 直接 failure）；改为单行 `simctl + grep/sed` 提取模拟器 UDID 后通过。本轮新增读数断言后，本地 e2e 因 ~100 次请求触发服务端限流（429），改为 fixture 启动时 `RATE_LIMIT_PER_MINUTE=0` 后稳定通过。
 - **计费**：macOS runner 按分钟计费且显著高于 Linux，因此该 workflow 只在 `main` 与 tag 触发、不跑 PR，并用 `concurrency` 按 sha 去重；单个提交一次运行约消耗 5–6 个 macOS 分钟。
 
@@ -328,14 +328,14 @@ cd /path/to/codemagic
 - 模拟器无真实蓝牙，状态为 `unsupported`；产品 / 市场 / 详情依赖网络，需运行包含 readings 链路的本地 Go 服务或已更新的 mock。
 - 已实现 GATT 服务发现与四个读数特征的 notify 订阅；**未实现特征写入 / OTA**，GATT 元数据仍来自 catalog。
 - 契约已用本地 fixture 服务端到端验证（106 项断言 PASS）；App 内的 Keychain token、BGTask 调度与真实网络环境仍需真机验证。
-- 后端 `PJGoIoT` 已合入 readings（main `7acab36`），但**尚未打 v0.4.0 tag**；iOS 本轮按冻结契约实现，CI 若 checkout 到无 readings 的后端，e2e 第 7 节会明确 SKIP。
+- 后端 `PJGoIoT` 已合入 readings（main `7acab36`，已打 tag `v0.4.0`）；iOS 按冻结契约实现，CI 若 checkout 到无 readings 的后端，e2e 第 7 节会明确 SKIP。
 - Release 签名与 App Store 上架未验证（无 Apple 开发者账号 / 证书）。
 
 ---
 
 ## 10. 版本记录
 
-- `v0.4.1`：读数解析黄金用例两端对齐（`MARKETING_VERSION 0.4.1` / build 12，tag `v0.4.1`）。新增 `codemagicTests/ReadingsGoldenTests.swift` 18 个用例（心率 / 电池 / 温度 / NUS / 空字节）；`docs/consistency.md` 新增 3.8「读数解析黄金用例」章节，声明两端共用同一张表；单测 140 个。核对发现表中 `00 4A → 20.0` 与 IEEE-754 binary16 不符（`0x4A00` = 12.0，20.0 对应 `0x4D00`），实现未硬编码并在文档脚注标注。实现行为无变更。
+- `v0.4.1`：读数解析黄金用例两端对齐（`MARKETING_VERSION 0.4.1` / build 12，tag `v0.4.1`）。新增 `codemagicTests/ReadingsGoldenTests.swift` 18 个用例（心率 / 电池 / 温度 / NUS / 空字节）；`docs/consistency.md` 新增 3.8「读数解析黄金用例」章节，声明两端共用同一张表；复核 7 天清理只删已同步记录，补「30 天前 pending 清理后仍在」用例；单测 141 个。核对发现表中 `00 4A → 20.0` 与 IEEE-754 binary16 不符（`0x4A00` = 12.0，20.0 对应 `0x4D00`），实现按真实半精度解码、未硬编码，两条位型均有用例并在文档脚注标注。实现行为无变更。
 - `v0.4.0`：接入设备读数链路（`MARKETING_VERSION 0.4.0` / build 11，tag `v0.4.0`）。连接后订阅心率 `0x2A37` / 电量 `0x2A19` / 温度 `0x2A6E` / Nordic UART TX，四个独立解析器（失败静默丢弃 + 本地「读数」日志）；SQLite 迁移 **v5** 新增 `readings` 表并做 7 天保留清理；读数并入 `/sync/push`（≤200/批，按 `id` 幂等，幂等键含读数）；设备详情新增「数据」区（真实指标选择 + 最近 60 点自绘折线图 + 24h 汇总 + 最近记录 + 离线标注 + 三种真实空状态）；单测 122 个，E2E 106 项（新增 19 项读数断言）。后端 `PJGoIoT` 使用当前 main（尚未打 v0.4.0 tag）。
 - `v0.3.6`：对齐 `openapi.yaml` **0.3.3**（`MARKETING_VERSION 0.3.6` / build 10，tag `v0.3.6`）。`UserDevice` 新增 `advertisedName`，本地迁移 **v4** 区分用户别名与广播名；`alias` / `advertisedName` / `group` 采用 `Patch` 三态（未修改省略、`""` 显式清除、具体值上报），清空分组上报 `"group": ""` 且再次同步不复活；缺省字段不参与 LWW 与幂等哈希；冲突响应缺省字段按 absent 解析；单测 81 个，E2E 87 项（新增 3.7 的 16 项断言）。
 - `v0.3.5`：CI 与 Android 对齐（`MARKETING_VERSION 0.3.5` / build 9，tag `v0.3.5`）。`actions/checkout` / `upload-artifact` / `setup-go` 全部升到 **v7**，消除 Node 20 弃用告警；新增并行 `e2e-contract` job（checkout `PJGoIoT` + `setup-go` 读 go.mod + 运行 `scripts/e2e-contract.sh`，失败上传日志）；`concurrency` 改为按 `github.sha` 分组去重；真实 run 41906015761 两个 job 均 success（74 单测 + 71 项 E2E）。

@@ -4,7 +4,7 @@
 
 - Android 侧口径以 `PKotlinApp/README.md` 与 `PJGoIoT/api/openapi.yaml` 为准。
 - iOS 侧以本仓库 `README.md`、`docs/architecture.md` 为准。
-- 后端 `openapi.yaml` 当前标注版本 **0.3.3**，但 `PJGoIoT` main 已合入读数链路（提交 `292e493`，**尚未打 v0.4.0 tag**）。iOS v0.4.1（`MARKETING_VERSION 0.4.1`，build 12）按冻结的 readings 契约实现：推送 `readings`（≤500/批、按 `id` 幂等）、查询 `readings`（倒序、cursor）、`readings/summary`（24h min/max/avg/last）；服务端保留 90 天，客户端本地保留 7 天。v0.4.1 起两端读数解析以 **3.8 黄金用例表**为唯一口径。0.3.3 的 `advertisedName` 与三态语义保持不变。
+- 后端 `openapi.yaml` 当前标注版本 **0.3.3**，但 `PJGoIoT` main 已合入读数链路并打了 tag **`v0.4.0`**（提交 `292e493`，tag 指向 `7acab36`）。iOS v0.4.1（`MARKETING_VERSION 0.4.1`，build 12）按冻结的 readings 契约实现：推送 `readings`（≤500/批、按 `id` 幂等）、查询 `readings`（倒序、cursor）、`readings/summary`（24h min/max/avg/last）；服务端保留 90 天，客户端本地保留 7 天。v0.4.1 起两端读数解析以 **3.8 黄金用例表**为唯一口径。0.3.3 的 `advertisedName` 与三态语义保持不变。
 
 ---
 
@@ -210,7 +210,7 @@ iOS 端不再存在“历史端点”调用；唯一保留的旧路径 `/api/v1/
 - 无 token 返回 401 `UNAUTHORIZED`；第二用户访问他人设备（按 MAC 与复合键）均返回 404 `NOT_FOUND`；
 - 读数：推送 3 条（`appliedReadings=3`）→ 查询按 `recordedAt` 倒序 → `summary` 的 count/min/max/avg/last/unit/window 正确 → 重复 id 推送 `appliedReadings=0`、`skippedReadings=3` → 非法 `NaN` 返回 400。
 
-当前共 **106 项断言全部通过**（v0.4.0 联调记录，后端 `PJGoIoT` main `7acab36`，尚未打 v0.4.0 tag）。
+当前共 **106 项断言全部通过**（v0.4.0 联调记录，后端 `PJGoIoT` main `7acab36`，已打 tag `v0.4.0`）。
 
 运行记录见 `README.md` 第 4.2 节；该脚本已接入 GitHub Actions `ios.yml` 的 `e2e-contract` job（macOS runner，与 build 并行）。v0.4.0 实际 CI 运行 [41941929495](https://github.com/platojobs/codemagic/actions/runs/41941929495) 中 `e2e-contract` 56s、106 项全 PASS（0 SKIP），`build-test` 3m47s、122 单测全绿。若 CI checkout 到的后端尚未包含 readings，第 7 节会输出 `[SKIP]`（能力门控，不计通过、不伪造 PASS），其余断言照常执行。
 

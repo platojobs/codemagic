@@ -287,6 +287,29 @@ final class ReadingsStoreTests: XCTestCase {
         XCTAssertTrue(try store.fetchPending().contains { $0.id == pendingOld.id })
     }
 
+    /// 离线超过 7 天（甚至 30 天）的 pending 读数不得被清理，必须留待补传。
+    func testPruneKeepsThirtyDayOldPending() throws {
+        let deviceID = UUID()
+        let now = Date()
+        let thirtyDaysAgo = now.addingTimeInterval(-30 * 24 * 60 * 60)
+
+        let syncedOld = DeviceReading(
+            deviceID: deviceID, metric: .heartRate, value: 70, unit: "bpm",
+            recordedAt: thirtyDaysAgo, syncState: .synced
+        )
+        let pendingOld = DeviceReading(
+            deviceID: deviceID, metric: .heartRate, value: 88, unit: "bpm",
+            recordedAt: thirtyDaysAgo, syncState: .pending
+        )
+        try store.insert(syncedOld)
+        try store.insert(pendingOld)
+
+        let removed = try store.prune(olderThan: now.addingTimeInterval(-7 * 24 * 60 * 60))
+        XCTAssertEqual(removed, 1, "只删已同步的过期记录")
+        XCTAssertEqual(try store.count(deviceID: deviceID), 1)
+        XCTAssertEqual(try store.fetchPending().map(\.id), [pendingOld.id], "30 天前的 pending 仍在")
+    }
+
     /// 模拟 v4 数据库（无 readings 表）升级到 v5。
     func testMigrationFromV4CreatesReadingsTable() throws {
         let path = testDatabase.directory.appendingPathComponent("legacy-v4.sqlite").path

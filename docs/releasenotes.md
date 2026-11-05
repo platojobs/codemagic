@@ -4,8 +4,8 @@
 
 | Tag | MARKETING_VERSION | Build | 日期 | 对齐后端 |
 | --- | --- | --- | --- | --- |
-| `v0.4.1` | 0.4.1 | 12 | 2026-11-05 | readings 契约（main `7acab36`，未打 tag） |
-| `v0.4.0` | 0.4.0 | 11 | 2026-11-05 | readings 契约（main `7acab36`，未打 tag） |
+| `v0.4.1` | 0.4.1 | 12 | 2026-11-05 | PJGoIoT v0.4.0（tag `7acab36`） |
+| `v0.4.0` | 0.4.0 | 11 | 2026-11-05 | PJGoIoT main `7acab36`（当时未打 tag） |
 | `v0.3.6` | 0.3.6 | 10 | 2026-11-05 | 0.3.3 |
 | `v0.3.5` | 0.3.5 | 9 | 2026-11-05 | 0.3.2 |
 | `v0.3.4` | 0.3.4 | 8 | 2026-11-05 | 0.3.2 |
@@ -31,8 +31,12 @@
 - 唯一差异为表中 `00 4A → 20.0`：按 IEEE-754 binary16，`0x4A00` = 1.5 × 2³ = **12.0**，20.0 对应 `0x4D00`（字节 `00 4D`）。实现未做硬编码，两种位型均固化为用例；已在文档脚注标注，供 Android 侧修正期望值。
 
 ### 测试
-- 单测 **140 个**（新增 18 个黄金用例），`xcodebuild build` / `xcodebuild test` 全绿。
-- 本地 e2e：`通过：106 项，跳过：0 项，失败：0 项` / `结论：PASS`（`PJGoIoT` main `7acab36`，`STORE=fixture`）。
+- 单测 **141 个**（新增 18 个黄金用例 + 1 个「30 天前 pending 清理后仍在」用例），`xcodebuild build` / `xcodebuild test` 全绿。
+- 本地 e2e：`通过：106 项，跳过：0 项，失败：0 项` / `结论：PASS`（`PJGoIoT` v0.4.0 `7acab36`，`STORE=fixture`）。
+- CI：run [41945052635](https://github.com/platojobs/codemagic/actions/runs/41945052635)（tag 提交 `81d8578`）`build-test` 140 单测、`e2e-contract` 106 项均 PASS；后续追加 pending 保留用例提交由 CI 再验证（141 单测）。
+
+### 复核
+- 本地 7 天清理只删 `sync_state = synced` 的过期读数；离线超过 7 天（含 30 天）的 `pending` 保留至补传，已用单测固化。
 
 ---
 
