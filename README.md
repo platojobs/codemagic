@@ -23,7 +23,7 @@
 | 自绘 RSSI + 自绘折线图 + 代码组装空状态 | 已实现（读数图表纯 `draw(_:)`，无第三方图表库） |
 | 单元测试 | **188 个用例，0 失败**（`** TEST SUCCEEDED **`，2026-11-05，Xcode 27.2 / iPhone 17 模拟器；含刷新去抖/退避、待同步降级、通知节流与恢复、CSV 分页/转义、设备搜索排序筛选、深色语义色扫描） |
 | 模拟器构建 | **通过**（`xcodebuild ... build`，`** BUILD SUCCEEDED **`） |
-| CI | **GitHub Actions 已实际运行 success**：v0.5.0 run [41949724232](https://github.com/platojobs/codemagic/actions/runs/41949724232)（macos-15 + Xcode 16.4，提交 `7ce9539`），并行 `build-test`（157 单测）与 `e2e-contract`（123 项，0 SKIP）；`codemagic.yaml` 作为可选替代保留但未验证 |
+| CI | **GitHub Actions 已实际运行 success**：v0.6.0 run [41956298244](https://github.com/platojobs/codemagic/actions/runs/41956298244)（macos-15 + Xcode 16.4，提交 `434ee0c`），并行 `build-test`（188 单测）与 `e2e-contract`（123 项，0 SKIP）；`codemagic.yaml` 作为可选替代保留但未验证 |
 | 真机 BLE / 签名 | **未验证**：本机无真机与 Apple 开发者账号；读数采集与图表需真机 / 可穿戴设备验证（见第 9 节） |
 | 真实后端同步 | **契约已联调**：`scripts/e2e-contract.sh` 对本地 `PJGoIoT` **v0.5.1**（`STORE=fixture`）跑 **123 项断言，全部 PASS**（含读数推送/倒序/summary/重复 id/NaN 400/series/metrics/bucket 400）；App 内同步 UI 仍需真机手动验证 |
 
@@ -300,12 +300,13 @@ cd /path/to/codemagic
 - Job `build-test`：`actions/checkout@v7` → 选择 Xcode（优先 `Xcode_16.4`）并打印 `xcodebuild -version` / 可用模拟器 → `xcodebuild build`（`generic/platform=iOS Simulator`）→ `xcodebuild test`（从 `xcrun simctl list devices available` 动态取首个 iPhone 模拟器 UDID）→ `actions/upload-artifact@v7` 上传 `*.xcresult`（`if: always()`）。
 - Job `e2e-contract`（与 build 并行）：`actions/checkout@v7` 拉本仓库 + `platojobs/PJGoIoT`（`repository` + `path: PJGoIoT`）→ `actions/setup-go@v7`（`go-version-file: PJGoIoT/go.mod`）→ `PJGOIOT_DIR=${{ github.workspace }}/PJGoIoT bash scripts/e2e-contract.sh`；失败时 `actions/upload-artifact@v7` 上传 `.build/e2e/` 日志。失败即红，无 `|| true`。
 - 两个 job 均使用 `CODE_SIGNING_ALLOWED=NO`，不需要证书与描述文件。
-- 当前真实运行：[run 41949724232](https://github.com/platojobs/codemagic/actions/runs/41949724232)（`v0.5.0` 代码提交 `7ce9539`，push `main` + tag `v0.5.0`），**success**（Xcode 16.4）：
-  - `Build & Test (iOS Simulator)` 4m3s，`** BUILD SUCCEEDED **` / `Executed 157 tests, with 0 failures` / `** TEST SUCCEEDED **`，`xcresult-41949724232.zip` 已上传；
-  - `E2E contract (PJGoIoT fixture)` 44s，`通过：123 项，跳过：0 项，失败：0 项` / `结论：PASS`（第 7 节 readings + series/metrics 36 项全部真实执行，无 SKIP）；
+- 当前真实运行：[run 41956298244](https://github.com/platojobs/codemagic/actions/runs/41956298244)（`v0.6.0` 代码提交 `434ee0c`，push `main`），**success**（Xcode 16.4）：
+  - `Build & Test (iOS Simulator)` **success**，`** BUILD SUCCEEDED **` / `Executed 188 tests, with 0 failures` / `** TEST SUCCEEDED **`，`xcresult-41956298244.zip` 已上传；
+  - `E2E contract (PJGoIoT fixture)` **success**，`通过：123 项，跳过：0 项，失败：0 项` / `结论：PASS`（本轮无 HTTP 契约变更）；
   - 同 sha 的 main 与 tag 运行按 `concurrency: ios-${sha}` 去重，只保留一轮真实结果。
   - 全部 action 已升到 `checkout@v7` / `upload-artifact@v7` / `setup-go@v7`，**Node 20 弃用告警已消除**（仅剩 macOS arm64 队列容量提示）。
-- 上一轮记录：[run 41945052635](https://github.com/platojobs/codemagic/actions/runs/41945052635)（`v0.4.1` 代码提交 `81d8578`，141 单测 / 106 项 E2E，success）；再往前：[run 41941929495](https://github.com/platojobs/codemagic/actions/runs/41941929495)（tag `v0.4.0`，122 单测 / 106 项 E2E，success）。
+- 上一轮记录：[run 41950630027](https://github.com/platojobs/codemagic/actions/runs/41950630027)（`v0.5.0` 文档提交 `4a20dfa`，157 单测 / 123 项 E2E，success）；更早：[run 41945052635](https://github.com/platojobs/codemagic/actions/runs/41945052635)（`v0.4.1`，141 单测 / 106 项 E2E，success）。
+- 本轮修复记录：首次 run 41955082837 在英文 CI locale 下因测试用中文别名参与 `localizedCaseInsensitiveCompare` 产生乱序（`Executed 188` 中 1 失败），改为 ASCII 别名后重跑 41956298244 全绿；CI 自身无代码问题。
 - 失败与修复：首次 workflow 因 `run: |` 块内嵌的多行 Python 未随块缩进，YAML 解析失败（run 无任何 job 直接 failure）；改为单行 `simctl + grep/sed` 提取模拟器 UDID 后通过。本轮新增读数断言后，本地 e2e 因 ~100 次请求触发服务端限流（429），改为 fixture 启动时 `RATE_LIMIT_PER_MINUTE=0` 后稳定通过。
 - **计费**：macOS runner 按分钟计费且显著高于 Linux，因此该 workflow 只在 `main` 与 tag 触发、不跑 PR，并用 `concurrency` 按 sha 去重；单个提交一次运行约消耗 5–6 个 macOS 分钟。
 
@@ -351,6 +352,7 @@ cd /path/to/codemagic
 
 ## 10. 版本记录
 
+- `v0.6.0`：请求节流、本地降级与四项产品功能（`MARKETING_VERSION 0.6.0` / build 14，tag `v0.6.0`）。详情页读数 notify 只本地重绘，远端刷新 800ms 去抖合并，不可见/后台不请求，失败指数退避 ≤5 分钟；服务端指标为空且本地有待同步读数时用本地指标与 UTC 网格并标注「待同步：本地数据」。新增阈值告警本地通知（首次使用授权、1/5/30 分钟节流、恢复通知、点击进详情、「我的」真实开关与权限引导）、CSV 导出（7 天内本地 / 更长服务端分页 ≤5 万条、UTF-8 BOM、ISO8601 UTC、RFC 4180 转义、临时文件分享后删除、真实进度与重试）、设备列表搜索/持久化排序/分组筛选/双空状态、外观三态与动态语义色（AccentColor 增 dark 变体）。单测 188 个（新增 31 个），E2E 123 项（无契约变更）。后端 `PJGoIoT` v0.5.1。
 - `v0.5.0`：设备详情「数据」区升级为长周期可切换图表（`MARKETING_VERSION 0.5.0` / build 13，tag `v0.5.0`）。新增 `ReadingsRange`（1 小时 / 24 小时 / 7 天 / 30 天，默认 24 小时）映射 `1m` / `1h` / `1h` / `1d`，切换即时重绘并重新查询 `readings/series`（`from` / `to` 为 UTC RFC3339）；X 轴按桶 `start` 真实时间比例定位，缺口处折线断开（不跨缺口连线），`avg` 折线叠加 `min`–`max` 区间带，Y 轴按区间 min/max 自适应并带单位；几何独立在 `ReadingsChartGeometry`。指标清单改用 `readings/metrics`（`count` / `lastAt` / `unit`），展示「指标名 · N 条」，单位随指标同步；离线按同一 UTC 网格聚合本地数据，30 天区间标注「离线：仅本地 7 天数据」。单测 157 个（新增 16 个），E2E 123 项（新增 17 项：series/metrics/空区间/非法 bucket）。后端 `PJGoIoT` v0.5.1。
 - `v0.4.1`：读数解析黄金用例两端对齐（`MARKETING_VERSION 0.4.1` / build 12，tag `v0.4.1`）。新增 `codemagicTests/ReadingsGoldenTests.swift` 18 个用例（心率 / 电池 / 温度 / NUS / 空字节）；`docs/consistency.md` 新增 3.8「读数解析黄金用例」章节，声明两端共用同一张表；复核 7 天清理只删已同步记录，补「30 天前 pending 清理后仍在」用例；单测 141 个。核对发现表中 `00 4A → 20.0` 与 IEEE-754 binary16 不符（`0x4A00` = 12.0，20.0 对应 `0x4D00`），实现按真实半精度解码、未硬编码，两条位型均有用例并在文档脚注标注。实现行为无变更。
 - `v0.4.0`：接入设备读数链路（`MARKETING_VERSION 0.4.0` / build 11，tag `v0.4.0`）。连接后订阅心率 `0x2A37` / 电量 `0x2A19` / 温度 `0x2A6E` / Nordic UART TX，四个独立解析器（失败静默丢弃 + 本地「读数」日志）；SQLite 迁移 **v5** 新增 `readings` 表并做 7 天保留清理；读数并入 `/sync/push`（≤200/批，按 `id` 幂等，幂等键含读数）；设备详情新增「数据」区（真实指标选择 + 最近 60 点自绘折线图 + 24h 汇总 + 最近记录 + 离线标注 + 三种真实空状态）；单测 122 个，E2E 106 项（新增 19 项读数断言）。后端 `PJGoIoT` 使用当前 main（尚未打 v0.4.0 tag）。
