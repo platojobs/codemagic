@@ -31,6 +31,7 @@ final class MainTabBarController: UITabBarController {
                     scanLogStore: environment.scanLogStore,
                     readingsStore: environment.readingsStore,
                     scenarioStore: environment.scenarioStore,
+                    roomStore: environment.roomStore,
                     executor: environment.scenarioExecutor
                 ),
                 environment: environment

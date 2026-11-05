@@ -66,6 +66,7 @@ final class DeviceDetailViewModel {
     private let readingsService: ReadingsAPIServicing
     private let readingsIngestor: ReadingsIngestor?
     private let exportService: ReadingsExportService
+    private let roomStore: RoomStore?
     private var refreshPolicy: ReadingsRefreshPolicy
     private var remoteRefreshWorkItem: DispatchWorkItem?
     /// 详情页是否可见；不可见时不发任何远端读数请求。
@@ -83,6 +84,7 @@ final class DeviceDetailViewModel {
         readingsService: ReadingsAPIServicing = UnavailableReadingsAPI(),
         readingsIngestor: ReadingsIngestor? = nil,
         exportService: ReadingsExportService? = nil,
+        roomStore: RoomStore? = nil,
         refreshPolicy: ReadingsRefreshPolicy = ReadingsRefreshPolicy()
     ) {
         self.device = device
@@ -97,6 +99,7 @@ final class DeviceDetailViewModel {
             readingsStore: readingsStore,
             readingsService: readingsService
         )
+        self.roomStore = roomStore
         self.refreshPolicy = refreshPolicy
     }
 
@@ -219,6 +222,33 @@ final class DeviceDetailViewModel {
         device.updatedAt = Date()
         device.syncState = .pending
         try? savedDeviceStore.upsert(device)
+    }
+
+    // MARK: - Rooms
+
+    var canChangeRoom: Bool { roomStore != nil }
+
+    var roomName: String {
+        guard let roomID = device.roomID, let room = availableRooms().first(where: { $0.id == roomID }) else {
+            return L10n.t("room.unassigned")
+        }
+        return room.name
+    }
+
+    func availableRooms() -> [Room] {
+        (try? roomStore?.fetchAll()) ?? []
+    }
+
+    /// 移入 / 移出房间：仅改本机 `room_id`，不置同步状态。
+    func updateRoom(_ roomID: UUID?) {
+        guard let roomStore else { return }
+        do {
+            try savedDeviceStore.setRoom(id: device.id, roomID: roomID)
+            device.roomID = roomID
+            onChange?()
+        } catch {
+            notice = L10n.f("room.moveFailed", String(describing: error))
+        }
     }
 
     // MARK: - Readings

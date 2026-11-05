@@ -457,6 +457,17 @@ iOS 用例固化在 `codemagicTests/ReadingsGoldenTests.swift`；新增特征或
 - **动态字体**：字号统一 `AppText`（`UIFontMetrics`）+ `applyFont(_:)`（`adjustsFontForContentSizeCategory = true`），禁止新增固定 `UIFont.systemFont(ofSize:)` 字号；表格行高 `automaticDimension`；图表 Y 轴左侧留白按当前字号测量，AX 字号下保持 3 个刻度且不与绘图区重叠。
 - **不改变契约**：本节不涉及网络字段，`openapi 0.7.0` 保持原样；E2E 契约套件不变。
 
+### 3.16 房间归属与首页分区（v0.13.0，仅本机）
+
+- **数据模型**：SQLite **v8** 新增 `rooms(id TEXT PK, name TEXT NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0, remote_id TEXT, created_at REAL, updated_at REAL)`；`saved_devices` 增加可空 `room_id TEXT`（`NULL` = 未分配）。原 `group_name` 保留为兼容字段，不再参与首页分区。
+- **房间仅本机**：`rooms` 与 `room_id` **不进入** `GET /sync/changes` 与 `POST /sync/push`；同步的 `PushDevice` 字段不变。`setRoom` 只执行 `UPDATE saved_devices SET room_id = ?`，不修改 `sync_state` / `updated_at`，不触发 pending。
+- **远端映射预留**：`rooms.remote_id` 可空，暂不使用；后端若提供家庭 / 房间接口，可按本地 `id` ↔ `remote_id` 增量对接，无需再改表结构。
+- **迁移与兼容**：v7→v8 只建表 / 加列 / 建索引，不重写旧数据；旧设备升级后 `room_id = NULL`，即进入「未分配」，`group_name` 原值保留（`RoomTests.testMigrationFromV7KeepsDevicesAndAddsRoomsAndRoomColumn`）。
+- **写入一致性**：`SavedDeviceStore.upsert` 的列清单必须包含 `room_id`，否则 `INSERT OR REPLACE` 删行重插会把归属重置为 `NULL`（`RoomTests.testRoomAssignmentSurvivesDeviceUpsert`）。
+- **删除语义**：删除房间先逐台 `setRoom(nil)` 再 `DELETE FROM rooms`；设备、读数、连接状态均不删除，全部回到「未分配」。需二次确认。
+- **首页分区口径**：房间按 `sort_order, created_at` 升序；未知 / 空 `room_id` 归「未分配」且固定最后。搜索只匹配设备字段（别名 / 广播名 / 型号 / 标识符），有关键字时隐藏无命中的房间；排序（最近出现 / 名称 / 信号 / 添加时间）只在房间内生效，不改变分区顺序。
+- **不改变契约**：本节不涉及网络字段，`openapi 0.7.0` 保持原样；E2E 契约套件不变。
+
 ## 4. 错误码
 
 客户端错误码用于日志、空状态副标题与问题反馈，**两端含义一致**：
@@ -567,18 +578,20 @@ iOS 迁移版本：
 - v5（v0.4.0）：新增 `readings` 表（`id`, `device_id`, `metric`, `value`, `unit`, `recorded_at`, `sync_state`），索引 `(device_id, metric, recorded_at DESC)` 支撑最近 60 点与 7 天清理。
 - v6（v0.8.0）：新增仅本机的 `scenarios` 表（`id`, `name`, `actions` JSON, `created_at`, `updated_at`），无同步字段。
 - v7（v0.11.0）：`rules` 增加 `metric TEXT`（可空）、`comparison TEXT NOT NULL DEFAULT 'lte'`、`reading_threshold REAL NOT NULL DEFAULT 0`、`consecutive INTEGER NOT NULL DEFAULT 1`；旧行回填为 `metric = NULL` / `lte` / `1`，仍按原 RSSI / 断开条件生效。
+- v8（v0.13.0）：新增仅本机的 `rooms` 表（`id`, `name`, `sort_order`, `remote_id`, `created_at`, `updated_at`）并为 `saved_devices` 增加可空 `room_id TEXT`（NULL = 未分配）；旧数据不重写，`group_name` 保留为兼容字段。
 
 iOS 表结构（`codemagic.sqlite`）：
 
 | 表 | 关键字段 |
 | --- | --- |
-| `saved_devices` | `id, peripheral_id, platform, external_id, name, remark, group_name, mac, vendor, device_type, firmware_version, last_seen_at, created_at, updated_at, deleted_at, sync_state` |
+| `saved_devices` | `id, peripheral_id, platform, external_id, name, remark, group_name, room_id, mac, vendor, device_type, firmware_version, last_seen_at, created_at, updated_at, deleted_at, sync_state` |
 | `rules` | `id, name, trigger, threshold, metric, comparison, reading_threshold, consecutive, device_id, enabled, created_at, updated_at, deleted_at, sync_state` |
 | `scan_logs` | `id, category, level, message, created_at, updated_at, deleted_at, sync_state` |
 | `recent_devices` | `peripheral_id, name, rssi, last_seen_at, updated_at, deleted_at, sync_state` |
 | `device_info_cache` | `peripheral_id, payload(JSON), fetched_at, updated_at, deleted_at, sync_state` |
 | `readings` | `id, device_id, metric, value, unit, recorded_at, sync_state` |
 | `scenarios`（仅本机） | `id, name, actions(JSON), created_at, updated_at` — 无 `deleted_at` / `sync_state` |
+| `rooms`（仅本机） | `id, name, sort_order, remote_id(预留), created_at, updated_at` — 无 `deleted_at` / `sync_state` |
 
 规则触发语义（两端一致）：
 

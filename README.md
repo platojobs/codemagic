@@ -12,12 +12,13 @@
 
 | 项 | 结果 |
 | --- | --- |
-| 版本 | **v0.12.0**（`MARKETING_VERSION 0.12.0`，`CURRENT_PROJECT_VERSION 20`，tag `v0.12.0`：推荐规则 + 中英双语 + 动态字体，契约沿用 `PJGoIoT` v0.9.0 / openapi 0.7.0） |
+| 版本 | **v0.13.0**（`MARKETING_VERSION 0.13.0`，`CURRENT_PROJECT_VERSION 21`，tag `v0.13.0`：房间归属 + 首页按房间分区，契约沿用 `PJGoIoT` v0.9.0 / openapi 0.7.0） |
 | 五模块（首页 / 智能 / 产品 / 市场 / 我的） | 已实现，纯代码 UIKit，真实数据路径；设备管理并入首页，规则与场景集中在「智能」 |
 | CoreBluetooth 扫描 + 连接 | 已实现（`CBCentralManager`，真实 RSSI） |
 | BLE 读数采集 | 已实现：连接后订阅心率 `0x2A37`、电量 `0x2A19`、温度 `0x2A6E`、Nordic UART TX `6E400003-…`；各特征独立解析器，失败静默丢弃并写本地日志 |
 | 长周期读数图表 | 已实现：1 小时 / 24 小时 / 7 天 / 30 天区间切换（映射 `1m` / `1h` / `1h` / `1d`），X 轴按桶 `start` 真实时间比例定位，缺口断线，`avg` 折线 + `min`–`max` 区间带，Y 轴自适应并带单位；**v0.11.0 支持点选 / 长按桶查看 start–end、min/max/avg/last 与条数（本地时区），点空白取消，Y 轴不变，并给出无障碍摘要** |
-| 本地持久化 | 已实现（SQLite3，含同步字段；迁移 **v7** 为 `rules` 加指标阈值字段并回填旧规则，v6 新增仅本机的 `scenarios` 表；v5 新增 `readings` 表，本地保留 7 天；v4 区分 `advertised_name` 与用户别名并记录三态 patch） |
+| 本地持久化 | 已实现（SQLite3，含同步字段；迁移 **v8** 新增仅本机的 `rooms` 表并为 `saved_devices` 增加可空 `room_id`（NULL = 未分配），v7 为 `rules` 加指标阈值字段并回填旧规则，v6 新增仅本机的 `scenarios` 表；v5 新增 `readings` 表，本地保留 7 天；v4 区分 `advertised_name` 与用户别名并记录三态 patch） |
+| 房间（v0.13.0，仅本机） | **已实现**：房间 CRUD 存 SQLite `rooms` 表，设备经 `saved_devices.room_id` 归属；首页按房间分区、标题可展开 / 收起，「未分配」固定最后；详情页与首页长按均可移入 / 移出；删除房间二次确认后设备回到未分配。房间**不参与 push / changes**，界面标注「仅本机」；`Room.remoteID` 为远端家庭 / 房间映射预留 |
 | 本地化（v0.12.0） | **已实现**：全部界面文案走 `L10n.t` / `L10n.f`，资源为 `Resources/zh-Hans.lproj/Localizable.strings` 与 `en.lproj/Localizable.strings`；工程 `knownRegions` 含 `zh-Hans`，`CFBundleLocalizations = [en, zh-Hans]`，设置跟随系统语言；术语双语见第 11 节；单测强制扫描 View / ViewModel 源码不得硬编码中文，并校验两语言 key 集合与占位符一致 |
 | 动态字体（v0.12.0） | **已实现**：字号统一走 `AppText`（`UIFontMetrics` 缩放）+ `applyFont(_:)`（`adjustsFontForContentSizeCategory = true`）；表格行高自适应；图表 Y 轴左侧留白随字号测量增长，超大字号缩为 3 个刻度且不与绘图区重叠 |
 | 设计系统（v0.8.0） | **已落地**：`Palette` 36 个语义色（浅/深 `UIColor(dynamicProvider:)`）、`Layout` 4pt 阶梯 / 16 页边距 / 56·72·88 行高 / 12 圆角 / 1dp 描边、`AppText` 10 级字号与等宽数字；代码内无硬编码色值与字号（单测强制扫描） |
@@ -25,7 +26,7 @@
 | 同步 | **已实现**：匿名登录、增量拉取、批量推送（设备 ≤100/批 + 读数 ≤200/批、幂等键含读数）、冲突提示、tombstone、Keychain token、前后台 / BGTask 触发、断网累积补传；后台唤醒仅做受限推送（不拉增量、不建号、≥15 分钟间隔）；**410 `RESYNC_REQUIRED` 自动全量重同步（pending 不丢）**，503 `TIMEOUT` 指数退避 |
 | 自绘 RSSI + 自绘折线图 + 代码组装空状态 | 已实现（读数图表纯 `draw(_:)`，无第三方图表库） |
 | 首启引导 | **已实现**：3 步（蓝牙 / 通知 / 后台采集），仅首次或未走完时出现，可跳过；步骤与完成标记持久化到 `UserDefaults` |
-| 单元测试 | **277 个用例，0 失败**（`** TEST SUCCEEDED **`，2026-11-05，Xcode 27.2 / iPhone Duo · iOS 27.2 模拟器；含推荐规则模板生成与一键写入、本地化 key / 占位符一致性与硬编码中文审计、`AppText` 默认与 AX5 字号差与布局固有高度、指标阈值规则（比较符边界 / 防抖 1–5 条 / 恢复一次 / 单位 / 旧规则 v6→v7 升级仍生效）、图表点选几何、CSV 文件名与 BOM、410 全量重同步、503 TIMEOUT 退避、错误码映射、分页上限、设计令牌审计、场景动作、通知节流、接管码、注销、首启与术语审计） |
+| 单元测试 | **284 个用例，0 失败**（`** TEST SUCCEEDED **`，2026-11-05，Xcode 27.2 / iPhone Duo · iOS 27.2 模拟器；含房间迁移 v7→v8、增删改、设备移入移出、按房间分区与搜索隐藏空房间、推荐规则模板生成与一键写入、本地化 key / 占位符一致性与硬编码中文审计、`AppText` 默认与 AX5 字号差与布局固有高度、指标阈值规则（比较符边界 / 防抖 1–5 条 / 恢复一次 / 单位 / 旧规则 v6→v7 升级仍生效）、图表点选几何、CSV 文件名与 BOM、410 全量重同步、503 TIMEOUT 退避、错误码映射、分页上限、设计令牌审计、场景动作、通知节流、接管码、注销、首启与术语审计） |
 | 模拟器构建 | **通过**（`xcodebuild ... build`，`** BUILD SUCCEEDED **`） |
 | CI | **GitHub Actions 已实际运行 success**：v0.10.0 tag run [41979289081](https://github.com/platojobs/codemagic/actions/runs/41979289081)（success，提交 `74f14c4`），并行 `Build & Test`（**236 单测**）与 `E2E contract`（**151 项，0 SKIP**）；同 sha 的 `main` run [41979270921](https://github.com/platojobs/codemagic/actions/runs/41979270921) 经重跑同样 success；v0.9.0 run [41973731269](https://github.com/platojobs/codemagic/actions/runs/41973731269) 为上一基线；`codemagic.yaml` 作为可选替代保留但未验证 |
 | 真机 BLE / 签名 | **未验证**：本机无真机与 Apple 开发者账号；读数采集与图表需真机 / 可穿戴设备验证（见第 9 节） |
@@ -37,17 +38,18 @@
 ## 2. 五模块能力
 
 ### 信息架构（v0.8.0，对齐米家）
-- 五个 Tab：**首页 / 智能 / 产品 / 市场 / 我的**。原「设备」Tab 取消，设备管理（搜索 / 排序 / 分组）并入首页；规则与场景入口统一放在「智能」，不留重复入口。
-- **首页**：设备卡片网格（名称、连接状态、最近一条读数、信号条），按分组分段；顶部搜索与排序、分组筛选；顶部一行「今日告警摘要」（真实触发条数，点击进入「智能」）；下方「快捷场景」横向卡（前 3 个场景，点击执行并提示结果）。点卡片进设备详情。
+- 五个 Tab：**首页 / 智能 / 产品 / 市场 / 我的**。原「设备」Tab 取消，设备管理（搜索 / 排序 / 房间）并入首页；规则与场景入口统一放在「智能」，不留重复入口。
+- **首页**：设备卡片网格（名称、连接状态、最近一条读数、信号条），**v0.13.0 起按房间分段**（房间标题 + 该房间设备，标题可展开 / 收起，「未分配」固定最后）；顶部搜索与排序、右上角房间管理；顶部一行「今日告警摘要」（真实触发条数，点击进入「智能」）；下方「快捷场景」横向卡（前 3 个场景，点击执行并提示结果）。点卡片进设备详情。
 - **智能**：分段控件切换「自动化」与「场景」。自动化 = 现有规则增删启停 + 最近触发记录；场景见下节。
 - **产品 / 市场 / 我的**：保留 v0.7.0 全部能力，仅做设计令牌与几何收口，不新增功能。
 
 ### 首页 Home（`Modules/Home`）
 - `CBCentralManager` 真实扫描，展示名称 / 标识符 / RSSI；扫描页仍由右上角入口进入，扫描会话写本地日志。
-- 已保存设备以卡片网格展示：备注名、连接状态、最近一条读数（等宽数字 + 单位）、`RSISignalView` 信号条、最后出现时间；按真实分组分段（含「未分组」，排在最后）。
-- 搜索别名 / 广播名 / 型号 / 标识符（大小写不敏感）；排序最近出现 / 名称 / 信号 / 添加时间（默认最近出现并持久化）；分组筛选与搜索可叠加。
+- 已保存设备以卡片网格展示：备注名、连接状态、最近一条读数（等宽数字 + 单位）、`RSISignalView` 信号条、最后出现时间；**按房间分段**（房间标题 + 设备数，可点击展开 / 收起；「未分配」固定最后）。
+- 搜索别名 / 广播名 / 型号 / 标识符（大小写不敏感）；排序最近出现 / 名称 / 信号 / 添加时间（默认最近出现并持久化）。**房间分区与搜索 / 排序的取舍**：搜索只匹配设备字段，有关键字时隐藏没有命中的房间；排序只在房间内生效，房间分区顺序固定按 `rooms.sort_order`；v0.13.0 移除首页「分组筛选」控件，原 `group_name` 仅作兼容字段保留（编辑弹窗与详情仍可修改），不再承担首页分区职责。
+- 空态真实：无房间显示「还没有房间」+「新建房间」；有房间但房间内无设备时，每个房间内给出扫描引导；搜索无结果给出清除搜索的入口。
 - 「今日告警摘要」读取本地扫描日志中当天 `rule` + `warning` 的真实条数，点击切到「智能」Tab。
-- 空状态 / 错误状态 / 骨架屏齐全；设备卡片支持长按编辑与删除，点击进入详情。
+- 空状态 / 错误状态 / 骨架屏齐全；设备卡片支持长按「详情 / 移入房间 / 编辑 / 删除」，点击进入详情。
 
 ### 智能 Smart（`Modules/Smart`）
 - **自动化**：本地规则（**断开**、**RSSI 低于阈值**、**指标阈值**）新增 / 启停 / 删除，规则持久化；可绑定单台设备或全部已保存设备；列表下方展示最近 5 条真实触发记录（摘自本地扫描日志）。
@@ -62,8 +64,15 @@
 - 一键执行按顺序逐个动作，任一动作失败**不阻断后续**，结束后汇总「成功 N / 失败 M」并逐条给出原因；执行中显示进度浮层（当前动作 + 已完成状态）。
 - 动作语义：连接前校验蓝牙权限与设备存在、已连接则返回失败原因；断开要求当前已连接；后台采集重复开启 / 未开启即停止均给出明确提示；静音校验 10/30/60 且告警未被关闭、未处于静音；同步复用现有 `SyncEngine` 并返回真实推送/拉取条数。
 
+### 房间（v0.13.0，仅本机）
+- 对齐米家的「家庭 / 房间」结构：房间有 `id` / `name` / `sort_order` / `created_at`，设备通过可空 `saved_devices.room_id` 归属，`NULL` = 未分配；`rooms` 与 `room_id` 见迁移 **v8**，旧库升级保留原数据，原 `group_name` 仅作兼容字段。
+- 房间管理（首页右上角）：新建 / 重命名 / 删除；删除前二次确认，房间内设备**回到未分配**（先逐台 `UPDATE room_id = NULL` 再删房间，设备不丢）；列表展示每个房间的设备数。
+- 设备移入 / 移出：详情页「房间」行可直接选择目标房间或「未分配」；首页卡片长按也有「移入房间」。两种入口都只更新 `room_id`，不触碰同步状态与 `updated_at`。
+- 仅本机：房间与归属**不参与 push / changes**，房间管理页脚与相关入口均标注「仅本机」；`Room.remoteID` 保留远端映射字段，后端若提供家庭 / 房间接口可按本地 `id` ↔ `remoteID` 对接，无需改表结构。
+
 ### 设备详情（`Modules/Devices`）
-- 设备详情：连接蓝牙 → `GET /api/v1/my/devices/ios/{externalId}` 拉取云端设备记录，**优先展示云端 `deviceType` / `vendor` / `firmwareVersion` / `compatibility`**；云端字段为 `null` 时显示「型号未知」/「—」/「暂无兼容性说明」，绝不出 `"null"`；未注册型号仍展示别名、分组与最近出现时间，并在「云端记录」区展示同步信息；网络失败才降级本地缓存并标注缓存时间，无缓存显示失败空状态与重试。
+- 设备详情：连接蓝牙 → `GET /api/v1/my/devices/ios/{externalId}` 拉取云端设备记录，**优先展示云端 `deviceType` / `vendor` / `firmwareVersion` / `compatibility`**；云端字段为 `null` 时显示「型号未知」/「—」/「暂无兼容性说明」，绝不出 `"null"`；未注册型号仍展示别名、分组、房间与最近出现时间，并在「云端记录」区展示同步信息；网络失败才降级本地缓存并标注缓存时间，无缓存显示失败空状态与重试。
+- **房间归属（v0.13.0）**：详情页「房间」行展示当前房间（未分配显示「未分配」），点击弹出房间列表（含「未分配」），选中即写本地 `room_id` 并刷新；房间仅本机，不推送。
 - **图表点选（v0.11.0）**：轻点 / 长按折线桶选中该桶，顶部摘要条展示 `start–end`、最小 / 最大 / 平均 / 最新与条数（本地时区）；点空白处取消；选中态不改变 Y 轴；图表 `accessibilityLabel` 在未选中时给出「指标，最近区间，最低 / 最高，共 N 个数据点」，选中后替换为当前桶摘要。
 - **读数 CSV 导出（v0.6.0 起，v0.11.0 扩展文件名）**：当前设备 + 指标 + 区间；7 天内读本地、更长走服务端分页（上限 5 万条）；UTF-8 BOM / ISO8601 UTC / RFC 4180 转义；文件名含设备名、设备标识末 8 位、指标、区间起止与 UTC 时间（如 `readings-温湿度计-4A2F9C31-temperature-20261105T010000Z-20261105T020000Z-1a2b3c4d.csv`）；临时文件分享后删除，进度真实可重试。
 - 跨平台设备：服务端拉回的 `platform = android` 设备标注「来自 Android，本机不可连接」，无展开箭头、禁用点击与连接，不进入详情。
@@ -295,7 +304,7 @@ cd /path/to/codemagic
 
 数据库位置：`Application Support/com.platojobs.codemagic/codemagic.sqlite`。磁盘库失败时回退内存库，并在「我的」页提示。
 
-迁移：`PRAGMA user_version` 线性递增。v1 建五张表；**v2（v0.2.0）** 为 `saved_devices` 增加 `platform`（默认 `ios`）与 `external_id`，由 `peripheral_id` 大写回填，并建立 `(platform, external_id) WHERE deleted_at IS NULL` 唯一索引；**v3（v0.3.3）** 增加 `device_type TEXT`（可空，旧库升级后为 `NULL`，由云端详情回填）；**v4（v0.3.6）** 增加 `advertised_name TEXT`（由历史 `name` 回填广播名）与 `alias_patch` / `advertised_name_patch` / `group_patch`（`absent` / `clear` / `set` 三态）；**v5（v0.4.0）** 新增 `readings` 表（`id` 主键、`device_id`、`metric`、`value`、`unit`、`recorded_at`、`sync_state`），并按 `(device_id, metric, recorded_at DESC)` 建索引，支撑最近 60 点查询与 7 天清理；**v6（v0.8.0）** 新增本地 `scenarios` 表（`id` / `name` / `actions` JSON / `created_at` / `updated_at`），**不含 `sync_state` / `deleted_at` / `platform` / `external_id`，不参与同步**。旧库升级后无需重装或清数据。
+迁移：`PRAGMA user_version` 线性递增。v1 建五张表；**v2（v0.2.0）** 为 `saved_devices` 增加 `platform`（默认 `ios`）与 `external_id`，由 `peripheral_id` 大写回填，并建立 `(platform, external_id) WHERE deleted_at IS NULL` 唯一索引；**v3（v0.3.3）** 增加 `device_type TEXT`（可空，旧库升级后为 `NULL`，由云端详情回填）；**v4（v0.3.6）** 增加 `advertised_name TEXT`（由历史 `name` 回填广播名）与 `alias_patch` / `advertised_name_patch` / `group_patch`（`absent` / `clear` / `set` 三态）；**v5（v0.4.0）** 新增 `readings` 表（`id` 主键、`device_id`、`metric`、`value`、`unit`、`recorded_at`、`sync_state`），并按 `(device_id, metric, recorded_at DESC)` 建索引，支撑最近 60 点查询与 7 天清理；**v6（v0.8.0）** 新增本地 `scenarios` 表（`id` / `name` / `actions` JSON / `created_at` / `updated_at`），**不含 `sync_state` / `deleted_at` / `platform` / `external_id`，不参与同步**；**v8（v0.13.0）** 新增本地 `rooms` 表（`id` / `name` / `sort_order` / `remote_id`（预留远端映射）/ `created_at` / `updated_at`）并为 `saved_devices` 增加可空 `room_id`（NULL = 未分配），原 `group_name` 保留为兼容字段；`rooms` **不参与 push / changes**。旧库升级后无需重装或清数据。
 
 ---
 
@@ -445,6 +454,7 @@ HTTP/1.1 410 Gone
 
 ## 10. 版本记录
 
+- `v0.13.0`：房间归属 + 首页按房间分区（`MARKETING_VERSION 0.13.0` / build 21，tag `v0.13.0`）。SQLite 迁移 **v8** 新增 `rooms` 表（`id` / `name` / `sort_order` / `remote_id` / `created_at` / `updated_at`）与 `saved_devices.room_id`（可空，NULL = 未分配），旧数据与原 `group_name` 原样保留；首页从扁平分组改为**按房间分区**，房间标题可展开 / 收起、「未分配」固定最后，无房间显示「还没有房间」+「新建房间」、房间空显示扫描引导；右上角房间管理支持新建 / 重命名 / 删除（二次确认后设备回到未分配），设备可在详情页或首页长按移入 / 移出；房间与归属仅本机、不参与 push / changes，`Room.remoteID` 为远端家庭 / 房间接口预留映射。交互取舍：搜索只匹配设备并隐藏空房间、排序只在房间内生效、分区顺序固定，首页原「分组筛选」移除，`group_name` 仅兼容保留。新增单测 7 个（共 284 个），E2E 151 项无契约变更。
 - `v0.12.0`：推荐规则 + 中英双语 + 动态字体（`MARKETING_VERSION 0.12.0` / build 20，tag `v0.12.0`）。推荐规则只按设备真实出现过的指标生成（温度 > 30℃、湿度 > 70%、电量 < 20%、心率 > 120、CO₂ > 1000ppm），一键写入现有 `readingThreshold` 规则并立即出现在列表，不新建模型、不改数据库；无设备 / 无读数分别给真实空态。全部界面文案抽到 `zh-Hans` / `en` 两份 `Localizable.strings`（685 key，key 集合与 `%@` 占位符一致由单测强制），`InfoPlist.strings` 双语权限文案，工程 `knownRegions` 含 `zh-Hans`、`CFBundleLocalizations = [en, zh-Hans]`，设置跟随系统语言；术语 Device / Reading / Sync / Scan / Group / Alert / Transfer Code。字号统一 `AppText` + `UIFontMetrics` + `adjustsFontForContentSizeCategory`，表格行高自适应，图表 Y 轴左侧留白按字号测量、超大字号下 3 个刻度且不压绘图区；数字与日期显式 `Locale.current`（CSV 仍 POSIX + UTC）。新增单测 17 个（共 277 个），E2E 151 项无契约变更。
 - `v0.11.0`：指标阈值规则 + 图表点选 + CSV 区间文件名（`MARKETING_VERSION 0.11.0` / build 19，tag `v0.11.0`）。规则条件扩为「指标 + 比较符 + 阈值 + 连续 N 条（1–5，默认 1）」，判定接在 `ReadingsIngestor` → `RuleEvaluator` 同一链路，命中日志带触发值 / 阈值 / 时间 / 设备并进「智能 → 最近触发」，恢复只在确实发过触发通知后补一条；SQLite v7 为 `rules` 增加 `metric` / `comparison` / `reading_threshold` / `consecutive` 并回填旧规则（仍按 RSSI / 断开生效）。图表支持点选 / 长按桶查看 `start–end`、min/max/avg/last 与条数（本地时区），点空白取消、Y 轴不变、无障碍摘要随选中更新；几何命中（最近桶 / 24pt 近邻阈值 / 空白不命中）为纯函数。CSV 文件名含设备名、设备标识末 8 位、指标与 UTC 区间起止。新增单测 24 个（共 260 个）。规则仅本机，不改变网络契约。
 - `v0.10.0`：跟进后端新契约与真 Postgres E2E（build 18，tag `v0.10.0`）。410 `RESYNC_REQUIRED` 清游标并以 `cursor=0` 全量重拉，pending 设备 / 读数保留并重新上传，终态只处理一次、不进指数退避，界面明确提示；503 `TIMEOUT` 映射「服务端繁忙，稍后重试」并退避；401 文案「登录已失效」；`expiresAt` 在「我的」只读展示；`readings 500 / export 5000 / changes 500` 上限提前分片。新增 `scripts/e2e-postgres.sh`（本地真 Postgres，macOS runner 无 Docker 故不进 CI）。单测 236 个，E2E 151 项。
@@ -478,7 +488,8 @@ HTTP/1.1 410 Gone
 | 发现附近 BLE | **扫描** | 搜索 | 「开始扫描」「扫描附近设备」 |
 | 过滤已保存设备 | **搜索** | — | 首页搜索框仅过滤本机设备，不触发扫描 |
 | 设备上报的值 | **读数** | 数值、参数、数据点 | 心率 / 电量 / 温度均为读数；阈值是规则条件 |
-| 用户对设备的分类 | **分组** | 分类（用于市场 / 产品筛选时保留「分类」） | 首页分组筛选 |
+| 用户对设备的分类 | **分组** | 分类（用于市场 / 产品筛选时保留「分类」） | v0.13.0 起仅作兼容字段，首页分区改用「房间」 |
+| 设备的空间归属 | **房间** | 分组、标签、家庭 | 首页房间分区 / 房间管理；房间仅本机，不参与同步 |
 | 自动化条件 | **规则** | 策略、场景 | 「智能 → 自动化」 |
 | 本地动作组合 | **场景** | 快捷指令、自动化（与规则区分） | 「智能 → 场景」，仅本机 |
 | 8 位一次性跨设备迁移码 | **接管码** | 配对码（「配对」仅指系统蓝牙配对） | 「迁移到新设备 / 从旧设备接管」；接口与文档保留 `pairing code` 旧名 |
@@ -498,4 +509,4 @@ HTTP/1.1 410 Gone
 | [`docs/app-privacy.md`](docs/app-privacy.md) | `PrivacyInfo.xcprivacy` 与代码位置逐项对照，含必需理由 API（UserDefaults `CA92.1`、文件时间戳 `C617.1`、系统启动时间 `35F9.1`） |
 | [`codemagic/Resources/PrivacyInfo.xcprivacy`](codemagic/Resources/PrivacyInfo.xcprivacy) | 实际打包进 App 的隐私清单：非追踪、5 类收集数据（Device ID / User ID / Other User Content / Health / Other Usage Data）、3 类必需理由 API |
 
-> 上架文案与版本说明一致：当前为 `v0.12.0`（build 20），详见 [`docs/releasenotes.md`](docs/releasenotes.md)。
+> 上架文案与版本说明一致：当前为 `v0.13.0`（build 21），详见 [`docs/releasenotes.md`](docs/releasenotes.md)。

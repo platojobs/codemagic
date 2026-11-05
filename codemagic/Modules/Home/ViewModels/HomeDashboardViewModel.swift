@@ -1,12 +1,12 @@
 import Foundation
 
-/// 首页视图模型：设备卡片网格（按分组分段）、今日告警摘要、快捷场景。
+/// 首页视图模型：设备卡片按房间分段、今日告警摘要、快捷场景。
 final class HomeDashboardViewModel {
     private(set) var devices: [SavedDevice] = []
+    private(set) var rooms: [Room] = []
     private(set) var scenarios: [Scenario] = []
     private(set) var todayAlertCount: Int = 0
     private(set) var searchText: String = ""
-    private(set) var groupFilter: String?
     private(set) var sort: DeviceSort
     private(set) var lastError: AppError?
     private(set) var isLoading = false
@@ -20,6 +20,7 @@ final class HomeDashboardViewModel {
     private let scanLogStore: ScanLogStore
     private let readingsStore: ReadingsStore
     private let scenarioStore: ScenarioStore
+    private let roomStore: RoomStore
     private let executor: ScenarioExecutor
     private var recentRSSI: [UUID: Int] = [:]
     private var latestReadings: [UUID: DeviceReading] = [:]
@@ -32,6 +33,7 @@ final class HomeDashboardViewModel {
         scanLogStore: ScanLogStore,
         readingsStore: ReadingsStore,
         scenarioStore: ScenarioStore,
+        roomStore: RoomStore,
         executor: ScenarioExecutor
     ) {
         self.bluetooth = bluetooth
@@ -41,6 +43,7 @@ final class HomeDashboardViewModel {
         self.scanLogStore = scanLogStore
         self.readingsStore = readingsStore
         self.scenarioStore = scenarioStore
+        self.roomStore = roomStore
         self.executor = executor
         self.sort = settingsStore.deviceSort
     }
@@ -50,6 +53,7 @@ final class HomeDashboardViewModel {
         defer { isLoading = false }
         do {
             devices = try savedDeviceStore.fetchAll()
+            rooms = try roomStore.fetchAll()
             scenarios = try scenarioStore.fetchAll()
             let recent = (try? recentDeviceStore.fetchAll(limit: 100)) ?? []
             recentRSSI = Dictionary(
@@ -62,9 +66,6 @@ final class HomeDashboardViewModel {
             latestReadings = [:]
             for device in devices {
                 latestReadings[device.id] = latestReading(deviceID: device.id)
-            }
-            if let groupFilter, !availableGroups.contains(groupFilter) {
-                self.groupFilter = nil
             }
         } catch {
             lastError = .database(L10n.f("home.loadFailed", String(describing: error)))
@@ -99,22 +100,41 @@ final class HomeDashboardViewModel {
         }
     }
 
-    // MARK: - 过滤与分组
+    // MARK: - 过滤与房间分段
 
-    var availableGroups: [String] {
-        Array(Set(devices.map(\.groupName))).sorted {
-            $0.localizedCaseInsensitiveCompare($1) == .orderedAscending
+    /// 房间分区：房间按 `sort_order` 升序，「未分配」固定最后。
+    /// 搜索只匹配设备字段；有关键字时隐藏没有命中的房间，无关键字时保留空房间并展示扫描引导。
+    var roomSections: [HomeRoomSection] {
+        let filtered = filteredDevices
+        let isSearching = !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let knownRoomIDs = Set(rooms.map(\.id))
+        let grouped = Dictionary(grouping: filtered) { device -> UUID? in
+            guard let roomID = device.roomID, knownRoomIDs.contains(roomID) else { return nil }
+            return roomID
         }
+
+        var sections = rooms.map { room in
+            HomeRoomSection(room: room, title: room.name, devices: grouped[room.id] ?? [])
+        }
+        if isSearching {
+            sections = sections.filter { !$0.devices.isEmpty }
+        }
+        let unassigned = grouped[nil] ?? []
+        if !unassigned.isEmpty {
+            sections.append(HomeRoomSection(room: nil, title: L10n.t("room.unassigned"), devices: unassigned))
+        }
+        return sections
     }
 
+    var hasRooms: Bool { !rooms.isEmpty }
+
     var hasActiveFilter: Bool {
-        !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || groupFilter != nil
+        !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     var filteredDevices: [SavedDevice] {
         let keyword = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let filtered = devices.filter { device in
-            if let groupFilter, device.groupName != groupFilter { return false }
             guard !keyword.isEmpty else { return true }
             return [
                 device.remark,
@@ -127,15 +147,11 @@ final class HomeDashboardViewModel {
         return sorted(filtered)
     }
 
-    /// 按分组分段，段内保持当前排序。
-    var groupedDevices: [(group: String, devices: [SavedDevice])] {
-        let filtered = filteredDevices
-        let groups = Dictionary(grouping: filtered, by: \.groupName)
-        return groups.keys.sorted { lhs, rhs in
-            if lhs == SavedDevice.defaultGroupName { return false }
-            if rhs == SavedDevice.defaultGroupName { return true }
-            return lhs.localizedCaseInsensitiveCompare(rhs) == .orderedAscending
-        }.map { ($0, groups[$0] ?? []) }
+    func roomName(for device: SavedDevice) -> String {
+        guard let roomID = device.roomID, let room = rooms.first(where: { $0.id == roomID }) else {
+            return L10n.t("room.unassigned")
+        }
+        return room.name
     }
 
     func rssi(for device: SavedDevice) -> Int? {
@@ -186,16 +202,9 @@ final class HomeDashboardViewModel {
         onChange?()
     }
 
-    func updateGroupFilter(_ group: String?) {
-        guard group != groupFilter else { return }
-        groupFilter = group
-        onChange?()
-    }
-
     func resetFilters() {
         guard hasActiveFilter else { return }
         searchText = ""
-        groupFilter = nil
         onChange?()
     }
 
@@ -242,6 +251,56 @@ final class HomeDashboardViewModel {
         }
     }
 
+    // MARK: - 房间（仅本机）
+
+    @discardableResult
+    func createRoom(name: String) -> Room? {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        do {
+            let room = try roomStore.create(name: trimmed)
+            reload()
+            return room
+        } catch {
+            lastError = .database(L10n.f("room.saveFailed", String(describing: error)))
+            onChange?()
+            return nil
+        }
+    }
+
+    func renameRoom(id: UUID, name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        do {
+            try roomStore.rename(id: id, name: trimmed)
+            reload()
+        } catch {
+            lastError = .database(L10n.f("room.saveFailed", String(describing: error)))
+            onChange?()
+        }
+    }
+
+    func deleteRoom(id: UUID) {
+        do {
+            try roomStore.delete(id: id, deviceStore: savedDeviceStore)
+            reload()
+        } catch {
+            lastError = .database(L10n.f("room.deleteFailed", String(describing: error)))
+            onChange?()
+        }
+    }
+
+    /// 移入 / 移出房间：只改本机 `room_id`，不置同步状态、不参与 push / changes。
+    func moveDevice(id: UUID, to roomID: UUID?) {
+        do {
+            try savedDeviceStore.setRoom(id: id, roomID: roomID)
+            reload()
+        } catch {
+            lastError = .database(L10n.f("room.moveFailed", String(describing: error)))
+            onChange?()
+        }
+    }
+
     // MARK: - Private
 
     private func latestReading(deviceID: UUID) -> DeviceReading? {
@@ -276,4 +335,13 @@ final class HomeDashboardViewModel {
             return lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName) == .orderedAscending
         }
     }
+}
+
+/// 首页房间分区：`room == nil` 表示「未分配」，固定排在最后。
+struct HomeRoomSection: Equatable {
+    let room: Room?
+    let title: String
+    let devices: [SavedDevice]
+
+    var isUnassigned: Bool { room == nil }
 }

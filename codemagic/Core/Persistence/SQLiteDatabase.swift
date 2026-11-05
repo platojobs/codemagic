@@ -107,7 +107,8 @@ final class SQLiteDatabase {
                 "scan_logs",
                 "recent_devices",
                 "device_info_cache",
-                "scenarios"
+                "scenarios",
+                "rooms"
             ]
             try performExecute("BEGIN IMMEDIATE;", [])
             do {
@@ -146,6 +147,9 @@ final class SQLiteDatabase {
         }
         if version < 7 {
             try migrateToVersion7()
+        }
+        if version < 8 {
+            try migrateToVersion8()
         }
     }
 
@@ -343,6 +347,31 @@ final class SQLiteDatabase {
         UPDATE rules SET comparison = 'lte' WHERE comparison IS NULL OR comparison = '';
         UPDATE rules SET consecutive = 1 WHERE consecutive < 1 OR consecutive > 5;
         PRAGMA user_version = 7;
+        """
+        try executeScript(script)
+    }
+
+    /// v8：房间归属。房间仅本机（不参与 push / changes），`saved_devices.room_id` 可空，NULL 表示未分配。
+    /// 旧数据原样保留，原 `group_name` 作为兼容字段继续存在，但不再承担首页主要分区职责。
+    private func migrateToVersion8() throws {
+        let columns = try performQuery("PRAGMA table_info(saved_devices);", [])
+        let existing = Set(columns.compactMap { $0.text("name") })
+        var script = """
+        CREATE TABLE IF NOT EXISTS rooms (
+            id TEXT PRIMARY KEY NOT NULL,
+            name TEXT NOT NULL,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            remote_id TEXT,
+            created_at REAL NOT NULL,
+            updated_at REAL NOT NULL
+        );
+        """
+        if !existing.isEmpty && !existing.contains("room_id") {
+            script += "ALTER TABLE saved_devices ADD COLUMN room_id TEXT;\n"
+        }
+        script += """
+        CREATE INDEX IF NOT EXISTS idx_rooms_sort ON rooms(sort_order);
+        PRAGMA user_version = 8;
         """
         try executeScript(script)
     }

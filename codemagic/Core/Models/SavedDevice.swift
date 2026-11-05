@@ -56,6 +56,8 @@ struct SavedDevice: Identifiable, Equatable {
     /// 用户别名；用户编辑写入，扫描路径不触碰。
     var remark: String
     var groupName: String
+    /// 本机房间归属；`nil` 表示未分配。仅本机字段，不参与同步。
+    var roomID: UUID?
     var mac: String?
     var vendor: String?
     var deviceType: String?
@@ -81,6 +83,7 @@ struct SavedDevice: Identifiable, Equatable {
         advertisedName: String,
         remark: String = "",
         groupName: String = SavedDevice.defaultGroupName,
+        roomID: UUID? = nil,
         mac: String? = nil,
         vendor: String? = nil,
         deviceType: String? = nil,
@@ -104,6 +107,7 @@ struct SavedDevice: Identifiable, Equatable {
         self.advertisedName = advertisedName
         self.remark = remark
         self.groupName = groupName.isEmpty ? SavedDevice.defaultGroupName : groupName
+        self.roomID = roomID
         self.mac = mac
         self.vendor = vendor
         self.deviceType = deviceType

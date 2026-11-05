@@ -79,10 +79,10 @@ final class SavedDeviceStore {
         try database.execute(
             """
             INSERT OR REPLACE INTO saved_devices
-            (id, peripheral_id, platform, external_id, name, advertised_name, remark, group_name, mac,
+            (id, peripheral_id, platform, external_id, name, advertised_name, remark, group_name, room_id, mac,
              vendor, device_type, firmware_version, last_seen_at, created_at, updated_at, deleted_at,
              sync_state, alias_patch, advertised_name_patch, group_patch)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """,
             [
                 .text(device.id.uuidString),
@@ -94,6 +94,7 @@ final class SavedDeviceStore {
                 .text(device.advertisedName),
                 .text(device.remark),
                 .text(device.groupName),
+                device.roomID.map { .text($0.uuidString) } ?? .null,
                 device.mac.map(SQLValue.text) ?? .null,
                 device.vendor.map(SQLValue.text) ?? .null,
                 device.deviceType.map(SQLValue.text) ?? .null,
@@ -106,6 +107,17 @@ final class SavedDeviceStore {
                 .text(device.aliasPatch.persistedState),
                 .text(device.advertisedNamePatch.persistedState),
                 .text(device.groupPatch.persistedState),
+            ]
+        )
+    }
+
+    /// 仅更新本机房间归属：不触碰同步状态与 `updated_at`，房间不参与 push / changes。
+    func setRoom(id: UUID, roomID: UUID?) throws {
+        try database.execute(
+            "UPDATE saved_devices SET room_id = ? WHERE id = ?;",
+            [
+                roomID.map { .text($0.uuidString) } ?? .null,
+                .text(id.uuidString),
             ]
         )
     }
@@ -216,6 +228,7 @@ final class SavedDeviceStore {
             advertisedName: advertisedName,
             remark: remark,
             groupName: groupName,
+            roomID: row.text("room_id").flatMap(UUID.init(uuidString:)),
             mac: row.text("mac"),
             vendor: row.text("vendor"),
             deviceType: row.text("device_type"),

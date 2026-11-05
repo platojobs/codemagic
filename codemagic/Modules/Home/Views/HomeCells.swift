@@ -316,10 +316,11 @@ final class HomeErrorCell: UICollectionViewCell {
     }
 }
 
-/// 分区头（UICollectionReusableView 包装 `SectionHeaderView`）。
+/// 分区头（UICollectionReusableView 包装 `SectionHeaderView`），房间分区支持点击展开 / 收起。
 final class HomeSectionHeaderView: UICollectionReusableView {
     static let reuseIdentifier = "HomeSectionHeaderView"
     private let header = SectionHeaderView(title: "")
+    private var onToggle: (() -> Void)?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -331,6 +332,7 @@ final class HomeSectionHeaderView: UICollectionReusableView {
             header.trailingAnchor.constraint(equalTo: trailingAnchor),
             header.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
+        addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(handleTap)))
     }
 
     @available(*, unavailable)
@@ -339,8 +341,30 @@ final class HomeSectionHeaderView: UICollectionReusableView {
     }
 
     func configure(title: String) {
+        onToggle = nil
+        rebuild(title: title, trailing: nil)
+    }
+
+    func configure(title: String, collapsed: Bool, onToggle: @escaping () -> Void) {
+        let chevron = UIImageView(image: UIImage(systemName: collapsed ? "chevron.down" : "chevron.up"))
+        chevron.tintColor = AppTheme.Palette.secondaryText
+        chevron.preferredSymbolConfiguration = UIImage.SymbolConfiguration(textStyle: .caption1)
+        chevron.contentMode = .scaleAspectFit
+        chevron.setContentHuggingPriority(.required, for: .horizontal)
+        chevron.accessibilityIdentifier = "roomSectionChevron"
+        rebuild(title: title, trailing: chevron)
+        self.onToggle = onToggle
+        accessibilityLabel = title
+        accessibilityHint = collapsed ? L10n.t("room.expand") : L10n.t("room.collapse")
+    }
+
+    @objc private func handleTap() {
+        onToggle?()
+    }
+
+    private func rebuild(title: String, trailing: UIView?) {
         header.removeFromSuperview()
-        let replacement = SectionHeaderView(title: title)
+        let replacement = SectionHeaderView(title: title, trailing: trailing)
         replacement.translatesAutoresizingMaskIntoConstraints = false
         addSubview(replacement)
         NSLayoutConstraint.activate([

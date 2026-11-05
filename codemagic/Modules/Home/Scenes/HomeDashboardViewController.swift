@@ -1,6 +1,6 @@
 import UIKit
 
-/// 首页：设备卡片网格（按分组分段）+ 今日告警摘要 + 快捷场景。
+/// 首页：设备卡片按房间分段 + 今日告警摘要 + 快捷场景。
 final class HomeDashboardViewController: UIViewController {
     // MARK: - Sections
 
@@ -8,7 +8,9 @@ final class HomeDashboardViewController: UIViewController {
         case alert
         case scenarios
         case scenarioEmpty
-        case devices(group: String, items: [SavedDevice])
+        case roomsEmpty
+        case room(room: Room?, items: [SavedDevice], totalCount: Int)
+        case roomEmpty(room: Room)
         case devicesEmpty
         case error(message: String)
     }
@@ -18,9 +20,13 @@ final class HomeDashboardViewController: UIViewController {
     private let collectionView: UICollectionView
     private let searchBar = UISearchBar()
     private let sortButton = AppButton(style: .filterChip, title: L10n.t("devices.sort"), symbolName: "arrow.up.arrow.down")
-    private let groupButton = AppButton(style: .filterChip, title: L10n.t("device.detail.group"), symbolName: "line.3.horizontal.decrease.circle")
+    private let roomButton = AppButton(style: .filterChip, title: L10n.t("room.manage"), symbolName: "square.grid.2x2")
     private let controlsView = UIStackView()
     private var titleHost: LargeTitleHost?
+
+    /// 收起状态只保存在当前会话：房间分区标题可点击展开 / 收起，未分配分区固定排最后。
+    private var collapsedRoomIDs: Set<UUID> = []
+    private var isUnassignedCollapsed = false
 
     // MARK: - Dependencies
 
@@ -133,9 +139,9 @@ final class HomeDashboardViewController: UIViewController {
         searchBar.searchTextField.heightAnchor.constraint(equalToConstant: Layout.inputH).isActive = true
 
         sortButton.addTarget(self, action: #selector(handleSort), for: .touchUpInside)
-        groupButton.addTarget(self, action: #selector(handleGroup), for: .touchUpInside)
+        roomButton.addTarget(self, action: #selector(handleRooms), for: .touchUpInside)
 
-        let chips = UIStackView(arrangedSubviews: [sortButton, groupButton, UIView()])
+        let chips = UIStackView(arrangedSubviews: [sortButton, roomButton, UIView()])
         chips.axis = .horizontal
         chips.spacing = Layout.space8
         chips.alignment = .center
@@ -149,8 +155,9 @@ final class HomeDashboardViewController: UIViewController {
 
     private func refreshControls() {
         sortButton.configuration?.title = L10n.f("devices.sortSummary", String(describing: viewModel.sort.title))
-        groupButton.configuration?.title = viewModel.groupFilter.map { L10n.f("devices.groupSummary", $0) } ?? L10n.t("devices.groupSummaryAll")
-        groupButton.isHidden = viewModel.availableGroups.isEmpty
+        roomButton.configuration?.title = viewModel.hasRooms
+            ? L10n.f("room.manageWithCount", String(describing: viewModel.rooms.count))
+            : L10n.t("room.manage")
     }
 
     private func makeLayout() -> UICollectionViewLayout {
@@ -199,7 +206,22 @@ final class HomeDashboardViewController: UIViewController {
             layoutSection.boundarySupplementaryItems = [makeHeader()]
             return layoutSection
 
-        case .devices:
+        case .room(_, let items, _):
+            if items.isEmpty {
+                let item = NSCollectionLayoutItem(
+                    layoutSize: NSCollectionLayoutSize(widthDimension: .fractionalWidth(1), heightDimension: .absolute(1))
+                )
+                let group = NSCollectionLayoutGroup.vertical(
+                    layoutSize: NSCollectionLayoutSize(widthDimension: .fractionalWidth(1), heightDimension: .absolute(1)),
+                    subitems: [item]
+                )
+                let layoutSection = NSCollectionLayoutSection(group: group)
+                layoutSection.contentInsets = NSDirectionalEdgeInsets(
+                    top: 0, leading: Layout.pageMargin, bottom: 0, trailing: Layout.pageMargin
+                )
+                layoutSection.boundarySupplementaryItems = [makeHeader()]
+                return layoutSection
+            }
             let item = NSCollectionLayoutItem(
                 layoutSize: NSCollectionLayoutSize(widthDimension: .fractionalWidth(1), heightDimension: .absolute(140))
             )
@@ -213,6 +235,36 @@ final class HomeDashboardViewController: UIViewController {
             layoutSection.interGroupSpacing = Layout.cardGap
             layoutSection.contentInsets = NSDirectionalEdgeInsets(
                 top: 0, leading: Layout.pageMargin, bottom: Layout.space8, trailing: Layout.pageMargin
+            )
+            layoutSection.boundarySupplementaryItems = [makeHeader()]
+            return layoutSection
+
+        case .roomEmpty:
+            let item = NSCollectionLayoutItem(
+                layoutSize: NSCollectionLayoutSize(widthDimension: .fractionalWidth(1), heightDimension: .absolute(220))
+            )
+            let group = NSCollectionLayoutGroup.vertical(
+                layoutSize: NSCollectionLayoutSize(widthDimension: .fractionalWidth(1), heightDimension: .absolute(220)),
+                subitems: [item]
+            )
+            let layoutSection = NSCollectionLayoutSection(group: group)
+            layoutSection.contentInsets = NSDirectionalEdgeInsets(
+                top: 0, leading: Layout.pageMargin, bottom: Layout.space8, trailing: Layout.pageMargin
+            )
+            layoutSection.boundarySupplementaryItems = [makeHeader()]
+            return layoutSection
+
+        case .roomsEmpty:
+            let item = NSCollectionLayoutItem(
+                layoutSize: NSCollectionLayoutSize(widthDimension: .fractionalWidth(1), heightDimension: .absolute(220))
+            )
+            let group = NSCollectionLayoutGroup.vertical(
+                layoutSize: NSCollectionLayoutSize(widthDimension: .fractionalWidth(1), heightDimension: .absolute(220)),
+                subitems: [item]
+            )
+            let layoutSection = NSCollectionLayoutSection(group: group)
+            layoutSection.contentInsets = NSDirectionalEdgeInsets(
+                top: Layout.space8, leading: Layout.pageMargin, bottom: Layout.space8, trailing: Layout.pageMargin
             )
             layoutSection.boundarySupplementaryItems = [makeHeader()]
             return layoutSection
@@ -265,11 +317,36 @@ final class HomeDashboardViewController: UIViewController {
         } else {
             result.append(.scenarios)
         }
-        if viewModel.devices.isEmpty || viewModel.filteredDevices.isEmpty {
+
+        // 无房间：给出「还没有房间」+ 新建房间；有房间但无设备：逐房间引导扫描。
+        if !viewModel.hasRooms {
+            result.append(.roomsEmpty)
+        }
+        if viewModel.devices.isEmpty {
+            if viewModel.hasRooms {
+                result.append(contentsOf: viewModel.rooms.map { .roomEmpty(room: $0) })
+            }
+            return result
+        }
+        if viewModel.filteredDevices.isEmpty {
             result.append(.devicesEmpty)
-        } else {
-            for group in viewModel.groupedDevices {
-                result.append(.devices(group: group.group, items: group.devices))
+            return result
+        }
+
+        for roomSection in viewModel.roomSections {
+            let totalCount = roomSection.devices.count
+            if let room = roomSection.room {
+                if collapsedRoomIDs.contains(room.id) {
+                    result.append(.room(room: room, items: [], totalCount: totalCount))
+                } else if roomSection.devices.isEmpty {
+                    result.append(.roomEmpty(room: room))
+                } else {
+                    result.append(.room(room: room, items: roomSection.devices, totalCount: totalCount))
+                }
+            } else if isUnassignedCollapsed {
+                result.append(.room(room: nil, items: [], totalCount: totalCount))
+            } else {
+                result.append(.room(room: nil, items: roomSection.devices, totalCount: totalCount))
             }
         }
         return result
@@ -327,18 +404,47 @@ final class HomeDashboardViewController: UIViewController {
         presentSheet(sheet, source: sortButton)
     }
 
-    @objc private func handleGroup() {
-        let sheet = UIAlertController(title: L10n.t("devices.filterByGroup"), message: nil, preferredStyle: .actionSheet)
-        sheet.addAction(UIAlertAction(title: viewModel.groupFilter == nil ? L10n.t("devices.groupAllChecked") : L10n.t("common.all"), style: .default) { [weak self] _ in
-            self?.viewModel.updateGroupFilter(nil)
-        })
-        for group in viewModel.availableGroups {
-            sheet.addAction(UIAlertAction(title: group == viewModel.groupFilter ? "✓ \(group)" : group, style: .default) { [weak self] _ in
-                self?.viewModel.updateGroupFilter(group)
+    @objc private func handleRooms() {
+        let viewModel = RoomManagementViewModel(roomStore: environment.roomStore, deviceStore: environment.savedDeviceStore)
+        let controller = RoomManagementViewController(viewModel: viewModel) { [weak self] in
+            self?.viewModel.reload()
+        }
+        present(UINavigationController(rootViewController: controller), animated: true)
+    }
+
+    private func toggleRoom(_ room: Room) {
+        if collapsedRoomIDs.contains(room.id) {
+            collapsedRoomIDs.remove(room.id)
+        } else {
+            collapsedRoomIDs.insert(room.id)
+        }
+        collectionView.reloadData()
+    }
+
+    private func toggleUnassigned() {
+        isUnassignedCollapsed.toggle()
+        collectionView.reloadData()
+    }
+
+    private func presentMoveSheet(for device: SavedDevice) {
+        let sheet = UIAlertController(title: L10n.t("room.moveTitle"), message: nil, preferredStyle: .actionSheet)
+        let current = device.roomID
+        for room in viewModel.rooms {
+            sheet.addAction(UIAlertAction(
+                title: room.id == current ? "✓ \(room.name)" : room.name,
+                style: .default
+            ) { [weak self] _ in
+                self?.viewModel.moveDevice(id: device.id, to: room.id)
             })
         }
+        sheet.addAction(UIAlertAction(
+            title: current == nil ? "✓ \(L10n.t("room.unassigned"))" : L10n.t("room.unassigned"),
+            style: .default
+        ) { [weak self] _ in
+            self?.viewModel.moveDevice(id: device.id, to: nil)
+        })
         sheet.addAction(UIAlertAction(title: L10n.t("common.cancel"), style: .cancel))
-        presentSheet(sheet, source: groupButton)
+        presentSheet(sheet, source: view)
     }
 
     private func presentSheet(_ sheet: UIAlertController, source: UIView) {
@@ -372,7 +478,8 @@ final class HomeDashboardViewController: UIViewController {
             savedDeviceStore: environment.savedDeviceStore,
             readingsStore: environment.readingsStore,
             readingsService: environment.readingsService,
-            readingsIngestor: environment.readingsIngestor
+            readingsIngestor: environment.readingsIngestor,
+            roomStore: environment.roomStore
         )
         navigationController?.pushViewController(DeviceDetailViewController(viewModel: detailViewModel), animated: true)
     }
@@ -436,11 +543,11 @@ extension HomeDashboardViewController: UICollectionViewDataSource {
 
     func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int {
         switch sections[section] {
-        case .alert, .scenarioEmpty, .devicesEmpty, .error:
+        case .alert, .scenarioEmpty, .roomsEmpty, .roomEmpty, .devicesEmpty, .error:
             return 1
         case .scenarios:
             return viewModel.quickScenarios.count
-        case .devices(_, let items):
+        case .room(_, let items, _):
             return items.count
         }
     }
@@ -488,7 +595,37 @@ extension HomeDashboardViewController: UICollectionViewDataSource {
             }
             return cell
 
-        case .devices(_, let items):
+        case .roomsEmpty:
+            guard let cell = collectionView.dequeueReusableCell(
+                withReuseIdentifier: HomeEmptyCell.reuseIdentifier,
+                for: indexPath
+            ) as? HomeEmptyCell else { return UICollectionViewCell() }
+            cell.configure(
+                symbol: "house",
+                title: L10n.t("room.emptyTitle"),
+                message: L10n.t("room.emptyMessage"),
+                actionTitle: L10n.t("room.create")
+            ) { [weak self] in
+                self?.handleRooms()
+            }
+            return cell
+
+        case .roomEmpty:
+            guard let cell = collectionView.dequeueReusableCell(
+                withReuseIdentifier: HomeEmptyCell.reuseIdentifier,
+                for: indexPath
+            ) as? HomeEmptyCell else { return UICollectionViewCell() }
+            cell.configure(
+                symbol: SymbolName.device,
+                title: L10n.t("room.roomEmptyTitle"),
+                message: L10n.t("room.roomEmptyMessage"),
+                actionTitle: L10n.t("home.scan.action")
+            ) { [weak self] in
+                self?.presentScanner()
+            }
+            return cell
+
+        case .room(_, let items, _):
             guard let cell = collectionView.dequeueReusableCell(
                 withReuseIdentifier: DeviceCardCell.reuseIdentifier,
                 for: indexPath
@@ -559,8 +696,20 @@ extension HomeDashboardViewController: UICollectionViewDataSource {
         switch sections[indexPath.section] {
         case .scenarios, .scenarioEmpty:
             header.configure(title: L10n.t("home.quickScenarios"))
-        case .devices(let group, let items):
-            header.configure(title: "\(group) · \(items.count)")
+        case .room(let room, _, let totalCount):
+            let title = "\(room?.name ?? L10n.t("room.unassigned")) · \(totalCount)"
+            if let room {
+                let collapsed = collapsedRoomIDs.contains(room.id)
+                header.configure(title: title, collapsed: collapsed) { [weak self] in
+                    self?.toggleRoom(room)
+                }
+            } else {
+                header.configure(title: title, collapsed: isUnassignedCollapsed) { [weak self] in
+                    self?.toggleUnassigned()
+                }
+            }
+        case .roomsEmpty, .roomEmpty:
+            header.configure(title: L10n.t("room.manage"))
         default:
             header.configure(title: "")
         }
@@ -580,7 +729,7 @@ extension HomeDashboardViewController: UICollectionViewDelegate {
         contextMenuConfigurationForItemAt indexPath: IndexPath,
         point: CGPoint
     ) -> UIContextMenuConfiguration? {
-        guard case .devices(_, let items) = sections[indexPath.section], items.indices.contains(indexPath.item) else {
+        guard case .room(_, let items, _) = sections[indexPath.section], items.indices.contains(indexPath.item) else {
             return nil
         }
         let device = items[indexPath.item]
@@ -595,7 +744,10 @@ extension HomeDashboardViewController: UICollectionViewDelegate {
             let detail = UIAction(title: L10n.t("home.viewDetail"), image: UIImage(systemName: SymbolName.disclosure)) { _ in
                 self.openDetail(for: device)
             }
-            return UIMenu(children: [detail, edit, delete])
+            let move = UIAction(title: L10n.t("room.moveTitle"), image: UIImage(systemName: "square.grid.2x2")) { _ in
+                self.presentMoveSheet(for: device)
+            }
+            return UIMenu(children: [detail, move, edit, delete])
         }
     }
 }

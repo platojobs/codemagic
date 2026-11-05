@@ -13,6 +13,7 @@ final class DeviceDetailViewController: UIViewController {
             metricName: String
         )
         case metricPicker
+        case roomPicker
         case export
         case emptyState
     }
@@ -203,6 +204,14 @@ final class DeviceDetailViewController: UIViewController {
                 Row(title: L10n.t("device.detail.firmwareVersion"), value: product.firmwareVersion.isEmpty ? "—" : product.firmwareVersion)
             )
             localRows.append(Row(title: "MAC", value: product.mac.isEmpty ? "—" : product.mac))
+        }
+        if viewModel.canChangeRoom {
+            let roomRow = Row(title: L10n.t("room.title"), value: viewModel.roomName, kind: .roomPicker)
+            if let groupIndex = localRows.firstIndex(where: { $0.title == L10n.t("device.detail.group") }) {
+                localRows.insert(roomRow, at: localRows.index(after: groupIndex))
+            } else {
+                localRows.append(roomRow)
+            }
         }
         sections.append(SectionModel(title: L10n.t("device.detail.info"), rows: localRows))
         sections.append(makeDataSection())
@@ -420,6 +429,12 @@ extension DeviceDetailViewController: UITableViewDataSource {
             cell.selectionStyle = .default
             return cell
 
+        case .roomPicker:
+            let cell = makeDetailCell(row: row, secondaryText: row.value)
+            cell.accessoryType = .disclosureIndicator
+            cell.selectionStyle = .default
+            return cell
+
         case .export:
             let cell = makeDetailCell(row: row, secondaryText: row.value)
             cell.accessoryType = .disclosureIndicator
@@ -459,6 +474,8 @@ extension DeviceDetailViewController: UITableViewDelegate {
         switch row.kind {
         case .metricPicker:
             presentMetricPicker()
+        case .roomPicker:
+            presentRoomPicker()
         case .export:
             guard let metric = viewModel.readings.selectedMetric else { return }
             startExport(range: viewModel.readings.selectedRange, metric: metric)
@@ -533,6 +550,32 @@ extension DeviceDetailViewController: UITableViewDelegate {
             self?.startExport(range: range, metric: metric)
         })
         present(alert, animated: true)
+    }
+
+    /// 房间选择：与首页长按「移入房间」同口径，只改本机归属。
+    private func presentRoomPicker() {
+        let sheet = UIAlertController(title: L10n.t("room.moveTitle"), message: nil, preferredStyle: .actionSheet)
+        let current = viewModel.device.roomID
+        for room in viewModel.availableRooms() {
+            sheet.addAction(UIAlertAction(
+                title: room.id == current ? "✓ \(room.name)" : room.name,
+                style: .default
+            ) { [weak self] _ in
+                self?.viewModel.updateRoom(room.id)
+            })
+        }
+        sheet.addAction(UIAlertAction(
+            title: current == nil ? "✓ \(L10n.t("room.unassigned"))" : L10n.t("room.unassigned"),
+            style: .default
+        ) { [weak self] _ in
+            self?.viewModel.updateRoom(nil)
+        })
+        sheet.addAction(UIAlertAction(title: L10n.t("common.cancel"), style: .cancel))
+        if let popover = sheet.popoverPresentationController {
+            popover.sourceView = tableView
+            popover.sourceRect = tableView.rectForRow(at: IndexPath(row: 0, section: 0))
+        }
+        present(sheet, animated: true)
     }
 
     private func presentMetricPicker() {

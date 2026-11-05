@@ -30,6 +30,8 @@ final class AppEnvironment {
     let accountDeletionService: AccountDeletionService
     let scenarioStore: ScenarioStore
     let scenarioExecutor: ScenarioExecutor
+    /// 房间：仅本机数据，不参与同步。
+    let roomStore: RoomStore
 
     /// 启动期降级说明，非空时在「我的」页展示。
     private(set) var startupWarning: String?
@@ -131,6 +133,7 @@ final class AppEnvironment {
         }
 
         scenarioStore = ScenarioStore(database: resolved.database)
+        roomStore = RoomStore(database: resolved.database)
         let engine = syncEngine
         scenarioExecutor = ScenarioExecutor(
             dependencies: ScenarioExecutor.Dependencies(
