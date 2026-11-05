@@ -4,6 +4,7 @@
 
 | Tag | MARKETING_VERSION | Build | 日期 | 对齐后端 |
 | --- | --- | --- | --- | --- |
+| `v0.16.0` | 0.16.0 | 24 | 2026-11-05 | PJGoIoT v0.15.0（openapi 0.11.0；所有权转让 / `isSelf` / `household`·`room` 结构变更进 change_log） |
 | `v0.15.0` | 0.15.0 | 23 | 2026-11-05 | PJGoIoT v0.13.0（openapi 0.9.0；成员移除 / 退出 / 邀请码列表与撤销 / 房间整段排序 / 真实计数） |
 | `v0.14.0` | 0.14.0 | 22 | 2026-11-05 | PJGoIoT v0.12.0（openapi 0.8.0；家庭 / 邀请码 / 房间 / 设备归属 PATCH） |
 | `v0.13.0` | 0.13.0 | 21 | 2026-11-05 | PJGoIoT v0.9.0（openapi 0.7.0；无契约变更，房间仅本机） |
@@ -26,6 +27,26 @@
 | `v0.3.0` | 0.3.0 | 4 | 2026-11-05 | 0.3.0 |
 | `v0.2.0` | 0.2.0 | 3 | 2026-11-05 | 0.2.0 |
 | `v0.1.0` | — | 1 | 2026-11-05 | — |
+
+---
+
+## v0.16.0（build 24）
+
+**主题：所有权转让 + 家庭结构变更进增量同步**
+
+- **契约（PJGoIoT v0.15.0 / openapi 0.11.0）**：
+  - 成员 DTO 增加 `isSelf`；`isSelf` 为 true 的行不出现「转让所有权 / 移除成员」。老后端不返回该字段时解码为 `nil`，入口整体隐藏。
+  - `POST /households/{id}/transfer-ownership`（body `{userId}`，200 返回调用者视角的家庭）：owner 可转让给普通成员；403 / 404 / 409 转可读文案并刷新成员与家庭详情；405 / 裸 404 视为服务端不支持，隐藏入口且不弹错误。
+  - `change_log` 新增 `household` / `room` 两个 entity。未知 entity 一律跳过但**游标照常推进**（固定 JSON 用例覆盖）。
+- **能力矩阵集中判定**：`HouseholdCapabilities` 是 owner / member 权限的唯一来源（改名、邀请码、移除成员、转让、退出拦截），界面与服务层只消费结果。
+- **增量同步语义**：
+  - `household upsert`：更新家庭名、接收者角色、`memberCount`；本地没有该家庭（如刚被邀请加入）时，本轮拉取结束补一次 `GET /households` 全量基线。
+  - `household delete`：整段移除该家庭的房间、待上报归属与本地归属，设备回落个人家庭（不静默删设备），当前家庭切回个人家庭。
+  - `room upsert`：按 `sortOrder` 落序、新增或改名；本机未上报的改名不丢，只应用服务端顺序。同名未上报房间认领而不是重复创建。
+  - `room delete`：删本地房间并清空房内设备归属与待上报项，设备本身保留。
+  - 410 `RESYNC_REQUIRED` 沿用原逻辑：清游标 → `cursor=0` 全量重拉，pending 编辑不丢。
+- **房间整段重排补强**：先本地落序（离线也保留），提交前补传未同步房间，收到 409 由界面重拉并提示已刷新，不盲目重试。
+- 单测 **315 个，0 失败**（新增 12 个：`isSelf` 本人行无操作、转让成功降级并隐藏入口、405 静默隐藏、403 可读提示并刷新、household upsert 更新 / 未知家庭基线、household delete 整段清理并回落个人家庭、room upsert 落序 / 新建、pending 改名保留、room delete 清归属不删设备、未知 entity 跳过且游标前进、未知 household 触发全量基线）。E2E fixture **299 项全 PASS**；真 Postgres 同套契约 + 直接查库确认转让后 `owner_user_id`、移除后成员行、删房后 `household_rooms`、`change_log` 结构实体与 `deleted`。
 
 ---
 

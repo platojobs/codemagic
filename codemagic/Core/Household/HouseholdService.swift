@@ -29,6 +29,11 @@ final class HouseholdService {
     private let logStore: ScanLogStore
     private let now: () -> Date
 
+    /// 服务端是否支持所有权转让。成员 DTO 缺少 `isSelf`（老后端）或转让端点返回 405 时置 false，入口隐藏。
+    private(set) var supportsOwnershipTransfer = true
+    /// 已确认端点不存在（405 / 裸 404）：后续成员刷新不得再把入口重新打开。
+    private var transferUnsupportedConfirmed = false
+
     init(
         api: HouseholdAPIServicing,
         tokenStore: TokenStoring,
@@ -95,7 +100,15 @@ final class HouseholdService {
             completion(.failure(.notFound))
             return
         }
-        api.members(householdID: household.remoteID, token: token, completion: completion)
+        api.members(householdID: household.remoteID, token: token) { [weak self] result in
+            guard let self else { return }
+            if case .success(let members) = result {
+                // 老后端不返回 isSelf：此时无法安全判定「这一行是我」，转让入口整体隐藏。
+                self.supportsOwnershipTransfer = !self.transferUnsupportedConfirmed
+                    && members.contains { $0.isSelf != nil }
+            }
+            completion(result)
+        }
     }
 
     // MARK: - 家庭
@@ -322,6 +335,12 @@ final class HouseholdService {
             completion(.failure(.conflict))
             return
         }
+        guard !household.capabilities(supportsOwnershipTransfer: supportsOwnershipTransfer)
+            .mustBlockOwnerLeave else {
+            // owner 还有其他成员：本地直接拦截，提示先转让或移除成员。
+            completion(.failure(.conflict))
+            return
+        }
         api.leaveHousehold(householdID: household.remoteID, token: token) { [weak self] result in
             guard let self else { return }
             switch result {
@@ -331,6 +350,45 @@ final class HouseholdService {
                 self.recordLog(L10n.f("household.log.left", household.name))
                 self.applyLocalDeparture(household: household)
                 self.refreshHouseholds { _ in completion(.success(())) }
+            }
+        }
+    }
+
+    /// 所有权转让。成功返回调用者视角的新家庭快照（`role=member`）并刷新服务端计数。
+    func transferOwnership(
+        householdID: UUID,
+        to userID: String,
+        completion: @escaping (Result<Household, HouseholdAPIError>) -> Void
+    ) {
+        guard let token else {
+            completion(.failure(.unauthorized))
+            return
+        }
+        guard let household = try? householdStore.fetch(localID: householdID) else {
+            completion(.failure(.notFound))
+            return
+        }
+        guard household.canManageHousehold else {
+            completion(.failure(.forbidden))
+            return
+        }
+        guard supportsOwnershipTransfer else {
+            completion(.failure(.unsupported))
+            return
+        }
+        api.transferOwnership(householdID: household.remoteID, userID: userID, token: token) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .failure(.unsupported):
+                self.transferUnsupportedConfirmed = true
+                self.supportsOwnershipTransfer = false
+                completion(.failure(.unsupported))
+            case .failure(let error):
+                completion(.failure(error))
+            case .success(let updated):
+                try? self.householdStore.upsert(updated)
+                self.recordLog(L10n.t("household.log.ownershipTransferred"))
+                self.refreshHouseholds { _ in completion(.success(updated)) }
             }
         }
     }
@@ -354,7 +412,7 @@ final class HouseholdService {
         metadataStore.currentHouseholdRemoteID = personal?.remoteID
     }
 
-    /// 整段重排：`orderedRoomIDs` 必须覆盖当前家庭全部已同步房间。409 时不改本地顺序。
+    /// 整段重排：先本地落序（离线也保留），提交前补传未同步房间；409 由界面重新拉取后整段重提。
     func reorderRooms(
         householdID: UUID,
         orderedRoomIDs: [UUID],
@@ -368,35 +426,43 @@ final class HouseholdService {
             completion(.failure(.forbidden))
             return
         }
-        let currentRooms = ((try? roomStore.fetchAll(householdID: household.id)) ?? [])
-            .filter { !$0.isDeleted }
-        let remoteRooms = currentRooms.filter { $0.remoteID != nil }
-        let orderedRemoteIDs = orderedRoomIDs.compactMap { id in
-            remoteRooms.first(where: { $0.id == id })?.remoteID
-        }
+        // 先落本机顺序：离线 / 网络失败时用户的排列不会丢。
+        try? roomStore.applySortOrders(orderedRoomIDs, at: now())
         guard let token, !household.remoteID.isEmpty else {
-            // 未登录 / 离线：只落本机顺序。
-            try? roomStore.applySortOrders(orderedRoomIDs, at: now())
             completion(.success((try? roomStore.fetchAll(householdID: household.id)) ?? []))
             return
         }
-        guard orderedRemoteIDs.count == remoteRooms.count, Set(orderedRemoteIDs).count == remoteRooms.count else {
-            completion(.failure(.roomSetMismatch))
-            return
-        }
-        api.reorderRooms(householdID: household.remoteID, roomIDs: orderedRemoteIDs, token: token) { [weak self] result in
+        // 提交前补传未同步房间，避免服务端集合缺项导致 409。
+        pushLocalRooms(token: token, household: household) { [weak self] in
             guard let self else { return }
-            switch result {
-            case .failure(let error):
-                // 网络失败不落本地顺序，避免与服务端真值分叉；409 由界面重新拉取后整段重提。
-                completion(.failure(error))
-            case .success(let remotes):
-                for remote in remotes {
-                    _ = self.upsertRemoteRoom(remote, household: household)
+            let currentRooms = ((try? self.roomStore.fetchAll(householdID: household.id)) ?? [])
+                .filter { !$0.isDeleted }
+            let remoteRooms = currentRooms.filter { $0.remoteID != nil }
+            let orderedRemoteIDs = orderedRoomIDs.compactMap { id in
+                remoteRooms.first(where: { $0.id == id })?.remoteID
+            }
+            guard orderedRemoteIDs.count == remoteRooms.count,
+                  Set(orderedRemoteIDs).count == remoteRooms.count else {
+                completion(.failure(.roomSetMismatch))
+                return
+            }
+            self.api.reorderRooms(
+                householdID: household.remoteID,
+                roomIDs: orderedRemoteIDs,
+                token: token
+            ) { [weak self] result in
+                guard let self else { return }
+                switch result {
+                case .failure(let error):
+                    completion(.failure(error))
+                case .success(let remotes):
+                    for remote in remotes {
+                        _ = self.upsertRemoteRoom(remote, household: household)
+                    }
+                    let ids = remotes.compactMap { self.localRoomID(remoteID: $0.id) }
+                    try? self.roomStore.applySortOrders(ids, at: self.now())
+                    completion(.success(self.visibleRooms()))
                 }
-                let ids = remotes.compactMap { self.localRoomID(remoteID: $0.id) }
-                try? self.roomStore.applySortOrders(ids, at: self.now())
-                completion(.success(self.visibleRooms()))
             }
         }
     }
@@ -739,6 +805,115 @@ final class HouseholdService {
     }
 
     // MARK: - 远端映射（供 SyncEngine 使用）
+
+    /// 家庭结构变更的应用结果。`needsBaseline` 表示本地没有该家庭 / 其房间，
+    /// 需要调用方触发一次 `GET /households` 全量基线（后端不回放历史，不能靠增量补齐）。
+    enum StructuralChangeOutcome: Equatable {
+        case applied
+        case needsBaseline
+    }
+
+    func applyHouseholdChange(_ payload: HouseholdChangePayload) -> StructuralChangeOutcome {
+        guard let local = try? householdStore.fetch(remoteID: payload.householdID) else {
+            // 本地没有这个家庭（例如刚被邀请加入）：触发全量基线。
+            return payload.deleted ? .applied : .needsBaseline
+        }
+        if payload.deleted {
+            applyHouseholdDeletion(household: local)
+            return .applied
+        }
+        var updated = local
+        if !payload.name.isEmpty { updated.name = payload.name }
+        updated.role = payload.role
+        updated.memberCount = payload.memberCount
+        updated.updatedAt = now()
+        try? householdStore.upsert(updated)
+        return .applied
+    }
+
+    func applyRoomChange(_ payload: RoomChangePayload) -> StructuralChangeOutcome {
+        guard let household = try? householdStore.fetch(remoteID: payload.householdID) else {
+            // 家庭尚不在本地：先补家庭基线，房间随后由全量拉取补齐。
+            return payload.deleted ? .applied : .needsBaseline
+        }
+        if payload.deleted {
+            guard let room = try? roomStore.fetch(remoteID: payload.roomID) else { return .applied }
+            // 删房间只清空房内设备归属，绝不删除设备本身。
+            let devices = (try? deviceStore.fetchAll())?.filter { $0.roomID == room.id } ?? []
+            for device in devices {
+                try? pendingStore.remove(deviceID: device.id)
+                try? deviceStore.setAssignment(
+                    id: device.id,
+                    householdID: household.id,
+                    roomID: nil,
+                    remoteRoomID: nil,
+                    remoteHouseholdID: household.remoteID
+                )
+            }
+            try? roomStore.purge(id: room.id)
+            return .applied
+        }
+        if let existing = try? roomStore.fetch(remoteID: payload.roomID) {
+            if existing.syncState == .pending {
+                // 本机未上报的改名不丢；服务端顺序仍然生效。
+                try? roomStore.setSortOrder(id: existing.id, sortOrder: payload.sortOrder, at: now())
+            } else {
+                try? roomStore.applyRemote(
+                    id: existing.id,
+                    remoteID: payload.roomID,
+                    name: payload.name,
+                    sortOrder: payload.sortOrder,
+                    at: now()
+                )
+            }
+            return .applied
+        }
+        // 服务端新增房间：若本机有同名未上报房间，认领而不是重复创建，保留设备归属。
+        if let local = (try? roomStore.localRooms(householdID: household.id))?.first(where: {
+            Self.normalizedName($0.name) == Self.normalizedName(payload.name)
+        }) {
+            try? roomStore.applyRemote(
+                id: local.id,
+                remoteID: payload.roomID,
+                name: payload.name,
+                sortOrder: payload.sortOrder,
+                at: now()
+            )
+            return .applied
+        }
+        _ = upsertRemoteRoom(
+            RemoteHouseholdRoom(
+                id: payload.roomID,
+                householdID: payload.householdID,
+                name: payload.name,
+                sortOrder: payload.sortOrder
+            ),
+            household: household
+        )
+        return .applied
+    }
+
+    /// 家庭被删除（解散 / 被移除 / 自己退出）：整段移除家庭、房间与设备归属，不逐房间处理。
+    /// 设备本身保留，回落个人家庭，避免静默删除用户设备。
+    private func applyHouseholdDeletion(household: Household) {
+        let personal = households().first(where: \.isPersonal)
+        let devices = (try? deviceStore.fetchAll())?.filter { $0.householdID == household.id } ?? []
+        for device in devices {
+            try? pendingStore.remove(deviceID: device.id)
+            try? deviceStore.setAssignment(
+                id: device.id,
+                householdID: personal?.id,
+                roomID: nil,
+                remoteRoomID: nil,
+                remoteHouseholdID: personal?.remoteID
+            )
+        }
+        try? roomStore.purgeHousehold(householdID: household.id)
+        try? householdStore.delete(localID: household.id)
+        if metadataStore.currentHouseholdRemoteID == household.remoteID {
+            metadataStore.currentHouseholdRemoteID = personal?.remoteID
+        }
+    }
 
     func localize(remoteHouseholdID: String?, remoteRoomID: String?) -> (householdID: UUID?, roomID: UUID?) {
         let householdID = householdStore.localID(forRemoteID: remoteHouseholdID)

@@ -1,27 +1,28 @@
-# 真实 Postgres 端到端联调（v0.15.0）
+# 真实 Postgres 端到端联调（v0.16.0）
 
 本文件记录 `scripts/e2e-postgres.sh` 的**真实本地运行输出**。与 `scripts/e2e-contract.sh`（后端 `STORE=fixture` 内存态）不同，本项起真实 Postgres + 真实 API，额外覆盖只有真实库才能构造的分支，并直接查库核对家庭链路的数据不变量。
 
 ## 环境与命令
 
-- iOS 仓库：`codemagic`（v0.15.0）
-- 后端：`PJGoIoT` `v0.13.0`（openapi `0.9.0`），通过 `PJGOIOT_DIR` 指向干净 worktree
+- iOS 仓库：`codemagic`（v0.16.0）
+- 后端：`PJGoIoT` `v0.15.0`（openapi `0.11.0`），通过 `PJGOIOT_DIR` 指向干净 worktree
 - 本机：macOS + Docker + Go 1.24+（Docker daemon 可用）
 - 命令：
 
 ```bash
 cd /Users/platojobs/Desktop/GitHub/platojobs/codemagic
-PJGOIOT_DIR=/tmp/pjgoiot-v013 ./scripts/e2e-postgres.sh
+PJGOIOT_DIR=/tmp/pjgoiot-v0.15.0 ./scripts/e2e-postgres.sh
 ```
 
 脚本行为：
 
 1. 用 `$PJGOIOT_DIR/scripts/stack-for-e2e.sh` 在 `mktemp` 目录里起独立 Postgres 容器与 API，stdout 输出 `BASE_URL`；
-2. **以 `E2E_EXTERNAL_BASE_URL` 复用该栈**跑现有 **260 项**契约套件（`e2e-contract.sh` 支持外部后端后不再自起 fixture），其中第 9 节覆盖家庭链路；
+2. **以 `E2E_EXTERNAL_BASE_URL` 复用该栈**跑现有 **299 项**契约套件（`e2e-contract.sh` 支持外部后端后不再自起 fixture），其中第 9 节覆盖家庭链路与 v0.14.0 / v0.15.0 转让、`isSelf`、结构变更；
 3. **家庭链路（真 Postgres）**：新建 owner / member / outsider 三个匿名账号，创建家庭 → 两个邀请码（一个用于列表与撤销、一个给成员领取）→ 列表无明文 → 撤销后 claim 404 → 建 3 间房并整段排序成功 → 缺项 409 → owner 带成员退出 409 → 移除成员后对方 404 → owner 退出 204；再用 `psql` 直接查库：邀请码只存 64 位哈希、移除成员后成员行删除、退出后成员行清空；
-4. 用真实 SQL 把最老 `change_log.seq` 的 `server_ts` 改到 100 天前，再跑 `cmd/cleanup`（保留 90 天），构造 **410 `RESYNC_REQUIRED`**；
-5. 验证 `cursor=0` 全量重拉永不 410、series / metrics、export（limit=5000）、注销；
-6. `trap` 停止栈并删除临时目录；`E2E_KEEP_STATE=1` 可保留现场。
+4. **家庭结构变更（真 Postgres）**：新建 owner / member → `isSelf` 恰一行 → 转让（非 owner 403、成功后原 owner 降级）→ 新 owner 改名、建房 / 改名 / 删房 → 双方 `change_log` 出现 `household` upsert（角色按接收者）与 `room` upsert / delete → 移除原 owner 后其 404 且不再收到后续结构变更，历史行仍可读 → 解散家庭推送 `household delete(deleted=true)`；并用 `psql` 核对 `households.owner_user_id`、成员行、`household_rooms`、`change_log`；
+5. 用真实 SQL 把最老 `change_log.seq` 的 `server_ts` 改到 100 天前，再跑 `cmd/cleanup`（保留 90 天），构造 **410 `RESYNC_REQUIRED`**；
+6. 验证 `cursor=0` 全量重拉永不 410、series / metrics、export（limit=5000）、注销；
+7. `trap` 停止栈并删除临时目录；`E2E_KEEP_STATE=1` 可保留现场。
 
 隔离说明：所有后端状态与日志都在 `mktemp` 目录（`E2E_STATE_DIR`）；契约 runner 是纯网络、无本地状态，**不读写 App 开发用的 SQLite / UserDefaults**。
 

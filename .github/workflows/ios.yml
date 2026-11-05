@@ -76,11 +76,12 @@ jobs:
       - name: Checkout iOS repo
         uses: actions/checkout@v7
 
-      - name: Checkout PJGoIoT (backend fixture)
+      - name: Checkout PJGoIoT (backend fixture, pinned release tag)
         uses: actions/checkout@v7
         with:
           repository: platojobs/PJGoIoT
           path: PJGoIoT
+          ref: v0.15.0
           persist-credentials: false
 
       - name: Set up Go (version from PJGoIoT/go.mod)

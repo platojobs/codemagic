@@ -162,16 +162,16 @@ final class HouseholdManagementViewController: UIViewController {
     }
 
     private func presentLeave() {
-        guard let current = viewModel.current, current.canLeave else {
+        guard viewModel.capabilities.canLeave else {
             ToastView.show(L10n.t("household.leave.personal"), kind: .info, in: self)
             return
         }
         // owner 且还有其他成员：本地直接给出可读提示，避免只展示服务端 message。
-        if current.role == .owner && current.memberCount > 1 {
+        if viewModel.capabilities.mustBlockOwnerLeave {
             ToastView.show(L10n.t("household.leave.ownerConflict"), kind: .failure, in: self)
             return
         }
-        let isOwner = current.role == .owner
+        let isOwner = viewModel.capabilities.isOwner
         let alert = UIAlertController(
             title: L10n.t("household.leave.title"),
             message: isOwner ? L10n.t("household.leave.ownerMessage") : L10n.t("household.leave.memberMessage"),
@@ -183,6 +183,57 @@ final class HouseholdManagementViewController: UIViewController {
                 guard let self else { return }
                 if succeeded {
                     ToastView.show(L10n.t("household.leave.done"), kind: .success, in: self)
+                } else {
+                    self.presentErrorIfNeeded()
+                }
+            }
+        })
+        present(alert, animated: true)
+    }
+
+    /// 成员行操作：转让所有权与移除成员并列互斥；本人行不出现任何操作。
+    private func presentMemberActions(_ member: HouseholdMember) {
+        let canTransfer = viewModel.canTransfer(member: member)
+        let canRemove = viewModel.canRemove(member: member)
+        guard canTransfer || canRemove else { return }
+        let sheet = UIAlertController(
+            title: L10n.f("household.member.actions.title", member.shortID),
+            message: nil,
+            preferredStyle: .actionSheet
+        )
+        if canTransfer {
+            sheet.addAction(UIAlertAction(
+                title: L10n.t("household.transfer.action"),
+                style: .default
+            ) { [weak self] _ in
+                self?.confirmTransferOwnership(member)
+            })
+        }
+        if canRemove {
+            sheet.addAction(UIAlertAction(
+                title: L10n.t("household.member.remove.action"),
+                style: .destructive
+            ) { [weak self] _ in
+                self?.confirmRemoveMember(member)
+            })
+        }
+        sheet.addAction(UIAlertAction(title: L10n.t("common.cancel"), style: .cancel))
+        presentSheet(sheet, source: nil)
+    }
+
+    private func confirmTransferOwnership(_ member: HouseholdMember) {
+        let alert = UIAlertController(
+            title: L10n.t("household.transfer.title"),
+            message: L10n.f("household.transfer.message", member.shortID) + "\n\n" + viewModel.transferConsequence,
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: L10n.t("common.cancel"), style: .cancel))
+        alert.addAction(UIAlertAction(title: L10n.t("household.transfer.action"), style: .destructive) {
+            [weak self] _ in
+            self?.viewModel.transferOwnership(to: member) { [weak self] succeeded in
+                guard let self else { return }
+                if succeeded {
+                    ToastView.show(L10n.t("household.transfer.success"), kind: .success, in: self)
                 } else {
                     self.presentErrorIfNeeded()
                 }
@@ -345,9 +396,12 @@ extension HouseholdManagementViewController: UITableViewDataSource {
                 configuration.textProperties.color = AppTheme.Palette.secondaryText
             } else {
                 let member = viewModel.members[indexPath.row]
-                configuration.text = "\(member.shortID) · \(member.role.displayName)"
+                configuration.text = member.isCurrentUser
+                    ? "\(member.shortID) · \(member.role.displayName) · \(L10n.t("household.member.me"))"
+                    : "\(member.shortID) · \(member.role.displayName)"
                 configuration.secondaryText = "\(member.kindDisplayName) · \(Self.dateFormatter.string(from: member.joinedAt))"
                 cell.selectionStyle = .default
+                cell.accessibilityLabel = configuration.text
             }
         case .invitations:
             if viewModel.invitations.isEmpty {
@@ -425,9 +479,7 @@ extension HouseholdManagementViewController: UITableViewDelegate {
             if indexPath.row == 1 { presentSwitch() }
         case .members:
             guard !viewModel.members.isEmpty else { return }
-            let member = viewModel.members[indexPath.row]
-            guard viewModel.canRemove(member: member) else { return }
-            confirmRemoveMember(member)
+            presentMemberActions(viewModel.members[indexPath.row])
         case .invitations:
             guard !viewModel.invitations.isEmpty else { return }
             confirmRevoke(viewModel.invitations[indexPath.row])
@@ -444,7 +496,7 @@ extension HouseholdManagementViewController: UITableViewDelegate {
         }
     }
 
-    /// 成员支持左滑移除（二次确认），与点击同一路径。
+    /// 成员支持左滑转让 / 移除（均二次确认）；本人行不出现任何操作。
     func tableView(
         _ tableView: UITableView,
         trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath
@@ -453,13 +505,30 @@ extension HouseholdManagementViewController: UITableViewDelegate {
               !viewModel.members.isEmpty
         else { return nil }
         let member = viewModel.members[indexPath.row]
-        guard viewModel.canRemove(member: member) else { return nil }
-        let action = UIContextualAction(style: .destructive, title: L10n.t("household.member.remove.action")) {
-            [weak self] _, _, completion in
-            self?.confirmRemoveMember(member)
-            completion(true)
+        var actions: [UIContextualAction] = []
+        if viewModel.canTransfer(member: member) {
+            let transfer = UIContextualAction(
+                style: .normal,
+                title: L10n.t("household.transfer.action")
+            ) { [weak self] _, _, completion in
+                self?.confirmTransferOwnership(member)
+                completion(true)
+            }
+            transfer.backgroundColor = AppTheme.Palette.accent
+            actions.append(transfer)
         }
-        return UISwipeActionsConfiguration(actions: [action])
+        if viewModel.canRemove(member: member) {
+            let remove = UIContextualAction(
+                style: .destructive,
+                title: L10n.t("household.member.remove.action")
+            ) { [weak self] _, _, completion in
+                self?.confirmRemoveMember(member)
+                completion(true)
+            }
+            actions.append(remove)
+        }
+        guard !actions.isEmpty else { return nil }
+        return UISwipeActionsConfiguration(actions: actions)
     }
 }
 

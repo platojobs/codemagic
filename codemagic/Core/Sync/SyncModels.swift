@@ -223,7 +223,12 @@ struct SyncChange: Decodable, Equatable {
     let entity: String
     let entityID: String
     let op: String
+    /// 设备实体 payload；非设备实体会解出空对象（不使用）。
     let payload: RemoteDevice
+    /// `household` 实体的结构变更 payload（后端 v0.15.0 起）。
+    let householdChange: HouseholdChangePayload?
+    /// `room` 实体的结构变更 payload（后端 v0.15.0 起）。
+    let roomChange: RoomChangePayload?
     let serverTimestamp: Date?
 
     private enum CodingKeys: String, CodingKey {
@@ -243,12 +248,52 @@ struct SyncChange: Decodable, Equatable {
         op = (try? container.decodeIfPresent(String.self, forKey: .op)) ?? "upsert"
         payload = (try? container.decode(RemoteDevice.self, forKey: .payload))
             ?? RemoteDevice(id: "", externalID: "", updatedAt: Date(timeIntervalSince1970: 0))
+        householdChange = try? container.decode(HouseholdChangePayload.self, forKey: .payload)
+        roomChange = try? container.decode(RoomChangePayload.self, forKey: .payload)
         serverTimestamp = SyncDateCodec.parse(
             (try? container.decodeIfPresent(String.self, forKey: .serverTs)) ?? ""
         )
     }
 
-    var isDeletion: Bool { op == "delete" || payload.deletedAt != nil }
+    init(
+        seq: Int64,
+        entity: String,
+        entityID: String,
+        op: String,
+        payload: RemoteDevice,
+        householdChange: HouseholdChangePayload? = nil,
+        roomChange: RoomChangePayload? = nil,
+        serverTimestamp: Date? = nil
+    ) {
+        self.seq = seq
+        self.entity = entity
+        self.entityID = entityID
+        self.op = op
+        self.payload = payload
+        self.householdChange = householdChange
+        self.roomChange = roomChange
+        self.serverTimestamp = serverTimestamp
+    }
+
+    var isDeletion: Bool {
+        op == "delete"
+            || payload.deletedAt != nil
+            || householdChange?.deleted == true
+            || roomChange?.deleted == true
+    }
+
+    var isDeviceEntity: Bool {
+        entity == SyncEntity.device || entity == SyncEntity.legacyDevice
+    }
+}
+
+/// `change_log` 的实体名。未知实体必须跳过且照常推进游标。
+enum SyncEntity {
+    static let device = "user_device"
+    /// 既有测试 / 旧客户端的实体名。
+    static let legacyDevice = "device"
+    static let household = "household"
+    static let room = "room"
 }
 
 struct SyncChangesPage: Decodable, Equatable {

@@ -1225,6 +1225,13 @@ private func run() -> Int32 {
             && memberList.contains { text($0, "userId") == memberAccount.userID && text($0, "role") == "member" },
         "成员角色与账号对应"
     )
+    let selfRows = memberList.filter { ($0["isSelf"] as? Bool) == true }
+    report.check(selfRows.count == 1, "成员列表恰有一行 isSelf=true", "count=\(selfRows.count)")
+    report.check(
+        selfRows.first.map { text($0, "userId") == memberAccount.userID } ?? false,
+        "isSelf=true 的行就是调用者本人",
+        "userId=\(selfRows.first.map { text($0, "userId") } ?? "")"
+    )
 
     // 9.5 房间归属设备，成员可见
     let roomResponse = client.request(
@@ -1581,6 +1588,215 @@ private func run() -> Int32 {
     report.check(ownerLeave.status == 204, "移除成员后 owner 退出返回 204", "status=\(ownerLeave.status)")
     let managementAfterLeave = client.request("GET", "households/\(managementID)", token: ownerAccount.token)
     report.check(managementAfterLeave.status == 404, "退出后家庭 404", "status=\(managementAfterLeave.status)")
+
+    // 9.12 所有权转让（后端 v0.14.0）与结构变更进 change_log（后端 v0.15.0）
+    let transferHousehold = client.request(
+        "POST", "households", token: ownerAccount.token, json: ["name": "e2e-转让"]
+    )
+    let transferID = text(jsonObject(transferHousehold.body) ?? [:], "id")
+    report.check(
+        transferHousehold.status == 201 && !transferID.isEmpty,
+        "创建转让家庭",
+        "status=\(transferHousehold.status)"
+    )
+    let transferInvite = client.request(
+        "POST", "households/\(transferID)/invitations", token: ownerAccount.token, json: [String: Any]()
+    )
+    let transferCode = text(jsonObject(transferInvite.body) ?? [:], "code")
+    let transferClaim = client.request(
+        "POST", "households/invitations/claim", token: memberAccount.token, json: ["code": transferCode]
+    )
+    report.check(transferClaim.status == 200, "成员加入转让家庭", "status=\(transferClaim.status)")
+
+    func payloadObject(_ change: [String: Any]) -> [String: Any] {
+        change["payload"] as? [String: Any] ?? [:]
+    }
+
+    func syncChanges(token: String) -> [[String: Any]] {
+        let response = client.request("GET", "sync/changes?cursor=0&limit=500", token: token)
+        return list((jsonObject(response.body) ?? [:])["changes"])
+    }
+
+    let ownerMemberRows = list((jsonObject(client.request(
+        "GET", "households/\(transferID)/members", token: ownerAccount.token
+    ).body) ?? [:])["items"])
+    let ownerSelfRow = ownerMemberRows.first { ($0["isSelf"] as? Bool) == true } ?? [:]
+    report.check(
+        text(ownerSelfRow, "userId") == ownerAccount.userID && text(ownerSelfRow, "role") == "owner",
+        "owner 视角 isSelf 指向本人且为 owner",
+        "userId=\(text(ownerSelfRow, "userId"))"
+    )
+
+    // 非成员转让目标 404；member 无权转让 403；本人 → 400
+    let transferToOutsider = client.request(
+        "POST", "households/\(transferID)/transfer-ownership", token: ownerAccount.token,
+        json: ["userId": outsiderAccount.userID]
+    )
+    report.check(transferToOutsider.status == 404, "转让给非成员返回 404", "status=\(transferToOutsider.status)")
+    report.check(
+        errorCode(transferToOutsider.body) == "NOT_FOUND" && !errorMessage(transferToOutsider.body).isEmpty,
+        "转让 404 带可读 message",
+        "body=\(bodyText(transferToOutsider.body))"
+    )
+    let memberTransfer = client.request(
+        "POST", "households/\(transferID)/transfer-ownership", token: memberAccount.token,
+        json: ["userId": ownerAccount.userID]
+    )
+    report.check(memberTransfer.status == 403, "member 转让返回 403", "status=\(memberTransfer.status)")
+    report.check(errorCode(memberTransfer.body) == "FORBIDDEN", "member 转让错误码为 FORBIDDEN")
+    let selfTransfer = client.request(
+        "POST", "households/\(transferID)/transfer-ownership", token: ownerAccount.token,
+        json: ["userId": ownerAccount.userID]
+    )
+    report.check(selfTransfer.status == 400, "转让给自己返回 400", "status=\(selfTransfer.status)")
+
+    // 转让成功：调用者降为 member，接收者成为 owner
+    let transferSuccess = client.request(
+        "POST", "households/\(transferID)/transfer-ownership", token: ownerAccount.token,
+        json: ["userId": memberAccount.userID]
+    )
+    let transferObject = jsonObject(transferSuccess.body) ?? [:]
+    report.check(transferSuccess.status == 200, "转让所有权返回 200", "status=\(transferSuccess.status) body=\(bodyText(transferSuccess.body))")
+    report.check(text(transferObject, "role") == "member", "转让后原 owner 角色为 member", "role=\(text(transferObject, "role"))")
+    report.check(text(transferObject, "ownerUserId") == memberAccount.userID, "家庭 ownerUserId 指向新 owner")
+
+    let afterTransferRows = list((jsonObject(client.request(
+        "GET", "households/\(transferID)/members", token: ownerAccount.token
+    ).body) ?? [:])["items"])
+    let formerOwnerRow = afterTransferRows.first { text($0, "userId") == ownerAccount.userID } ?? [:]
+    let newOwnerRow = afterTransferRows.first { text($0, "userId") == memberAccount.userID } ?? [:]
+    report.check(text(formerOwnerRow, "role") == "member", "原 owner 在成员列表降为 member")
+    report.check(text(newOwnerRow, "role") == "owner", "新 owner 在成员列表为 owner")
+    report.check(
+        afterTransferRows.first { ($0["isSelf"] as? Bool) == true }.map { text($0, "userId") == ownerAccount.userID } ?? false,
+        "原 owner 视角 isSelf 仍指向本人"
+    )
+
+    // 权限随角色翻转：原 owner 改名 / 邀请 403，新 owner 可改名
+    let formerRename = client.request(
+        "PATCH", "households/\(transferID)", token: ownerAccount.token, json: ["name": "原 owner 改名"]
+    )
+    report.check(formerRename.status == 403, "原 owner 改名返回 403", "status=\(formerRename.status)")
+    let formerInvite = client.request(
+        "POST", "households/\(transferID)/invitations", token: ownerAccount.token, json: [String: Any]()
+    )
+    report.check(formerInvite.status == 403, "原 owner 签发邀请码返回 403", "status=\(formerInvite.status)")
+    let newRename = client.request(
+        "PATCH", "households/\(transferID)", token: memberAccount.token, json: ["name": "e2e-转让-改名"]
+    )
+    report.check(newRename.status == 200, "新 owner 改名返回 200", "status=\(newRename.status)")
+    report.check(text(jsonObject(newRename.body) ?? [:], "name") == "e2e-转让-改名", "家庭名已更新")
+
+    // 结构变更进入双方 change_log：household upsert 的角色按接收者计算
+    let ownerChangesAfterTransfer = syncChanges(token: ownerAccount.token)
+    let ownerHouseholdChanges = ownerChangesAfterTransfer.filter {
+        text($0, "entity") == "household" && text($0, "entityId") == transferID
+    }
+    let ownerLatestHousehold = ownerHouseholdChanges.last.map(payloadObject) ?? [:]
+    report.check(
+        !ownerHouseholdChanges.isEmpty && text(ownerLatestHousehold, "role") == "member",
+        "原 owner 收到 household upsert 且 role=member",
+        "payload=\(ownerLatestHousehold)"
+    )
+    let memberChangesAfterTransfer = syncChanges(token: memberAccount.token)
+    let memberHouseholdChanges = memberChangesAfterTransfer.filter {
+        text($0, "entity") == "household" && text($0, "entityId") == transferID
+    }
+    let memberLatestHousehold = memberHouseholdChanges.last.map(payloadObject) ?? [:]
+    report.check(
+        text(memberLatestHousehold, "role") == "owner" && text(memberLatestHousehold, "name") == "e2e-转让-改名",
+        "新 owner 收到 household upsert（role=owner 且名字已更新）",
+        "payload=\(memberLatestHousehold)"
+    )
+    report.check(
+        (memberLatestHousehold["memberCount"] as? NSNumber)?.intValue == 2,
+        "household payload 带服务端 memberCount",
+        "payload=\(memberLatestHousehold)"
+    )
+
+    // 房间结构：新增 / 改名 / 删除都进 change_log
+    let structRoom = client.request(
+        "POST", "households/\(transferID)/rooms", token: memberAccount.token,
+        json: ["name": "结构-客厅", "sortOrder": 1]
+    )
+    let structRoomID = text(jsonObject(structRoom.body) ?? [:], "id")
+    report.check(structRoom.status == 201 && !structRoomID.isEmpty, "新 owner 建房", "status=\(structRoom.status)")
+    let roomRename = client.request(
+        "PATCH", "households/\(transferID)/rooms/\(structRoomID)", token: memberAccount.token,
+        json: ["name": "结构-起居室"]
+    )
+    report.check(roomRename.status == 200, "新 owner 改名房间", "status=\(roomRename.status)")
+    let roomDelete = client.request("DELETE", "households/\(transferID)/rooms/\(structRoomID)", token: memberAccount.token)
+    report.check(roomDelete.status == 204, "新 owner 删房", "status=\(roomDelete.status)")
+
+    for (label, token) in [("原 owner", ownerAccount.token), ("新 owner", memberAccount.token)] {
+        let roomChanges = syncChanges(token: token).filter {
+            text($0, "entity") == "room" && text($0, "entityId") == structRoomID
+        }
+        let renamed = roomChanges.map(payloadObject).first { text($0, "name") == "结构-起居室" }
+        report.check(
+            renamed != nil && text(renamed ?? [:], "householdId") == transferID,
+            "\(label) 收到 room upsert（改名 + householdId）",
+            "count=\(roomChanges.count)"
+        )
+        let deleted = roomChanges.map(payloadObject).last
+        report.check(
+            (deleted?["deleted"] as? Bool) == true,
+            "\(label) 收到 room delete（deleted=true）",
+            "payload=\(deleted ?? [:])"
+        )
+        report.check(
+            (deleted?["sortOrder"] as? NSNumber)?.intValue == 1,
+            "room delete payload 保留 sortOrder",
+            "payload=\(deleted ?? [:])"
+        )
+    }
+
+    // 移除成员后的可见性：被移除者不再收到后续结构变更，历史行仍可读
+    let removedBeforeChanges = syncChanges(token: ownerAccount.token)
+    let removedHistoricalHousehold = removedBeforeChanges.filter {
+        text($0, "entity") == "household" && text($0, "entityId") == transferID
+    }
+    report.check(!removedHistoricalHousehold.isEmpty, "被移除前的历史 household 变更仍可读")
+    let removeFormerOwner = client.request(
+        "DELETE", "households/\(transferID)/members/\(ownerAccount.userID)", token: memberAccount.token
+    )
+    report.check(removeFormerOwner.status == 204, "新 owner 移除原 owner 返回 204", "status=\(removeFormerOwner.status)")
+    let formerOwnerAfterRemoval = client.request("GET", "households/\(transferID)", token: ownerAccount.token)
+    report.check(formerOwnerAfterRemoval.status == 404, "被移除成员访问家庭返回 404", "status=\(formerOwnerAfterRemoval.status)")
+
+    // 接收方计数更新
+    let newOwnerHouseholdChanges = syncChanges(token: memberAccount.token).filter {
+        text($0, "entity") == "household" && text($0, "entityId") == transferID
+    }
+    let latestAfterRemoval = newOwnerHouseholdChanges.last.map(payloadObject) ?? [:]
+    report.check(
+        (latestAfterRemoval["memberCount"] as? NSNumber)?.intValue == 1,
+        "移除成员后新 owner 收到 memberCount=1 的 household upsert",
+        "payload=\(latestAfterRemoval)"
+    )
+    // 被移除者：移除之后不应再出现该家庭的新 household 行
+    let removedAfter = syncChanges(token: ownerAccount.token).filter {
+        text($0, "entity") == "household" && text($0, "entityId") == transferID
+    }
+    report.check(
+        removedAfter.count == removedHistoricalHousehold.count,
+        "被移除成员不再收到该家庭的新结构变更",
+        "before=\(removedHistoricalHousehold.count) after=\(removedAfter.count)"
+    )
+
+    // 解散家庭：剩余 owner 收到 household delete
+    let deleteTransferHousehold = client.request("DELETE", "households/\(transferID)", token: memberAccount.token)
+    report.check(deleteTransferHousehold.status == 204, "新 owner 解散家庭返回 204", "status=\(deleteTransferHousehold.status)")
+    let deleteHouseholdChanges = syncChanges(token: memberAccount.token).filter {
+        text($0, "entity") == "household" && text($0, "entityId") == transferID
+    }
+    let deletePayload = deleteHouseholdChanges.last.map(payloadObject) ?? [:]
+    report.check(
+        (deletePayload["deleted"] as? Bool) == true,
+        "家庭解散推送 household delete（deleted=true）",
+        "payload=\(deletePayload)"
+    )
 
     // MARK: 汇总
 

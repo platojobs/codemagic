@@ -211,6 +211,142 @@ MEMBERS_FINAL="$(docker exec "$PG_CONTAINER" psql -U "$PG_USER" -d "$PG_DB" -tAc
 [ "$MEMBERS_FINAL" = "0" ] || fail "owner 退出后成员行应清空（got=$MEMBERS_FINAL）"
 log "PASS 真 Postgres：邀请码仅存哈希；移除成员 404；owner 退出 409→移除后可退出"
 
+step "家庭结构变更（真 Postgres）：isSelf / 改名 / 建房 / 删房 / 转让 / 移除可见性"
+python3 - "$BASE_URL" >"$TMP_ROOT/artifacts/structural.json" <<'PY'
+import json
+import sys
+import urllib.error
+import urllib.request
+
+base = sys.argv[1]
+
+
+def call(method, path, token=None, body=None):
+    data = None if body is None else json.dumps(body).encode("utf-8")
+    request = urllib.request.Request(base + "/api/v1/" + path, data=data, method=method)
+    if token:
+        request.add_header("Authorization", "Bearer " + token)
+    if data is not None:
+        request.add_header("Content-Type", "application/json")
+    try:
+        with urllib.request.urlopen(request) as response:
+            raw = response.read()
+            return response.status, (json.loads(raw) if raw else None)
+    except urllib.error.HTTPError as error:
+        raw = error.read()
+        try:
+            payload = json.loads(raw) if raw else None
+        except ValueError:
+            payload = None
+        return error.code, payload
+
+
+def changes(token):
+    status, body = call("GET", "sync/changes?cursor=0&limit=500", token=token)
+    assert status == 200, (status, body)
+    return body["changes"]
+
+
+owner = call("POST", "auth/anonymous")[1]
+member = call("POST", "auth/anonymous")[1]
+
+status, household = call("POST", "households", token=owner["token"], body={"name": "pg-结构"})
+assert status == 201, (status, household)
+hid = household["id"]
+status, invite = call("POST", f"households/{hid}/invitations", token=owner["token"], body={})
+assert status == 201, (status, invite)
+status, _ = call("POST", "households/invitations/claim", token=member["token"], body={"code": invite["code"]})
+assert status == 200, status
+
+status, members = call("GET", f"households/{hid}/members", token=owner["token"])
+assert status == 200 and len(members["items"]) == 2, (status, members)
+self_rows = [item for item in members["items"] if item.get("isSelf") is True]
+assert len(self_rows) == 1 and self_rows[0]["userId"] == owner["userId"], members
+assert next(item for item in members["items"] if item["userId"] == member["userId"])["role"] == "member", members
+
+# 转让：非 owner 403，目标非成员 404，成功后原 owner 降为 member
+status, _ = call("POST", f"households/{hid}/transfer-ownership", token=member["token"], body={"userId": owner["userId"]})
+assert status == 403, status
+status, _ = call("POST", f"households/{hid}/transfer-ownership", token=owner["token"], body={"userId": member["userId"]})
+assert status == 200, status
+status, after = call("GET", f"households/{hid}/members", token=owner["token"])
+assert status == 200, status
+assert next(item for item in after["items"] if item["userId"] == owner["userId"])["role"] == "member", after
+assert next(item for item in after["items"] if item["userId"] == member["userId"])["role"] == "owner", after
+
+status, _ = call("PATCH", f"households/{hid}", token=owner["token"], body={"name": "原 owner 改名"})
+assert status == 403, status
+status, renamed = call("PATCH", f"households/{hid}", token=member["token"], body={"name": "pg-结构-改名"})
+assert status == 200 and renamed["name"] == "pg-结构-改名", (status, renamed)
+
+status, room = call("POST", f"households/{hid}/rooms", token=member["token"], body={"name": "结构-客厅", "sortOrder": 1})
+assert status == 201, (status, room)
+rid = room["id"]
+status, _ = call("PATCH", f"households/{hid}/rooms/{rid}", token=member["token"], body={"name": "结构-起居室"})
+assert status == 200, status
+status, _ = call("DELETE", f"households/{hid}/rooms/{rid}", token=member["token"])
+assert status == 204, status
+
+member_changes = changes(member["token"])
+household_rows = [c for c in member_changes if c["entity"] == "household" and c["entityId"] == hid]
+assert household_rows, "新 owner 未收到 household 变更"
+latest = household_rows[-1]["payload"]
+assert latest["role"] == "owner" and latest["name"] == "pg-结构-改名", latest
+assert latest["memberCount"] == 2, latest
+room_rows = [c for c in member_changes if c["entity"] == "room" and c["entityId"] == rid]
+assert any(c["payload"].get("name") == "结构-起居室" and c["payload"].get("householdId") == hid for c in room_rows), room_rows
+assert room_rows[-1]["payload"].get("deleted") is True, room_rows[-1]
+assert room_rows[-1]["payload"].get("sortOrder") == 1, room_rows[-1]
+
+# 移除原 owner：被移除者不再收到后续结构变更，历史行仍可读
+old_owner_rows_before = [c for c in changes(owner["token"]) if c["entity"] == "household" and c["entityId"] == hid]
+assert old_owner_rows_before, "被移除前的历史 household 变更应可读"
+status, _ = call("DELETE", f"households/{hid}/members/{owner['userId']}", token=member["token"])
+assert status == 204, status
+status, _ = call("GET", f"households/{hid}", token=owner["token"])
+assert status == 404, status
+old_owner_rows_after = [c for c in changes(owner["token"]) if c["entity"] == "household" and c["entityId"] == hid]
+assert len(old_owner_rows_after) == len(old_owner_rows_before), (len(old_owner_rows_before), len(old_owner_rows_after))
+
+remaining_changes = changes(member["token"])
+remaining_household = [c for c in remaining_changes if c["entity"] == "household" and c["entityId"] == hid]
+assert remaining_household[-1]["payload"]["memberCount"] == 1, remaining_household[-1]
+
+print(json.dumps({
+    "householdId": hid,
+    "newOwnerUserId": member["userId"],
+    "newOwnerToken": member["token"],
+    "roomId": rid,
+}))
+PY
+struct_hh="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["householdId"])' "$TMP_ROOT/artifacts/structural.json")"
+new_owner_id="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["newOwnerUserId"])' "$TMP_ROOT/artifacts/structural.json")"
+
+# 直接查库：转让后 owner_user_id 指向新 owner；移除成员后只剩新 owner；房间已删；结构变更已入 change_log
+PG_OWNER="$(docker exec "$PG_CONTAINER" psql -U "$PG_USER" -d "$PG_DB" -tAc \
+    "SELECT owner_user_id FROM households WHERE id = '$struct_hh'::uuid;" | tr -d '[:space:]')"
+[ "$PG_OWNER" = "$new_owner_id" ] || fail "转让后 households.owner_user_id 应为新 owner（got=${PG_OWNER}）"
+PG_STRUCT_MEMBERS="$(docker exec "$PG_CONTAINER" psql -U "$PG_USER" -d "$PG_DB" -tAc \
+    "SELECT count(*) FROM household_members WHERE household_id = '$struct_hh'::uuid;" | tr -d '[:space:]')"
+[ "$PG_STRUCT_MEMBERS" = "1" ] || fail "移除后家庭只应剩新 owner（got=${PG_STRUCT_MEMBERS}）"
+PG_STRUCT_ROOMS="$(docker exec "$PG_CONTAINER" psql -U "$PG_USER" -d "$PG_DB" -tAc \
+    "SELECT count(*) FROM household_rooms WHERE household_id = '$struct_hh'::uuid;" | tr -d '[:space:]')"
+[ "$PG_STRUCT_ROOMS" = "0" ] || fail "删房后 household_rooms 应为 0（got=${PG_STRUCT_ROOMS}）"
+PG_STRUCT_LOG="$(docker exec "$PG_CONTAINER" psql -U "$PG_USER" -d "$PG_DB" -tAc \
+    "SELECT count(*) FROM change_log WHERE user_id = '$new_owner_id'::uuid AND entity IN ('household','room');" | tr -d '[:space:]')"
+[ "$PG_STRUCT_LOG" -ge 2 ] || fail "change_log 应包含 household 与 room 结构变更（got=${PG_STRUCT_LOG}）"
+# 解散家庭后，行删除且 change_log 留下 deleted=true 的 household delete
+new_owner_token="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["newOwnerToken"])' "$TMP_ROOT/artifacts/structural.json")"
+curl -fsS -o /dev/null -X DELETE -H "Authorization: Bearer $new_owner_token" \
+    "$BASE_URL/api/v1/households/$struct_hh" || fail "解散家庭失败"
+PG_STRUCT_DELETED="$(docker exec "$PG_CONTAINER" psql -U "$PG_USER" -d "$PG_DB" -tAc \
+    "SELECT count(*) FROM households WHERE id = '$struct_hh'::uuid;" | tr -d '[:space:]')"
+[ "$PG_STRUCT_DELETED" = "0" ] || fail "解散后 households 行应删除（got=${PG_STRUCT_DELETED}）"
+PG_DELETE_LOG="$(docker exec "$PG_CONTAINER" psql -U "$PG_USER" -d "$PG_DB" -tAc \
+    "SELECT count(*) FROM change_log WHERE user_id = '$new_owner_id'::uuid AND entity = 'household' AND entity_id = '$struct_hh' AND op = 'delete' AND (payload->>'deleted')::boolean;" | tr -d '[:space:]')"
+[ "$PG_DELETE_LOG" -ge 1 ] || fail "change_log 应有 deleted=true 的 household delete（got=${PG_DELETE_LOG}）"
+log "PASS 真 Postgres 结构变更：转让 owner_user_id / 移除可见性 / 删房 / change_log 实体"
+
 step "匿名登录"
 LOGIN_JSON="$(curl -fsS -X POST "$BASE_URL/api/v1/auth/anonymous")"
 TOKEN="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])' <<<"$LOGIN_JSON")"
@@ -319,8 +455,9 @@ import json, sys
 body = json.loads(sys.argv[1])
 changes = body.get("changes") or []
 assert len(changes) >= 2, "至少需要两条变更才能构造 410 间隙：%r" % body
-assert all(c["entity"] == "user_device" for c in changes)
-print(min(c["seq"] for c in changes))
+devices = [c for c in changes if c["entity"] == "user_device"]
+assert devices, "缺少 user_device 变更：%r" % body
+print(min(c["seq"] for c in devices))
 PY
 )"
 OLD_CURSOR=$((OLD_SEQ - 1))

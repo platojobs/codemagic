@@ -222,6 +222,22 @@ final class RoomStore {
         }
     }
 
+    /// 单房间顺序变更（增量同步 `room upsert` 用，保留本机未上报的改名）。
+    func setSortOrder(id: UUID, sortOrder: Int, at date: Date = Date()) throws {
+        try database.execute(
+            "UPDATE rooms SET sort_order = ?, updated_at = ? WHERE id = ? AND deleted = 0;",
+            [.integer(Int64(sortOrder)), .double(date.timeIntervalSince1970), .text(id.uuidString)]
+        )
+    }
+
+    /// 家庭被删除时整段移除其房间（含墓碑），不做逐房间删除。
+    func purgeHousehold(householdID: UUID) throws {
+        try database.execute(
+            "DELETE FROM rooms WHERE household_id = ?;",
+            [.text(householdID.uuidString)]
+        )
+    }
+
     func claim(id: UUID, householdID: UUID) throws {
         try database.execute(
             "UPDATE rooms SET household_id = ? WHERE id = ? AND household_id IS NULL;",

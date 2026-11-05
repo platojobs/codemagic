@@ -554,6 +554,236 @@ final class HouseholdTests: XCTestCase {
         XCTAssertFalse(ownerVM.canRemove(member: api.members[1]), "member 不能移除成员")
     }
 
+    // MARK: - v0.16.0：所有权转让与 isSelf
+
+    func testSelfRowHidesTransferAndRemoveActions() throws {
+        let owner = makeHousehold(name: "共享家", personal: false, role: .owner, memberCount: 2)
+        try householdStore.upsert(owner)
+        metadata.currentHouseholdRemoteID = owner.remoteID
+        api.households = [owner]
+        api.members = [
+            HouseholdMember(userID: "me", role: .owner, kind: "account", joinedAt: Date(), isSelf: true),
+            HouseholdMember(userID: "other", role: .member, kind: "anonymous", joinedAt: Date(), isSelf: false),
+        ]
+
+        let viewModel = HouseholdManagementViewModel(service: service)
+        viewModel.reload()
+
+        XCTAssertFalse(viewModel.canTransfer(member: api.members[0]), "本人行不出现转让")
+        XCTAssertFalse(viewModel.canRemove(member: api.members[0]), "本人行不出现移除")
+        XCTAssertTrue(viewModel.canTransfer(member: api.members[1]), "owner 可转让给普通成员")
+        XCTAssertTrue(viewModel.canRemove(member: api.members[1]))
+    }
+
+    func testTransferOwnershipUpdatesRoleAndHidesEntry() throws {
+        let owner = makeHousehold(name: "共享家", personal: false, role: .owner, memberCount: 2)
+        try householdStore.upsert(owner)
+        metadata.currentHouseholdRemoteID = owner.remoteID
+        api.households = [owner]
+        api.members = [
+            HouseholdMember(userID: "me", role: .owner, kind: "account", joinedAt: Date(), isSelf: true),
+            HouseholdMember(userID: "other", role: .member, kind: "anonymous", joinedAt: Date(), isSelf: false),
+        ]
+
+        let viewModel = HouseholdManagementViewModel(service: service)
+        viewModel.reload()
+        XCTAssertTrue(viewModel.canTransfer(member: api.members[1]))
+
+        var succeeded = false
+        viewModel.transferOwnership(to: api.members[1]) { succeeded = $0 }
+
+        XCTAssertTrue(succeeded)
+        XCTAssertEqual(api.transferCalls.count, 1)
+        XCTAssertEqual(api.transferCalls.first?.userID, "other")
+        XCTAssertEqual(viewModel.current?.role, .member, "转让后本人降为成员")
+        XCTAssertFalse(viewModel.canManageHousehold, "失去改名 / 邀请码权限")
+        XCTAssertFalse(viewModel.canTransfer(member: api.members[1]), "入口随角色消失")
+        XCTAssertEqual(viewModel.notice, L10n.t("household.transfer.success"))
+    }
+
+    func testTransferUnsupportedHidesEntryWithoutShowingError() throws {
+        let owner = makeHousehold(name: "共享家", personal: false, role: .owner, memberCount: 2)
+        try householdStore.upsert(owner)
+        metadata.currentHouseholdRemoteID = owner.remoteID
+        api.households = [owner]
+        api.members = [
+            HouseholdMember(userID: "me", role: .owner, kind: "account", joinedAt: Date(), isSelf: true),
+            HouseholdMember(userID: "other", role: .member, kind: "anonymous", joinedAt: Date(), isSelf: false),
+        ]
+        api.transferError = .unsupported
+
+        let viewModel = HouseholdManagementViewModel(service: service)
+        viewModel.reload()
+        XCTAssertTrue(viewModel.canTransfer(member: api.members[1]))
+
+        var succeeded = true
+        viewModel.transferOwnership(to: api.members[1]) { succeeded = $0 }
+
+        XCTAssertFalse(succeeded)
+        XCTAssertNil(viewModel.errorMessage, "老后端不弹错误")
+        XCTAssertFalse(viewModel.canTransfer(member: api.members[1]), "入口隐藏")
+        XCTAssertEqual(viewModel.current?.role, .owner, "失败不改变角色")
+    }
+
+    func testTransferForbiddenShowsReadableMessageAndRefreshes() throws {
+        let owner = makeHousehold(name: "共享家", personal: false, role: .owner, memberCount: 2)
+        try householdStore.upsert(owner)
+        metadata.currentHouseholdRemoteID = owner.remoteID
+        api.households = [owner]
+        api.members = [
+            HouseholdMember(userID: "me", role: .owner, kind: "account", joinedAt: Date(), isSelf: true),
+            HouseholdMember(userID: "other", role: .member, kind: "anonymous", joinedAt: Date(), isSelf: false),
+        ]
+        api.transferError = .forbidden
+
+        let viewModel = HouseholdManagementViewModel(service: service)
+        viewModel.reload()
+        viewModel.transferOwnership(to: api.members[1]) { _ in }
+
+        XCTAssertEqual(viewModel.errorMessage, L10n.t("household.forbidden"), "403 转可读提示")
+        XCTAssertEqual(viewModel.members.count, 2, "失败后仍刷新家庭详情")
+    }
+
+    // MARK: - v0.16.0：家庭 / 房间结构变更
+
+    func testHouseholdUpsertUpdatesNameRoleAndCount() throws {
+        let shared = makeHousehold(name: "旧名字", personal: false, role: .owner, memberCount: 2)
+        try householdStore.upsert(shared)
+
+        let outcome = service.applyHouseholdChange(HouseholdChangePayload(
+            householdID: shared.remoteID,
+            name: "新名字",
+            ownerUserID: "other-owner",
+            role: .member,
+            memberCount: 3,
+            deleted: false
+        ))
+
+        XCTAssertEqual(outcome, .applied)
+        let reloaded = try householdStore.fetch(localID: shared.id)
+        XCTAssertEqual(reloaded?.name, "新名字")
+        XCTAssertEqual(reloaded?.role, .member, "接收者本人的角色")
+        XCTAssertEqual(reloaded?.memberCount, 3, "计数来自服务端")
+    }
+
+    func testHouseholdUpsertForUnknownHouseholdRequestsBaseline() throws {
+        let outcome = service.applyHouseholdChange(HouseholdChangePayload(
+            householdID: "remote-new",
+            name: "刚加入的家",
+            ownerUserID: "owner",
+            role: .member,
+            memberCount: 2,
+            deleted: false
+        ))
+        XCTAssertEqual(outcome, .needsBaseline, "后端不回放历史，必须全量拉家庭基线")
+    }
+
+    func testHouseholdDeletePurgesRoomsAndFallsDevicesBackToPersonal() throws {
+        let personal = makeHousehold(name: "我的家", personal: true, role: .owner)
+        let shared = makeHousehold(name: "共享家", personal: false, role: .member)
+        try householdStore.upsert(personal)
+        try householdStore.upsert(shared)
+        metadata.currentHouseholdRemoteID = shared.remoteID
+
+        let room = Room(name: "客厅", sortOrder: 1, remoteID: "r1", householdID: shared.id, syncState: .synced)
+        try roomStore.upsert(room)
+        let device = makeDevice(roomID: room.id, householdID: shared.id)
+        try deviceStore.upsert(device)
+        try pendingStore.upsert(PendingDeviceAssignment(
+            deviceID: device.id,
+            platform: device.platform,
+            externalID: device.externalID,
+            roomRemoteID: "r1",
+            householdRemoteID: shared.remoteID,
+            attempts: 0,
+            createdAt: Date(),
+            updatedAt: Date()
+        ))
+
+        let outcome = service.applyHouseholdChange(HouseholdChangePayload(
+            householdID: shared.remoteID,
+            name: shared.name,
+            ownerUserID: "owner",
+            role: .member,
+            memberCount: 1,
+            deleted: true
+        ))
+
+        XCTAssertEqual(outcome, .applied)
+        XCTAssertNil(try householdStore.fetch(localID: shared.id), "整段移除家庭")
+        XCTAssertTrue(try roomStore.fetchAll(householdID: shared.id).isEmpty, "整段移除房间")
+        XCTAssertTrue(try pendingStore.fetchAll().isEmpty, "清掉待上报归属")
+        XCTAssertEqual(try deviceStore.fetch(id: device.id)?.householdID, personal.id, "设备回落个人家庭而不是被删除")
+        XCTAssertEqual(try deviceStore.fetch(id: device.id)?.roomID, nil, "本地归属清空")
+        XCTAssertEqual(metadata.currentHouseholdRemoteID, personal.remoteID)
+    }
+
+    func testRoomUpsertAppliesOrderRenameAndCreation() throws {
+        let personal = makeHousehold(name: "我的家", personal: true, role: .owner)
+        try householdStore.upsert(personal)
+        let living = Room(name: "客厅", sortOrder: 1, remoteID: "r1", householdID: personal.id, syncState: .synced)
+        try roomStore.upsert(living)
+
+        XCTAssertEqual(service.applyRoomChange(RoomChangePayload(
+            roomID: "r1",
+            householdID: personal.remoteID,
+            name: "起居室",
+            sortOrder: 2,
+            deleted: false
+        )), .applied)
+        XCTAssertEqual(service.applyRoomChange(RoomChangePayload(
+            roomID: "r2",
+            householdID: personal.remoteID,
+            name: "卧室",
+            sortOrder: 1,
+            deleted: false
+        )), .applied)
+
+        let rooms = try roomStore.fetchAll(householdID: personal.id)
+        XCTAssertEqual(rooms.map(\.name), ["卧室", "起居室"], "按 sortOrder 落序")
+        XCTAssertEqual(rooms.first(where: { $0.remoteID == "r2" })?.syncState, .synced)
+    }
+
+    func testRoomUpsertPreservesPendingLocalRename() throws {
+        let personal = makeHousehold(name: "我的家", personal: true, role: .owner)
+        try householdStore.upsert(personal)
+        let room = Room(name: "卧室", sortOrder: 1, remoteID: "r1", householdID: personal.id, syncState: .pending)
+        try roomStore.upsert(room)
+
+        XCTAssertEqual(service.applyRoomChange(RoomChangePayload(
+            roomID: "r1",
+            householdID: personal.remoteID,
+            name: "主卧",
+            sortOrder: 3,
+            deleted: false
+        )), .applied)
+
+        let reloaded = try roomStore.fetch(id: room.id)
+        XCTAssertEqual(reloaded?.name, "卧室", "未上报的改名不丢")
+        XCTAssertEqual(reloaded?.sortOrder, 3, "服务端顺序仍生效")
+    }
+
+    func testRoomDeleteClearsAssignmentButKeepsDevice() throws {
+        let personal = makeHousehold(name: "我的家", personal: true, role: .owner)
+        try householdStore.upsert(personal)
+        let room = Room(name: "客厅", sortOrder: 1, remoteID: "r1", householdID: personal.id, syncState: .synced)
+        try roomStore.upsert(room)
+        let device = makeDevice(roomID: room.id, householdID: personal.id)
+        try deviceStore.upsert(device)
+
+        XCTAssertEqual(service.applyRoomChange(RoomChangePayload(
+            roomID: "r1",
+            householdID: personal.remoteID,
+            name: "客厅",
+            sortOrder: 1,
+            deleted: true
+        )), .applied)
+
+        XCTAssertNil(try roomStore.fetch(id: room.id))
+        XCTAssertNotNil(try deviceStore.fetch(id: device.id), "不静默删除设备")
+        XCTAssertNil(try deviceStore.fetch(id: device.id)?.roomID, "归属清空")
+    }
+
     // MARK: - Helpers
 
     private func makeService(userID: String) -> HouseholdService {
@@ -620,6 +850,7 @@ final class FakeHouseholdAPI: HouseholdAPIServicing {
     var updateHouseholdError: HouseholdAPIError?
     var removeMemberError: HouseholdAPIError?
     var leaveError: HouseholdAPIError?
+    var transferError: HouseholdAPIError?
     var invitationInfos: [HouseholdInvitationInfo] = []
     var revokeError: HouseholdAPIError?
     var reorderError: HouseholdAPIError?
@@ -627,6 +858,7 @@ final class FakeHouseholdAPI: HouseholdAPIServicing {
     private(set) var patches: [PatchCall] = []
     private(set) var removedMembers: [(householdID: String, userID: String)] = []
     private(set) var leaveCalls: [String] = []
+    private(set) var transferCalls: [(householdID: String, userID: String)] = []
     private(set) var revokedInvitationIDs: [String] = []
     private(set) var reorderCalls: [[String]] = []
 
@@ -705,6 +937,25 @@ final class FakeHouseholdAPI: HouseholdAPIServicing {
         leaveCalls.append(householdID)
         households.removeAll { $0.remoteID == householdID }
         completion(.success(()))
+    }
+
+    func transferOwnership(
+        householdID: String,
+        userID: String,
+        token: String,
+        completion: @escaping (Result<Household, HouseholdAPIError>) -> Void
+    ) {
+        if let transferError {
+            completion(.failure(transferError))
+            return
+        }
+        transferCalls.append((householdID, userID))
+        guard let index = households.firstIndex(where: { $0.remoteID == householdID }) else {
+            completion(.failure(.notFound))
+            return
+        }
+        households[index].role = .member
+        completion(.success(households[index]))
     }
 
     func invitations(

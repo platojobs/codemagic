@@ -54,6 +54,8 @@ final class SyncEngine {
     private var retryFailureCount = 0
     /// 自动同步的退避闸门：未到点前 `syncIfNeeded` 直接跳过；手动同步不受限。
     private var nextAutomaticRetryAt: Date?
+    /// 增量里出现本地未知的家庭（如刚被邀请加入）：本轮拉取结束后补一次 `GET /households` 全量基线。
+    private var needsHouseholdBaseline = false
 
     init(
         api: SyncAPIServicing,
@@ -117,6 +119,7 @@ final class SyncEngine {
         isSyncing = true
         sessionConflictMessages = []
         didFullResync = false
+        needsHouseholdBaseline = false
         status.isSyncing = true
         status.lastError = nil
         notify()
@@ -192,6 +195,7 @@ final class SyncEngine {
         }
         isSyncing = true
         sessionConflictMessages = []
+        needsHouseholdBaseline = false
         status.isSyncing = true
         status.lastError = nil
         notify()
@@ -359,6 +363,7 @@ final class SyncEngine {
                     completion(.failure(.database(L10n.f("sync.applyChangesFailed", String(describing: error)))))
                     return
                 }
+                // 未知实体也在 apply 中被跳过；游标照常推进，绝不阻塞后续实体。
                 self.metadataStore.cursor = pageResult.nextCursor
 
                 if pageResult.hasMore, page + 1 < self.maxPages {
@@ -370,6 +375,12 @@ final class SyncEngine {
                         hasResynced: hasResynced,
                         completion: completion
                     )
+                } else if self.needsHouseholdBaseline, let householdService = self.householdService {
+                    // 本地缺失家庭（如刚被邀请加入）：后端不回放历史，补一次全量基线。
+                    self.needsHouseholdBaseline = false
+                    householdService.refreshHouseholds { _ in
+                        completion(.success(summary))
+                    }
                 } else {
                     completion(.success(summary))
                 }
@@ -403,11 +414,35 @@ final class SyncEngine {
     }
 
     /// 应用一页变更，返回「实际写入条数」与冲突提示。
+    ///
+    /// 未知 `entity` 必须在 while 循环内被忽略，但**不得影响游标推进**（游标由 `pull` 无条件写入）。
     private func apply(_ changes: [SyncChange]) throws -> (pulled: Int, conflicts: [String]) {
         var pulled = 0
         var conflicts: [String] = []
 
         for change in changes {
+            switch change.entity {
+            case SyncEntity.household:
+                guard let householdService, let payload = change.householdChange else { continue }
+                if householdService.applyHouseholdChange(payload) == .needsBaseline {
+                    needsHouseholdBaseline = true
+                }
+                pulled += 1
+                continue
+
+            case SyncEntity.room:
+                guard let householdService, let payload = change.roomChange else { continue }
+                if householdService.applyRoomChange(payload) == .needsBaseline {
+                    needsHouseholdBaseline = true
+                }
+                pulled += 1
+                continue
+
+            default:
+                // 未知实体：跳过，但循环继续、游标照常推进。
+                guard change.isDeviceEntity else { continue }
+            }
+
             let remote = change.payload
             guard !remote.externalID.isEmpty else { continue }
 

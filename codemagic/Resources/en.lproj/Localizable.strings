@@ -814,3 +814,12 @@
 "home.household.switchTitle" = "Switch household";
 "device.sync.unsynced" = "Unsynced";
 "profile.section.household" = "Household";
+"household.member.me" = "Me";
+"household.member.actions.title" = "Member %@";
+"household.transfer.action" = "Transfer ownership";
+"household.transfer.title" = "Transfer household ownership?";
+"household.transfer.message" = "Transfer household ownership to %@.";
+"household.transfer.consequence" = "You will become a regular member and lose the ability to rename the household, issue invitation codes, and remove members. This cannot be undone.";
+"household.transfer.success" = "Ownership transferred; you are now a regular member";
+"household.unsupported" = "This operation is not supported by the current server version";
+"household.log.ownershipTransferred" = "Household ownership transferred";

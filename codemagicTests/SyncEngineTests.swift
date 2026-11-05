@@ -859,6 +859,95 @@ final class SyncEngineTests: XCTestCase {
         let data = try! JSONSerialization.data(withJSONObject: json)
         return try! JSONDecoder().decode(SyncChange.self, from: data)
     }
+
+    // MARK: - v0.16.0：结构变更进增量同步
+
+    /// 硬约束：未知实体必须被跳过，且游标照常推进（否则未来加实体会让老版本永久卡住）。
+    func testUnknownEntityIsSkippedAndCursorStillAdvances() throws {
+        let json = """
+        {
+          "changes": [
+            {"seq": 1, "entity": "future_entity", "entityId": "u-1", "op": "upsert", "payload": {"id": "u-1", "whatever": 42}},
+            {"seq": 2, "entity": "user_device", "entityId": "d-1", "op": "upsert", "payload": {
+              "id": "00000000-0000-0000-0000-000000000001",
+              "platform": "ios",
+              "externalId": "EXT-1",
+              "alias": "灯",
+              "updatedAt": "2026-11-05T02:00:00Z"
+            }}
+          ],
+          "nextCursor": 2,
+          "hasMore": false
+        }
+        """
+        let page = try JSONDecoder().decode(SyncChangesPage.self, from: Data(json.utf8))
+        api.changesPages = [.success(page)]
+
+        let engine = makeEngine()
+        let result = runSync(engine)
+
+        guard case .success(let summary) = result else {
+            return XCTFail("未知实体不应导致同步失败")
+        }
+        XCTAssertEqual(metadata.cursor, 2, "游标必须前进")
+        XCTAssertEqual(summary.pulled, 1, "只写入已知的设备实体")
+        let device = try savedDeviceStore.fetch(platform: SavedDevice.iosPlatform, externalID: "EXT-1")
+        XCTAssertNotNil(device, "未知实体被跳过后仍继续处理后续设备")
+    }
+
+    /// 本地没有该家庭时，增量 upsert 必须触发一次 GET /households 全量基线。
+    func testUnknownHouseholdUpsertTriggersBaselinePull() throws {
+        let householdStore = HouseholdStore(database: testDatabase.database)
+        let roomStore = RoomStore(database: testDatabase.database)
+        let pendingStore = DeviceAssignmentPendingStore(database: testDatabase.database)
+        let householdAPI = FakeHouseholdAPI()
+        let remoteHousehold = Household(
+            id: UUID(),
+            remoteID: "h-1",
+            name: "刚加入的家",
+            isPersonal: false,
+            role: .member,
+            memberCount: 2,
+            deviceCount: 0,
+            roomCount: 1,
+            createdAt: Date(timeIntervalSince1970: 1_600_000_000),
+            updatedAt: Date(timeIntervalSince1970: 1_600_000_000)
+        )
+        householdAPI.households = [remoteHousehold]
+        let householdService = HouseholdService(
+            api: householdAPI,
+            tokenStore: tokenStore,
+            householdStore: householdStore,
+            roomStore: roomStore,
+            deviceStore: savedDeviceStore,
+            pendingStore: pendingStore,
+            metadataStore: metadata,
+            logStore: logStore
+        )
+        let engine = SyncEngine(
+            api: api,
+            tokenStore: tokenStore,
+            metadataStore: metadata,
+            deviceStore: savedDeviceStore,
+            readingsStore: readingsStore,
+            logStore: logStore,
+            householdService: householdService
+        )
+
+        let json = """
+        {"changes":[{"seq":7,"entity":"household","entityId":"h-1","op":"upsert","payload":{
+          "id":"h-1","name":"刚加入的家","ownerUserId":"owner","role":"member","memberCount":2,"deleted":false
+        }}],"nextCursor":7,"hasMore":false}
+        """
+        let page = try JSONDecoder().decode(SyncChangesPage.self, from: Data(json.utf8))
+        api.changesPages = [.success(page)]
+
+        _ = runSync(engine)
+
+        XCTAssertEqual(metadata.cursor, 7)
+        XCTAssertNotNil(try householdStore.fetch(remoteID: "h-1"), "基线拉取后本地出现该家庭")
+        XCTAssertEqual(metadata.currentHouseholdRemoteID, "h-1")
+    }
 }
 
 // MARK: - API Client

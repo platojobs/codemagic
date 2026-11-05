@@ -814,3 +814,12 @@
 "home.household.switchTitle" = "切换家庭";
 "device.sync.unsynced" = "未同步";
 "profile.section.household" = "家庭";
+"household.member.me" = "我";
+"household.member.actions.title" = "成员 %@";
+"household.transfer.action" = "转让所有权";
+"household.transfer.title" = "转让家庭所有权？";
+"household.transfer.message" = "将家庭所有权转让给 %@。";
+"household.transfer.consequence" = "转让后你将降为普通成员，失去修改家庭名、签发邀请码和移除成员的权限。此操作不可撤销。";
+"household.transfer.success" = "所有权已转让，你已成为普通成员";
+"household.unsupported" = "当前服务端版本不支持该操作";
+"household.log.ownershipTransferred" = "已转让家庭所有权";

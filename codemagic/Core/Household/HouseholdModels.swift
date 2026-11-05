@@ -8,9 +8,48 @@ enum HouseholdRole: String, Equatable {
     var displayName: String {
         self == .owner ? L10n.t("household.role.owner") : L10n.t("household.role.member")
     }
+}
 
-    var canManageRooms: Bool { self == .owner }
-    var canManageHousehold: Bool { self == .owner }
+/// owner / member 能力矩阵的唯一判定入口。界面与服务层只消费这里的结果，不再各自比较角色。
+struct HouseholdCapabilities: Equatable {
+    let isOwner: Bool
+    let canManageHousehold: Bool
+    let canManageRooms: Bool
+    let canInviteMembers: Bool
+    /// 仅对「非本人」的成员行生效；本人行由 `canAct(on:)` 统一拦截。
+    let canRemoveMembers: Bool
+    /// 服务端不支持（成员 DTO 无 `isSelf` 或 405）时为 false，入口直接隐藏。
+    let canTransferOwnership: Bool
+    let canLeave: Bool
+    /// owner 且还有其他成员：退出必须被拦截，提示先转让或移除成员。
+    let mustBlockOwnerLeave: Bool
+
+    static func make(
+        role: HouseholdRole,
+        isPersonal: Bool,
+        memberCount: Int,
+        supportsOwnershipTransfer: Bool
+    ) -> HouseholdCapabilities {
+        let isOwner = role == .owner
+        return HouseholdCapabilities(
+            isOwner: isOwner,
+            canManageHousehold: isOwner,
+            canManageRooms: isOwner,
+            canInviteMembers: isOwner,
+            canRemoveMembers: isOwner,
+            canTransferOwnership: isOwner && supportsOwnershipTransfer,
+            canLeave: !isPersonal,
+            mustBlockOwnerLeave: isOwner && !isPersonal && memberCount > 1
+        )
+    }
+
+    func canAct(on member: HouseholdMember) -> Bool {
+        member.isSelf != true && canRemoveMembers
+    }
+
+    func canTransfer(_ member: HouseholdMember) -> Bool {
+        canTransferOwnership && member.isSelf != true && member.role == .member
+    }
 }
 
 /// 家庭快照，与服务端 `Household` 一致。本地 id 直接复用远端 UUID，便于与房间 / 设备映射。
@@ -27,10 +66,28 @@ struct Household: Identifiable, Equatable {
     var createdAt: Date
     var updatedAt: Date
 
-    var canManageRooms: Bool { role.canManageRooms }
-    var canManageHousehold: Bool { role.canManageHousehold }
+    var capabilities: HouseholdCapabilities {
+        HouseholdCapabilities.make(
+            role: role,
+            isPersonal: isPersonal,
+            memberCount: memberCount,
+            supportsOwnershipTransfer: false
+        )
+    }
+
+    func capabilities(supportsOwnershipTransfer: Bool) -> HouseholdCapabilities {
+        HouseholdCapabilities.make(
+            role: role,
+            isPersonal: isPersonal,
+            memberCount: memberCount,
+            supportsOwnershipTransfer: supportsOwnershipTransfer
+        )
+    }
+
+    var canManageRooms: Bool { capabilities.canManageRooms }
+    var canManageHousehold: Bool { capabilities.canManageHousehold }
     /// 个人家庭不可退出（服务端 400），也不可删除。
-    var canLeave: Bool { !isPersonal }
+    var canLeave: Bool { capabilities.canLeave }
 }
 
 /// 家庭成员。服务端不返回昵称，展示时对用户 id 做脱敏缩写。
@@ -40,6 +97,18 @@ struct HouseholdMember: Identifiable, Equatable {
     let role: HouseholdRole
     let kind: String
     let joinedAt: Date
+    /// 服务端 `isSelf`；老后端（openapi < 0.10.0）不返回该字段，解码为 nil。
+    let isSelf: Bool?
+
+    init(userID: String, role: HouseholdRole, kind: String, joinedAt: Date, isSelf: Bool? = nil) {
+        self.userID = userID
+        self.role = role
+        self.kind = kind
+        self.joinedAt = joinedAt
+        self.isSelf = isSelf
+    }
+
+    var isCurrentUser: Bool { isSelf == true }
 
     /// 成员列表展示名：前 8 位，避免整屏 UUID。
     var shortID: String {
@@ -132,6 +201,85 @@ struct PendingDeviceAssignment: Equatable {
     var updatedAt: Date
 }
 
+/// `change_log` 的家庭结构变更（后端 v0.15.0）。`role` 是接收者本人的角色。
+struct HouseholdChangePayload: Decodable, Equatable {
+    let householdID: String
+    let name: String
+    let ownerUserID: String
+    let role: HouseholdRole
+    let memberCount: Int
+    let deleted: Bool
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case ownerUserId
+        case role
+        case memberCount
+        case deleted
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        householdID = (try? container.decodeIfPresent(String.self, forKey: .id)) ?? ""
+        name = (try? container.decodeIfPresent(String.self, forKey: .name)) ?? ""
+        ownerUserID = (try? container.decodeIfPresent(String.self, forKey: .ownerUserId)) ?? ""
+        role = HouseholdRole(rawValue: (try? container.decodeIfPresent(String.self, forKey: .role)) ?? "") ?? .member
+        memberCount = (try? container.decodeIfPresent(Int.self, forKey: .memberCount)) ?? 0
+        deleted = (try? container.decodeIfPresent(Bool.self, forKey: .deleted)) ?? false
+    }
+
+    init(
+        householdID: String,
+        name: String,
+        ownerUserID: String,
+        role: HouseholdRole,
+        memberCount: Int,
+        deleted: Bool
+    ) {
+        self.householdID = householdID
+        self.name = name
+        self.ownerUserID = ownerUserID
+        self.role = role
+        self.memberCount = memberCount
+        self.deleted = deleted
+    }
+}
+
+/// `change_log` 的房间结构变更（后端 v0.15.0）。
+struct RoomChangePayload: Decodable, Equatable {
+    let roomID: String
+    let householdID: String
+    let name: String
+    let sortOrder: Int
+    let deleted: Bool
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case householdId
+        case name
+        case sortOrder
+        case deleted
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        roomID = (try? container.decodeIfPresent(String.self, forKey: .id)) ?? ""
+        householdID = (try? container.decodeIfPresent(String.self, forKey: .householdId)) ?? ""
+        name = (try? container.decodeIfPresent(String.self, forKey: .name)) ?? ""
+        sortOrder = (try? container.decodeIfPresent(Int.self, forKey: .sortOrder)) ?? 0
+        deleted = (try? container.decodeIfPresent(Bool.self, forKey: .deleted)) ?? false
+    }
+
+    init(roomID: String, householdID: String, name: String, sortOrder: Int, deleted: Bool) {
+        self.roomID = roomID
+        self.householdID = householdID
+        self.name = name
+        self.sortOrder = sortOrder
+        self.deleted = deleted
+    }
+}
+
 /// 家庭接口错误。403 / 404 / 409 都转换为可读提示，界面不展示错误码。
 enum HouseholdAPIError: Error, Equatable {
     case unauthorized
@@ -139,6 +287,8 @@ enum HouseholdAPIError: Error, Equatable {
     case notFound
     /// 409：owner 还有其他成员时不能退出等状态冲突。
     case conflict
+    /// 405（或老后端的裸 404）：当前服务端不支持该能力，入口应隐藏而非报错。
+    case unsupported
     case rateLimited(retryAfterSeconds: Int?)
     /// 409：整段重排时房间集合已变化（服务端 `ROOM_SET_MISMATCH` 或重排端点 `CONFLICT`）。
     case roomSetMismatch
@@ -155,6 +305,8 @@ enum HouseholdAPIError: Error, Equatable {
             return L10n.t("household.notFound")
         case .conflict:
             return L10n.t("household.leave.ownerConflict")
+        case .unsupported:
+            return L10n.t("household.unsupported")
         case .rateLimited(let seconds):
             if let seconds {
                 return L10n.f("household.rateLimitedSeconds", String(describing: seconds))

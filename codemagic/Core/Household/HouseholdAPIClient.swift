@@ -1,6 +1,6 @@
 import Foundation
 
-/// 家庭 / 邀请码 / 房间 / 设备归属接口（`PJGoIoT` openapi 0.9.0，后端 v0.13.0）。
+/// 家庭 / 邀请码 / 房间 / 设备归属接口（`PJGoIoT` openapi 0.11.0，后端 v0.15.0）。
 protocol HouseholdAPIServicing {
     func listHouseholds(token: String, completion: @escaping (Result<[Household], HouseholdAPIError>) -> Void)
     func createHousehold(name: String, token: String, completion: @escaping (Result<Household, HouseholdAPIError>) -> Void)
@@ -25,6 +25,13 @@ protocol HouseholdAPIServicing {
         householdID: String,
         token: String,
         completion: @escaping (Result<Void, HouseholdAPIError>) -> Void
+    )
+    /// 所有权转让（后端 v0.14.0 起）。老后端返回 405 时映射为 `.unsupported`。
+    func transferOwnership(
+        householdID: String,
+        userID: String,
+        token: String,
+        completion: @escaping (Result<Household, HouseholdAPIError>) -> Void
     )
     func createInvitation(
         householdID: String,
@@ -212,7 +219,8 @@ final class HouseholdAPIClient: HouseholdAPIServicing {
                             userID: item.userId,
                             role: HouseholdRole(rawValue: item.role) ?? .member,
                             kind: item.kind,
-                            joinedAt: SyncDateCodec.parse(item.joinedAt) ?? Date(timeIntervalSince1970: 0)
+                            joinedAt: SyncDateCodec.parse(item.joinedAt) ?? Date(timeIntervalSince1970: 0),
+                            isSelf: item.isSelf
                         )
                     }
                     self.deliver(.success(members), completion)
@@ -265,6 +273,41 @@ final class HouseholdAPIClient: HouseholdAPIServicing {
                 self.deliver(.failure(error), completion)
             case .success:
                 self.deliver(.success(()), completion)
+            }
+        }
+    }
+
+    func transferOwnership(
+        householdID: String,
+        userID: String,
+        token: String,
+        completion: @escaping (Result<Household, HouseholdAPIError>) -> Void
+    ) {
+        let body = (try? JSONEncoder().encode(OwnershipTransferBody(userId: userID))) ?? Data()
+        send(
+            HTTPRequest(
+                url: endpoint("households/\(householdID)/transfer-ownership"),
+                method: "POST",
+                headers: jsonAuthHeaders(token: token),
+                body: body
+            ),
+            bareNotFoundIsUnsupported: true
+        ) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .failure(let error):
+                self.deliver(.failure(error), completion)
+            case .success(let response):
+                do {
+                    let payload = try self.decoder.decode(HouseholdPayload.self, from: response.data)
+                    guard let household = Self.makeHousehold(payload) else {
+                        self.deliver(.failure(.decoding(L10n.t("household.responseMismatch"))), completion)
+                        return
+                    }
+                    self.deliver(.success(household), completion)
+                } catch {
+                    self.deliver(.failure(.decoding(error.localizedDescription)), completion)
+                }
             }
         }
     }
@@ -587,6 +630,7 @@ final class HouseholdAPIClient: HouseholdAPIServicing {
     private func send(
         _ request: HTTPRequest,
         conflict: HouseholdAPIError = .conflict,
+        bareNotFoundIsUnsupported: Bool = false,
         completion: @escaping (Result<HTTPResponse, HouseholdAPIError>) -> Void
     ) {
         httpClient.send(request) { [weak self] result in
@@ -596,7 +640,16 @@ final class HouseholdAPIClient: HouseholdAPIServicing {
                 self.deliver(.failure(.failure(error)), completion)
             case .success(let response):
                 guard response.isSuccess else {
-                    self.deliver(.failure(self.apiError(response, conflict: conflict)), completion)
+                    self.deliver(
+                        .failure(
+                            self.apiError(
+                                response,
+                                conflict: conflict,
+                                bareNotFoundIsUnsupported: bareNotFoundIsUnsupported
+                            )
+                        ),
+                        completion
+                    )
                     return
                 }
                 self.deliver(.success(response), completion)
@@ -604,25 +657,33 @@ final class HouseholdAPIClient: HouseholdAPIServicing {
         }
     }
 
-    private func apiError(_ response: HTTPResponse, conflict conflictKind: HouseholdAPIError) -> HouseholdAPIError {
+    private func apiError(
+        _ response: HTTPResponse,
+        conflict conflictKind: HouseholdAPIError,
+        bareNotFoundIsUnsupported: Bool
+    ) -> HouseholdAPIError {
+        let envelope = try? decoder.decode(APIErrorEnvelope.self, from: response.data)
         switch response.statusCode {
         case 401:
             return .unauthorized
         case 403:
             return .forbidden
         case 404:
+            // 老后端没有该路由时返回裸 404（无 JSON envelope）；新后端的 404 一定带错误体。
+            if bareNotFoundIsUnsupported, envelope == nil { return .unsupported }
             return .notFound
+        case 405:
+            return .unsupported
         case 409:
             // 机读判断：`ROOM_SET_MISMATCH` 为重排集合不一致，其余 409 按调用端点语义降级。
-            if let envelope = try? decoder.decode(APIErrorEnvelope.self, from: response.data),
-               envelope.error.code == "ROOM_SET_MISMATCH" {
+            if envelope?.error.code == "ROOM_SET_MISMATCH" {
                 return .roomSetMismatch
             }
             return conflictKind
         case 429:
             return .rateLimited(retryAfterSeconds: Self.retryAfterSeconds(response))
         default:
-            if let envelope = try? decoder.decode(APIErrorEnvelope.self, from: response.data) {
+            if let envelope {
                 if envelope.error.code == "FORBIDDEN" { return .forbidden }
                 if envelope.error.code == "ROOM_SET_MISMATCH" { return .roomSetMismatch }
                 return .failure(.api(
@@ -700,6 +761,8 @@ final class HouseholdAPIClient: HouseholdAPIServicing {
             let role: String
             let kind: String
             let joinedAt: String
+            /// 老后端不返回该字段。
+            let isSelf: Bool?
         }
     }
 
@@ -731,6 +794,10 @@ final class HouseholdAPIClient: HouseholdAPIServicing {
 
     private struct ClaimBody: Encodable {
         let code: String
+    }
+
+    private struct OwnershipTransferBody: Encodable {
+        let userId: String
     }
 
     private struct RoomCreateBody: Encodable {
@@ -796,6 +863,15 @@ final class UnavailableHouseholdAPI: HouseholdAPIServicing {
         householdID: String,
         token: String,
         completion: @escaping (Result<Void, HouseholdAPIError>) -> Void
+    ) {
+        completion(.failure(error))
+    }
+
+    func transferOwnership(
+        householdID: String,
+        userID: String,
+        token: String,
+        completion: @escaping (Result<Household, HouseholdAPIError>) -> Void
     ) {
         completion(.failure(error))
     }
