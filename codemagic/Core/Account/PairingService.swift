@@ -104,6 +104,7 @@ final class PairingService: PairingServicing {
                 // 换号后游标必须归零：旧账号的游标对新账号没有意义。
                 self.metadataStore.userID = session.userID
                 self.metadataStore.resetCursor()
+                self.metadataStore.sessionExpiresAt = session.expiresAt
                 self.metadataStore.reloginRequired = false
 
                 do {

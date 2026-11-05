@@ -64,7 +64,11 @@ final class SyncAPIClient: SyncAPIServicing {
                         return
                     }
                     self.deliver(
-                        .success(AnonymousSession(userID: decoded.userId, token: decoded.token)),
+                        .success(AnonymousSession(
+                            userID: decoded.userId,
+                            token: decoded.token,
+                            expiresAt: SyncDateCodec.parse(decoded.expiresAt ?? "")
+                        )),
                         completion
                     )
                 } catch {
@@ -90,7 +94,8 @@ final class SyncAPIClient: SyncAPIServicing {
         )
         components?.queryItems = [
             URLQueryItem(name: "cursor", value: String(cursor)),
-            URLQueryItem(name: "limit", value: String(limit)),
+            // 服务端上限 500；越界会被 400，客户端先收敛。
+            URLQueryItem(name: "limit", value: String(APILimits.clamp(limit, to: APILimits.changes))),
         ]
         guard let url = components?.url else {
             completion(.failure(.configuration("无法构造同步 URL")))
@@ -209,16 +214,19 @@ final class SyncAPIClient: SyncAPIServicing {
     private struct AnonymousResponse: Decodable {
         let userId: String
         let token: String
+        let expiresAt: String?
 
         private enum CodingKeys: String, CodingKey {
             case userId
             case token
+            case expiresAt
         }
 
         init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             userId = (try? container.decodeIfPresent(String.self, forKey: .userId)) ?? ""
             token = (try? container.decodeIfPresent(String.self, forKey: .token)) ?? ""
+            expiresAt = try? container.decodeIfPresent(String.self, forKey: .expiresAt)
         }
     }
 

@@ -12,22 +12,22 @@
 
 | 项 | 结果 |
 | --- | --- |
-| 版本 | **v0.9.0**（`MARKETING_VERSION 0.9.0`，`CURRENT_PROJECT_VERSION 17`，tag `v0.9.0`：首启引导 + 权限前置 + 启动打点 + 上架材料，契约对齐 `PJGoIoT` v0.7.0 / openapi 0.6.0） |
+| 版本 | **v0.10.0**（`MARKETING_VERSION 0.10.0`，`CURRENT_PROJECT_VERSION 18`，tag `v0.10.0`：410 全量重同步 + 503 退避 + 会话到期日 + 真 Postgres E2E，契约对齐 `PJGoIoT` v0.9.0 / openapi 0.7.0） |
 | 五模块（首页 / 智能 / 产品 / 市场 / 我的） | 已实现，纯代码 UIKit，真实数据路径；设备管理并入首页，规则与场景集中在「智能」 |
 | CoreBluetooth 扫描 + 连接 | 已实现（`CBCentralManager`，真实 RSSI） |
 | BLE 读数采集 | 已实现：连接后订阅心率 `0x2A37`、电量 `0x2A19`、温度 `0x2A6E`、Nordic UART TX `6E400003-…`；各特征独立解析器，失败静默丢弃并写本地日志 |
 | 长周期读数图表 | 已实现：1 小时 / 24 小时 / 7 天 / 30 天区间切换（映射 `1m` / `1h` / `1h` / `1d`），X 轴按桶 `start` 真实时间比例定位，缺口断线，`avg` 折线 + `min`–`max` 区间带，Y 轴自适应并带单位 |
 | 本地持久化 | 已实现（SQLite3，含同步字段；迁移 **v6** 新增仅本机的 `scenarios` 表；v5 新增 `readings` 表，本地保留 7 天；v4 区分 `advertised_name` 与用户别名并记录三态 patch） |
 | 设计系统（v0.8.0） | **已落地**：`Palette` 36 个语义色（浅/深 `UIColor(dynamicProvider:)`）、`Layout` 4pt 阶梯 / 16 页边距 / 56·72·88 行高 / 12 圆角 / 1dp 描边、`AppText` 10 级字号与等宽数字；代码内无硬编码色值与字号（单测强制扫描） |
-| 网络层 | 已实现（URLSession + Codable；设备/型号/同步/账号对齐 `PJGoIoT` v0.7.0 openapi 0.6.0；读数查询 / summary / series / metrics 对齐 v0.5.1 起；详情页远端刷新 800ms 去抖动 + 失败指数退避 ≤5 分钟，不可见/后台不请求） |
-| 同步 | **已实现**：匿名登录、增量拉取、批量推送（设备 ≤100/批 + 读数 ≤200/批、幂等键含读数）、冲突提示、tombstone、Keychain token、前后台 / BGTask 触发、断网累积补传；后台唤醒仅做受限推送（不拉增量、不建号、≥15 分钟间隔） |
+| 网络层 | 已实现（URLSession + Codable；设备/型号/同步/账号对齐 `PJGoIoT` v0.9.0 openapi 0.7.0；读数查询 / summary / series / metrics 对齐 v0.5.1 起；详情页远端刷新 800ms 去抖动 + 失败指数退避 ≤5 分钟，不可见/后台不请求；分页上限 changes 500 / readings 500 / export 5000 客户端先收敛） |
+| 同步 | **已实现**：匿名登录、增量拉取、批量推送（设备 ≤100/批 + 读数 ≤200/批、幂等键含读数）、冲突提示、tombstone、Keychain token、前后台 / BGTask 触发、断网累积补传；后台唤醒仅做受限推送（不拉增量、不建号、≥15 分钟间隔）；**410 `RESYNC_REQUIRED` 自动全量重同步（pending 不丢）**，503 `TIMEOUT` 指数退避 |
 | 自绘 RSSI + 自绘折线图 + 代码组装空状态 | 已实现（读数图表纯 `draw(_:)`，无第三方图表库） |
 | 首启引导 | **已实现**：3 步（蓝牙 / 通知 / 后台采集），仅首次或未走完时出现，可跳过；步骤与完成标记持久化到 `UserDefaults` |
-| 单元测试 | **226 个用例，0 失败**（`** TEST SUCCEEDED **`，2026-11-05，Xcode 27.2 / iPhone 17 模拟器；含 36 语义色与深浅变体、10 级字号、硬编码色值/字号审计、场景动作真实调用与失败汇总、迁移 v5→v6、刷新去抖/退避、通知节流、CSV 分页、接管码、注销、后台限流、首启持久化与术语审计） |
+| 单元测试 | **236 个用例，0 失败**（`** TEST SUCCEEDED **`，2026-11-05，Xcode 27.2 / iPhone 17 模拟器；含 410 全量重同步 / pending 保留 / 二次从 0 / HTTP fake transport、503 TIMEOUT 退避、错误码映射表、changes/readings/export 分页上限、36 语义色与深浅变体、硬编码色值/字号审计、场景动作、迁移、刷新退避、通知节流、CSV 分页、接管码、注销、后台限流、首启与术语审计） |
 | 模拟器构建 | **通过**（`xcodebuild ... build`，`** BUILD SUCCEEDED **`） |
 | CI | **GitHub Actions 已实际运行 success**：v0.9.0 run [41973731269](https://github.com/platojobs/codemagic/actions/runs/41973731269)（success，macos-15 + Xcode 16.4，提交 `08f88d6`），并行 `Build & Test`（226 单测）与 `E2E contract`（151 项，0 SKIP）；v0.8.0 run [41967922243](https://github.com/platojobs/codemagic/actions/runs/41967922243) 为上一基线；`codemagic.yaml` 作为可选替代保留但未验证 |
 | 真机 BLE / 签名 | **未验证**：本机无真机与 Apple 开发者账号；读数采集与图表需真机 / 可穿戴设备验证（见第 9 节） |
-| 真实后端同步 | **契约已联调**：`scripts/e2e-contract.sh` 对本地 `PJGoIoT` **v0.7.0**（`STORE=fixture`）跑 **151 项断言，全部 PASS**（含接管码生成/失效/一次性、导出分页、注销后 token 失效，以及既有读数/设备/series/metrics 契约）；App 内同步 UI 仍需真机手动验证 |
+| 真实后端同步 | **契约已联调**：`scripts/e2e-contract.sh` 对本地 `PJGoIoT` **v0.9.0**（`STORE=fixture`）跑 **151 项断言，全部 PASS**；另用 `scripts/e2e-postgres.sh` 对真实 Postgres 跑通 410 分支 / series / metrics / export / 注销（输出见 [docs/e2e-postgres.md](docs/e2e-postgres.md)）；App 内同步 UI 仍需真机手动验证 |
 | 上架材料 | **已补齐**：`docs/store-listing.md`、`docs/privacy-policy.md`、`docs/app-privacy.md` 与 `codemagic/Resources/PrivacyInfo.xcprivacy`（未使用能力不声明） |
 
 ---
@@ -338,16 +338,38 @@ cd /path/to/codemagic
 - 采集：CoreBluetooth notify 订阅心率 `0x2A37`、电量 `0x2A19`、温度 `0x2A6E`、Nordic UART TX `6E400003-…`；解析规则见 `docs/consistency.md` 3.7。解析失败静默丢弃并写本地日志（分类「读数」），不崩溃、不写脏数据。
 - 黄金用例：两端共用 `docs/consistency.md` 3.8 的「读数解析黄金用例」表（输入 hex → 唯一期望）；iOS 固化在 `codemagicTests/ReadingsGoldenTests.swift`（18 个用例，含空字节与多行部分失败）。
 
-### 7.4 账号（v0.7.0，契约对齐 PJGoIoT v0.7.0 / openapi 0.6.0）
+### 7.4 账号（v0.7.0，契约对齐 PJGoIoT v0.9.0 / openapi 0.7.0）
 
 | 接口 | 方法 | 说明 |
 | --- | --- | --- |
+| `/api/v1/auth/anonymous` | `POST` | 返回 `{userId, token, expiresAt}`；token 默认 180 天 TTL |
 | `/api/v1/auth/pairing-code` | `POST` | Bearer；返回 `{code, expiresAt}`；8 位、10 分钟、一次性；重新生成使旧码失效 |
-| `/api/v1/auth/pairing-code/claim` | `POST` | Body `{code}`，无需旧 token；返回 `{userId, token}`；404 统一「码无效或已过期」；429 带 `Retry-After` |
-| `/api/v1/me/export?limit=&cursor=` | `GET` | Bearer；返回 `{user, devices, readings, exportedAt, hasMore, nextCursor}`；`cursor` 不透明 |
+| `/api/v1/auth/pairing-code/claim` | `POST` | Body `{code}`，无需旧 token；返回 `{userId, token, expiresAt}`；404 统一「码无效或已过期」；429 带 `Retry-After` |
+| `/api/v1/me/export?limit=&cursor=` | `GET` | Bearer；返回 `{user, devices, readings, exportedAt, hasMore, nextCursor}`；`limit` 上限 **5000**；`cursor` 不透明 |
 | `/api/v1/me` | `DELETE` | Bearer；204；删除账号、设备、读数并使全部 token 失效 |
 
-接管成功后客户端替换 Keychain token，保留本机设备 / 读数并全部重新标记 pending，游标清零；注销成功后按 Keychain → SQLite 业务表 → 同步元数据顺序清理。细节与错误口径见 `docs/consistency.md` 3.11。
+接管成功后客户端替换 Keychain token，保留本机设备 / 读数并全部重新标记 pending，游标清零；注销成功后按 Keychain → SQLite 业务表 → 同步元数据顺序清理。细节与错误口径见 `docs/consistency.md` 3.11 / 3.13。
+
+### 7.5 游标失效与全量重同步（v0.10.0）
+
+服务端保留 `change_log` 90 天。若本机游标早于该用户最老保留行（例如离线超过 90 天），`GET /sync/changes` 返回：
+
+```json
+HTTP/1.1 410 Gone
+{"error":{"code":"RESYNC_REQUIRED","message":"游标已过期，请全量重新同步"}}
+```
+
+`cursor=0` **永不** 410。客户端（`SyncEngine.handleResyncRequired`）收到后：
+
+1. 清空本地同步游标与 `lastSyncAt`（`SyncMetadataStore.resetCursor()`）；
+2. **不清理** pending 设备 / 读数，全量拉取后仍由 `pushPending` 重新上传；
+3. 立即以 `cursor=0` 全量重拉，合并规则与首次拉取完全一致；
+4. 410 属终态分支：**不进指数退避**，只处理一次（二次仍 410 则失败，不死循环）；
+5. 「我的」同步状态区明确提示「**云端变更记录已过期，已重新全量同步**；同步完成：拉取 N 条…」，不静默。
+
+与 503 的边界：`503 TIMEOUT` 是查询超时，映射「服务端繁忙，稍后重试」并进退避（30s 起、上限 5 分钟），**不得按 410 处理**。
+
+测试：`SyncEngineTests` 中 410 游标归零 / pending 保留 / 二次从 0 / 文案断言 / HTTP fake transport 全量拉取成功；`NetworkingTests` 锁定 `TIMEOUT` 与 `RESYNC_REQUIRED` 的映射；真实 Postgres 分支由 `scripts/e2e-postgres.sh` 触发，输出见 [docs/e2e-postgres.md](docs/e2e-postgres.md)。
 
 ---
 
@@ -406,8 +428,11 @@ cd /path/to/codemagic
 
 - 模拟器无真实蓝牙，状态为 `unsupported`；产品 / 市场 / 详情依赖网络，需运行包含 readings 链路的本地 Go 服务或已更新的 mock。
 - 已实现 GATT 服务发现与四个读数特征的 notify 订阅；**未实现特征写入 / OTA**，GATT 元数据仍来自 catalog。
-- 契约已用本地 fixture 服务端到端验证（151 项断言 PASS，后端 `PJGoIoT` v0.7.0 / 契约 0.6.0）；App 内的 Keychain token、BGTask 调度、后台 BLE 采集与真实网络环境仍需真机验证。
-- 后端 `PJGoIoT` 已打 tag **v0.7.0**（含接管码、账号导出与注销）；iOS 按该契约实现，CI 若 checkout 到旧后端，e2e 第 8 节会明确 SKIP。
+- 契约已用本地 fixture 服务端到端验证（151 项断言 PASS，后端 `PJGoIoT` v0.9.0 / openapi 0.7.0）；真实 Postgres 的 410 / series / metrics / export / 注销已由 `scripts/e2e-postgres.sh` 本地跑通（不进 CI）。App 内的 Keychain token、BGTask 调度、后台 BLE 采集与真实网络环境仍需真机验证。
+- 后端 `PJGoIoT` 已打 tag **v0.9.0**（含 410 `RESYNC_REQUIRED`、503 `TIMEOUT`、token `expiresAt`、分页上限）；iOS 按该契约实现，CI 若 checkout 到旧后端，e2e 相关分支会明确 SKIP。
+- [ ] 真机 + 真实后端：断网 90 天以上游标（改库 + cleanup 构造 410）后的自动全量重同步、pending 保留与 UI 提示。
+- [ ] 真机 + 真实后端：503 `TIMEOUT` 的「服务端繁忙，稍后重试」与退避闸门（手动同步可立即重试）。
+- [ ] 真机：token 过期后的「登录已失效」与「会话到期日」展示、接管 / 注销后的更新与清除。
 - Release 签名与 App Store 上架未验证（无 Apple 开发者账号 / 证书）。
 
 ---

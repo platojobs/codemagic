@@ -120,6 +120,14 @@ final class ProfileViewModel {
         return userID
     }
 
+    /// 会话到期日：只读展示，来自 `/auth/anonymous` 或 claim 返回的 `expiresAt`。
+    /// 不用于鉴权判断（是否失效以 401 为准）；旧后端未返回时明确显示"未返回"。
+    var sessionExpiryText: String {
+        if syncStatus.needsRelogin { return "登录已失效" }
+        guard let expiresAt = syncStatus.sessionExpiresAt else { return "服务端未返回" }
+        return AppDateFormat.day(expiresAt)
+    }
+
     /// 同步区状态：登录失效 / 进行中 / 上次结果 / 失败原因 / 从未同步。
     var syncStatusText: String {
         if syncStatus.isSyncing { return "正在同步…" }

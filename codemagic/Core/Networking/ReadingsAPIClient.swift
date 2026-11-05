@@ -64,7 +64,8 @@ final class ReadingsAPIClient: ReadingsAPIServicing {
     ) {
         var queryItems = [
             URLQueryItem(name: "metric", value: metric.rawValue),
-            URLQueryItem(name: "limit", value: String(limit)),
+            // 服务端上限 500；翻页时客户端先收敛，避免越界 400。
+            URLQueryItem(name: "limit", value: String(APILimits.clamp(limit, to: APILimits.readings))),
         ]
         if let from { queryItems.append(URLQueryItem(name: "from", value: SyncDateCodec.string(from: from))) }
         if let to { queryItems.append(URLQueryItem(name: "to", value: SyncDateCodec.string(from: to))) }

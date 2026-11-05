@@ -314,7 +314,7 @@ extension ProfileViewController: UITableViewDataSource {
         switch section {
         case .bluetooth: return 3
         case .localData: return 2
-        case .sync: return 4 + (viewModel.needsRelogin ? 1 : 0)
+        case .sync: return 5 + (viewModel.needsRelogin ? 1 : 0)
         case .account: return 4
         case .alerts: return 3
         case .appearance: return 1
@@ -399,6 +399,8 @@ extension ProfileViewController: UITableViewDataSource {
                 )
             case 3:
                 return makeValueCell(title: "匿名账号", value: viewModel.accountText)
+            case 4:
+                return makeValueCell(title: "会话到期日", value: viewModel.sessionExpiryText)
             default:
                 return makeActionCell(
                     title: viewModel.isSyncing ? "登录中…" : "重新登录",
@@ -514,7 +516,7 @@ extension ProfileViewController: UITableViewDelegate {
             confirmClearLogs()
         case .sync where indexPath.row == 2:
             viewModel.manualSync()
-        case .sync where indexPath.row == 4:
+        case .sync where indexPath.row == 5:
             confirmRelogin()
         case .account where indexPath.row == 0:
             openPairingCode()

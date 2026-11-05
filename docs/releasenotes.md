@@ -4,6 +4,7 @@
 
 | Tag | MARKETING_VERSION | Build | 日期 | 对齐后端 |
 | --- | --- | --- | --- | --- |
+| `v0.10.0` | 0.10.0 | 18 | 2026-11-05 | PJGoIoT v0.9.0（openapi 0.7.0；410 / 503 TIMEOUT / expiresAt / 分页上限） |
 | `v0.9.0` | 0.9.0 | 17 | 2026-11-05 | PJGoIoT v0.7.0（契约 0.6.0；无后端变更） |
 | `v0.8.0` | 0.8.0 | 16 | 2026-11-05 | PJGoIoT v0.7.0（契约 0.6.0；无后端变更） |
 | `v0.7.0` | 0.7.0 | 15 | 2026-11-05 | PJGoIoT v0.7.0（契约 0.6.0） |
@@ -20,6 +21,33 @@
 | `v0.3.0` | 0.3.0 | 4 | 2026-11-05 | 0.3.0 |
 | `v0.2.0` | 0.2.0 | 3 | 2026-11-05 | 0.2.0 |
 | `v0.1.0` | — | 1 | 2026-11-05 | — |
+
+---
+
+## v0.10.0（build 18）
+
+**主题：跟进后端新契约（410 / 503 / expiresAt / 分页上限）与真 Postgres E2E**
+
+### 410 `RESYNC_REQUIRED` 全量重同步
+- 收到 `410 {"error":{"code":"RESYNC_REQUIRED"}}`：`SyncMetadataStore.resetCursor()` 清空游标与 `lastSyncAt`，立即以 `cursor=0` 全量重拉；合并规则复用首次拉取，本地 pending 设备 / 读数不清理，拉取后仍重新上传。
+- 410 属终态分支：不进指数退避、只处理一次；二次仍 410 直接失败，不死循环。
+- 「我的」同步状态区明确展示「云端变更记录已过期，已重新全量同步；…」，不静默。
+- 单测覆盖：游标归零、pending 保留并重新推送、二次同步从新游标、UI 文案、fake transport 410 → 全量 200 → push；另加「二次仍 410 不死循环」。
+
+### 其它契约
+- `503 TIMEOUT` 映射「服务端繁忙，稍后重试」，按指数退避（30s 起、上限 5 分钟）设自动同步闸门；绝不按 410 处理。
+- `401`（含 token 180 天 TTL 过期）沿用既有重登流程，文案统一「登录已失效」。
+- `/auth/anonymous` 与 `claim` 解析 `expiresAt` 并存 `sync.sessionExpiresAt`；「我的」新增只读行「会话到期日」，注销 / 重新登录 / 接管时更新或清除。
+- 错误码集中到 `APIErrorCatalog` 一张映射表（补 `RESYNC_REQUIRED` / `TIMEOUT` / `IDEMPOTENCY_CONFLICT` 等）。
+- 分页上限自查：changes 500、readings 500、export 5000，`APILimits` 在发请求前收敛，避免越界 400。
+
+### 真 Postgres E2E
+- 新增 `scripts/e2e-postgres.sh`：起 `PJGoIoT/scripts/stack-for-e2e.sh`（Postgres + API）→ 复用真实栈跑 151 项契约 → 用 SQL 改最老 `server_ts` + `cleanup(90)` 触发真实 410 → `cursor=0` 全量 → series / metrics / export / 注销 → 停栈回收；状态全部落在 `mktemp` 目录。
+- 真实运行 PASS，输出见 `docs/e2e-postgres.md`。GitHub Actions macOS runner 无法跑 Docker，本项**不进 CI**，只本地执行。
+
+### 测试与文档
+- 单元测试 **236 个，0 失败**；`xcodebuild build` / `test` 全绿；`scripts/e2e-contract.sh` 151 项 PASS。
+- `docs/consistency.md` 新增 3.13（410 / 503 / 401+expiresAt / 分页上限）与错误码映射表；README 新增「游标失效与全量重同步」；`docs/acceptance.md` 新增 S-01–S-08 真机走查。
 
 ---
 

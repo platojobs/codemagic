@@ -27,6 +27,18 @@ enum AppDateFormat {
         absoluteFormatter.string(from: date)
     }
 
+    private static let dayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
+
+    /// 日期型只读展示（如会话到期日）。
+    static func day(_ date: Date) -> String {
+        dayFormatter.string(from: date)
+    }
+
     static func rssi(_ value: Int) -> String {
         "\(value) dBm"
     }

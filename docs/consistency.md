@@ -51,12 +51,12 @@ iOS 设备详情页独立于底部导航：`Modules/Devices/Scenes/DeviceDetailV
 
 | 用途 | Android | iOS | 说明 |
 | --- | --- | --- | --- |
-| 匿名登录 | `POST /api/v1/auth/anonymous` | `POST /api/v1/auth/anonymous` | 返回 `{userId, token}`；token 存 Keychain |
+| 匿名登录 | `POST /api/v1/auth/anonymous` | `POST /api/v1/auth/anonymous` | 返回 `{userId, token, expiresAt}`；token 存 Keychain，到期日只读展示 |
 | 产品列表 | `GET api/products` | `GET /api/v1/device-types` + `.../{type}/catalog` | 见 3.4 |
 | 市场列表 | `GET api/market` | `GET /api/v1/device-types/{type}/catalog` | 聚合 firmware + accessories |
 | 设备信息 | `GET /api/v1/devices/{mac}` | `GET /api/v1/my/devices/ios/{externalId}` | iOS 用复合键，不依赖 MAC |
 | 型号元数据 | `GET /api/v1/device-types/{type}` | `GET /api/v1/device-types/{type}` | iOS 型号列表与 catalog |
-| 增量拉取 | `GET /api/v1/sync/changes?cursor=&limit=` | 同左 | 返回 `{changes[], nextCursor, hasMore}` |
+| 增量拉取 | `GET /api/v1/sync/changes?cursor=&limit=` | 同左 | 返回 `{changes[], nextCursor, hasMore}`；cursor 失效返回 410，客户端以 0 全量重拉 |
 | 批量推送 | `POST /api/v1/sync/push` | 同左 | 批量 + `Idempotency-Key` |
 | 型号 catalog | `GET /api/v1/device-types/{type}/catalog` | 同左 | 一次返回 `deviceType` + `firmwares` + `accessories`；产品 / 市场的数据源 |
 | 用户设备列表 | `GET /api/v1/my/devices` | — | iOS App 未使用（拉取走 `sync/changes`）；仅 E2E 校验鉴权 |
@@ -170,7 +170,7 @@ gattServices: [{ uuid, name, characteristics? }]
 
 ### 3.4 与 `openapi.yaml` 的对齐状态
 
-`PJGoIoT/api/openapi.yaml`（当前标注 v0.3.3）提供 `POST /auth/anonymous`、`GET /sync/changes`、`POST /sync/push`、`GET /device-types/{type}/catalog`、`GET /my/devices/{platform}/{externalId}` 等。逐项核对结果：
+`PJGoIoT/api/openapi.yaml`（当前标注 v0.7.0，后端 v0.9.0）提供 `POST /auth/anonymous`、`GET /sync/changes`、`POST /sync/push`、`GET /device-types/{type}/catalog`、`GET /my/devices/{platform}/{externalId}` 等。逐项核对结果：
 
 | 项 | 状态 |
 | --- | --- |
@@ -354,11 +354,11 @@ iOS 用例固化在 `codemagicTests/ReadingsGoldenTests.swift`；新增特征或
 
 ### 3.11 跨设备接管、账号导出注销与后台采集（v0.7.0）
 
-后端契约 `PJGoIoT` v0.7.0（openapi **0.6.0**）。以下均为客户端行为口径，排序 / 格式化断言必须显式 Locale（`en_US_POSIX`）。
+后端契约 `PJGoIoT` v0.9.0（openapi **0.7.0**）。以下均为客户端行为口径，排序 / 格式化断言必须显式 Locale（`en_US_POSIX`）。
 
 **配对码（跨设备接管）**
 - `POST /api/v1/auth/pairing-code`（Bearer）→ `{code, expiresAt}`；码为 **8 位大写字母/数字**，字符集去掉易混的 `0/O/1/I`，10 分钟有效、一次性使用。
-- 真机接入另一台设备：`POST /api/v1/auth/pairing-code/claim`（无需旧 token）→ `{userId, token}`。
+- 真机接入另一台设备：`POST /api/v1/auth/pairing-code/claim`（无需旧 token）→ `{userId, token, expiresAt}`；新 token 默认 180 天有效，接管后写入 Keychain 与会话到期日。
 - 输入规范化：自动大写、过滤空白与 `0/O/1/I`、截断 8 位；不足 8 位不发起请求。
 - 重新生成：新码生成后旧码立即失效（服务端保证）；界面在生成前二次确认并明确提示旧码失效。
 - 错误口径：**404 一律「码无效或已过期」，不区分原因**；**429 读取 `Retry-After` 秒数并显示冷却倒计时**，冷却期间禁用提交；网络错误可重试。401 提示登录失效。
@@ -397,6 +397,45 @@ iOS 用例固化在 `codemagicTests/ReadingsGoldenTests.swift`；新增特征或
 - 连接动作前置校验蓝牙授权与设备存在；静音写入 `SettingsStore.ruleAlertsMutedUntil` 并让 `RuleAlertCoordinator` 停止告警；同步复用 `SyncEngine` 返回真实推送 / 拉取条数。
 - UI：场景列表与编辑页标注「仅本机」；首页快捷场景只展示前 3 个，点击执行并显示进度浮层与结果 Toast。
 
+### 3.13 游标失效 410、503 TIMEOUT、分页上限与会话到期（v0.10.0）
+
+后端契约为 `PJGoIoT` **v0.9.0 / openapi 0.7.0**；客户端行为口径如下。
+
+**410 `RESYNC_REQUIRED`（游标早于保留边界）**
+
+- 触发：`GET /sync/changes?cursor=` 的游标早于该用户最老保留 `change_log.seq`（服务端判定 `cursor > 0 && cursor < minSeq - 1`）时返回 `410 {"error":{"code":"RESYNC_REQUIRED","message":"游标已过期，请全量重新同步"}}`；**`cursor=0` 永不 410**。
+- 客户端处理（`SyncEngine.handleResyncRequired`）：
+  1. `SyncMetadataStore.resetCursor()`：清空本地游标与 `lastSyncAt`；
+  2. **不清理**本地 pending 设备 / 读数，全量拉取后仍由 `pushPending` 重新上传；
+  3. 立即以 `cursor=0` 全量重拉，合并规则复用 `apply`（与首次拉取完全一致：本地无 → 插入；已同步 → 覆盖；pending 且云端更新 → 云端获胜；pending 且本地更新 → 保留待推送）；
+  4. 410 属于**终态分支**：不进指数退避、只处理一次（`hasResynced` 守卫；二次仍 410 则直接失败，不死循环）；
+  5. 成功后在「我的」同步状态区明确展示「**云端变更记录已过期，已重新全量同步**；同步完成：拉取 N 条…」，不静默。
+- 单测：`SyncEngineTests.testResyncRequiredClearsCursorKeepsPendingAndPullsFromZero`（游标归零 / pending 保留 / 二次从 0 / UI 文案）、`testResyncRequiredOnlyHandledOnceWhenFullPullAlsoFails`、`testResyncRequiredEndToEndThroughHTTPTransport`（fake transport 410 → 全量 200 → push）。
+- 真 Postgres 分支：`scripts/e2e-postgres.sh` 用 SQL 改最老 `server_ts` + `cleanup(90)` 真实触发 410，再用 `cursor=0` 拉回；输出见 `docs/e2e-postgres.md`。
+
+**503 `TIMEOUT`（查询超时）**
+
+- `503 {"error":{"code":"TIMEOUT"}}`（以及 `UNAVAILABLE` / 裸 503）映射为「**服务端繁忙，稍后重试**」，属于**可重试**错误，按指数退避（30s 起、翻倍、上限 5 分钟）；**绝不可按 410 处理**，也不改动游标、不进入重新登录。
+- 退避闸门 `nextAutomaticRetryAt`：`syncIfNeeded` 在窗口内直接跳过，手动「立即同步」不受限。
+- 测试：`testTimeoutMapsToBusyAndEntersBackoffInsteadOfResync`（文案 / 游标不变 / 窗口内不再请求）。
+
+**401 登录失效（token 180 天 TTL）**
+
+- 401 语义不变：必须由用户确认重新登录，客户端不静默建号；文案统一「**登录已失效**」。
+- `/auth/anonymous` 与 `claim` 返回 `expiresAt`（默认 180 天，服务端 `TOKEN_TTL_DAYS` 可配）。客户端解析后存 `sync.sessionExpiresAt`（UserDefaults，非凭据），在「我的」以只读行「会话到期日」展示；过期时间**不参与鉴权**（是否失效只以 401 为准）。旧后端不返回时显示「服务端未返回」，不臆造日期。
+- 重新登录 / 注销 / 接管时同步更新或清除该字段。
+
+**分页上限（客户端先收敛，避免越界 400）**
+
+| 端点 | 服务端上限 | 客户端请求 |
+| --- | --- | --- |
+| `GET /sync/changes` | 500 | 默认 200 / 页，`APILimits.clamp(…, 500)` |
+| `GET /my/devices/…/readings` | 500 | 详情页默认 100，导出翻页 200，均 `clamp(…, 500)` |
+| `GET /me/export` | 5000 | 单页 5000，`clamp(…, 5000)` |
+
+- `APILimits`（`Core/Networking/APIErrorCatalog.swift`）集中定义三个上限；`SyncEngine` 的 `pageLimit` 在 init 时同样收敛。
+- 测试：`NetworkingTests.testChangesLimitIsClampedTo500` / `testReadingsLimitIsClampedTo500` / `testExportLimitIsClampedTo5000`。
+
 ---
 
 ## 4. 错误码
@@ -413,17 +452,29 @@ iOS 用例固化在 `codemagicTests/ReadingsGoldenTests.swift`；新增特征或
 | `BT-004` | 蓝牙前置条件不满足（不支持/未授权/已关闭/连接失败） | BLE 调用异常 | `CBManager` 状态异常 |
 | `SYNC-001` | 同步 / 云端记录前置条件不满足 | — | 上一次同步尚未结束、缺少匿名会话 |
 
-后端 `openapi.yaml` 的错误体为 `{"error":{"code":"...","message":"..."}}`，完整枚举（与 `PJGoIoT/internal/httpapi/errors.go` 一致）：
+后端 `openapi.yaml` 的错误体为 `{"error":{"code":"...","message":"..."}}`。完整枚举（与 `PJGoIoT/internal/httpapi/errors.go` 一致，v0.10.0 起含 410 / 503 新码）：
 
-`BAD_REQUEST`、`INVALID_MAC`、`INVALID_JSON`、`UNAUTHORIZED`、`NOT_FOUND`、`METHOD_NOT_ALLOWED`、`CONFLICT`、`IDEMPOTENCY_CONFLICT`、`RATE_LIMITED`、`PAYLOAD_TOO_LARGE`、`NOT_IMPLEMENTED`、`UNAVAILABLE`、`INTERNAL`。
+`BAD_REQUEST`、`INVALID_MAC`、`INVALID_JSON`、`UNAUTHORIZED`、`NOT_FOUND`、`METHOD_NOT_ALLOWED`、`CONFLICT`、`IDEMPOTENCY_CONFLICT`、`RATE_LIMITED`、`PAYLOAD_TOO_LARGE`、`NOT_IMPLEMENTED`、`UNAVAILABLE`、`INTERNAL`、**`RESYNC_REQUIRED`**、**`TIMEOUT`**。
+
+**唯一映射表**：`Core/Networking/APIErrorCatalog.swift` 把服务端 code 映射为「处理方式 + 展示文案」，`AppError` 与同步流程都只查这一张表：
+
+| code | HTTP | 处理方式 | 展示文案 |
+| --- | --- | --- | --- |
+| `RESYNC_REQUIRED` | 410 | `resyncRequired`：清游标 + `cursor=0` 全量重拉，只处理一次，不进退避 | 云端变更记录已过期，需要全量重新同步 |
+| `TIMEOUT` | 503 | `retryWithBackoff`：指数退避，不改游标、不重登 | 服务端繁忙，稍后重试 |
+| `UNAUTHORIZED` | 401 | `reloginRequired`：等用户确认重新登录 | 登录已失效，请在「我的」页重新登录 |
+| `IDEMPOTENCY_CONFLICT` | 409 | `terminal`：不自动重试 | 同步请求与已有幂等键冲突，请稍后重试 |
+| `RATE_LIMITED` / `UNAVAILABLE` / `INTERNAL` | 429 / 503 / 500 | `retryWithBackoff` | 请求过于频繁 / 服务暂时不可用 / 服务端内部错误 |
+| 其余（`BAD_REQUEST` / `NOT_FOUND` / `CONFLICT` 等） | 4xx | `terminal` | 按表内固定文案 |
 
 客户端 `SyncAPIClient` 统一解析为 `AppError.api`：
 
 - 客户端错误码仍为 `NET-002`，便于两端统一统计；
-- 展示与日志中同时保留服务端 `code` 与 `message`（如 `NET-002 RATE_LIMITED 请求过于频繁`）；
-- 同一 `Idempotency-Key` 用于不同请求体时返回 409 `IDEMPOTENCY_CONFLICT`（不是 `IDEMPOTENCY_KEY_REUSED`）；
+- 展示与日志中同时保留服务端 `code` 与 `HTTP status`（如 `NET-002 服务端繁忙，稍后重试（HTTP 503 / TIMEOUT）`）；
+- 同一 `Idempotency-Key` 用于不同请求体时返回 409 `IDEMPOTENCY_CONFLICT`（不是 `IDEMPOTENCY_KEY_REUSED`），客户端不自动重试；
 - **401 `UNAUTHORIZED` 语义**：token 已失效，必须由用户重新登录（重新获取匿名会话）后重试。客户端**不得在 401 时静默调用 `auth/anonymous` 新建匿名账号**，以免设备归属漂移。
-- iOS 当前在 401 时保留待上传记录并展示「登录已失效」：「我的」页显示状态与「重新登录」入口，用户确认后才调用 `auth/anonymous` 换新匿名账号；**不做自动重登**。确认后同步游标重置为 0，本机活动设备重新上传到新账号；旧账号云端数据不自动合并。见 `KNOWN_ISSUES.md`。
+- iOS 在 401 时保留待上传记录并展示「登录已失效」：「我的」页显示状态与「重新登录」入口，用户确认后才调用 `auth/anonymous` 换新匿名账号；**不做自动重登**。确认后同步游标重置为 0，本机活动设备重新上传到新账号；旧账号云端数据不自动合并。见 `KNOWN_ISSUES.md`。
+- **410 与 503 不可混用**：`AppError.isResyncRequired` 只认 410 / `RESYNC_REQUIRED`；`isServerBusy` 只认 503 / `TIMEOUT` / `UNAVAILABLE`；两者都有单测锁定。
 
 ---
 
@@ -517,13 +568,14 @@ iOS 表结构（`codemagic.sqlite`）：
 
 **身份与鉴权**
 
-- 首次同步调用 `POST /api/v1/auth/anonymous`，得到 `{userId, token}`。
+- 首次同步调用 `POST /api/v1/auth/anonymous`，得到 `{userId, token, expiresAt}`；`expiresAt` 存入 `sync.sessionExpiresAt`（UserDefaults，非凭据），仅供「我的」只读展示。
 - token 只存 **Keychain**（`kSecClassGenericPassword`，`AfterFirstUnlock`），不写 UserDefaults；userId 与游标存 UserDefaults（非凭据）。
 - 之后所有请求带 `Authorization: Bearer <token>`。
 
 **增量拉取**
 
-- `GET /api/v1/sync/changes?cursor=<上次游标>&limit=200`，`cursor` 持久化；`hasMore = true` 时继续拉取，单次同步最多 10 页。
+- `GET /api/v1/sync/changes?cursor=<上次游标>&limit=200`（服务端上限 500，客户端先收敛），`cursor` 持久化；`hasMore = true` 时继续拉取，单次同步最多 10 页。
+- 游标早于保留边界 → 410 `RESYNC_REQUIRED`：清游标 + `cursor=0` 全量重拉（只处理一次，pending 不丢，详见 3.13）。
 - 应用规则：
   - 本地不存在 → 插入并标记 `synced`；
   - 本地已同步 → 以云端字段覆盖；
@@ -547,7 +599,8 @@ iOS 表结构（`codemagic.sqlite`）：
 - 回到前台：`sceneDidBecomeActive` → 节流 120 秒后自动同步。
 - 进入后台：提交 `BGAppRefreshTask`（`com.platojobs.codemagic.sync`，最早 15 分钟），系统择机执行。
 - 「我的」页「立即同步」：手动触发，不受节流限制。
-- 失败不影响本地读写；「我的」页展示上次同步时间、待上传条数、错误码与降级说明。
+- 失败不影响本地读写；「我的」页展示上次同步时间、待上传条数、会话到期日、错误码与降级说明。
+- 可重试失败（网络 / 503 `TIMEOUT` / 5xx / 429）按指数退避（30s 起、翻倍、上限 300s）设 `nextAutomaticRetryAt`，窗口内自动同步跳过，手动同步不受限；410 不进该退避。
 
 ---
 

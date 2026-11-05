@@ -146,7 +146,11 @@ final class AccountAPIClient: AccountAPIServicing {
                         return
                     }
                     self.deliver(
-                        .success(AnonymousSession(userID: payload.userId, token: payload.token)),
+                        .success(AnonymousSession(
+                            userID: payload.userId,
+                            token: payload.token,
+                            expiresAt: SyncDateCodec.parse(payload.expiresAt ?? "")
+                        )),
                         completion
                     )
                 } catch {
@@ -168,7 +172,10 @@ final class AccountAPIClient: AccountAPIServicing {
             url: endpoint("api/v1/me/export"),
             resolvingAgainstBaseURL: false
         )
-        var queryItems = [URLQueryItem(name: "limit", value: String(limit))]
+        // 服务端导出分页上限 5000；超限会被 400，客户端先收敛。
+        var queryItems = [
+            URLQueryItem(name: "limit", value: String(APILimits.clamp(limit, to: APILimits.export))),
+        ]
         if let cursor, !cursor.isEmpty {
             queryItems.append(URLQueryItem(name: "cursor", value: cursor))
         }
@@ -271,6 +278,7 @@ final class AccountAPIClient: AccountAPIServicing {
     private struct ClaimPayload: Decodable {
         let userId: String
         let token: String
+        let expiresAt: String?
     }
 
     private struct APIErrorEnvelope: Decodable {

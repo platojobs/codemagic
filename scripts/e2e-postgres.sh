@@ -1,0 +1,288 @@
+#!/usr/bin/env bash
+#
+# 真实 Postgres 端到端联调（iOS ↔ PJGoIoT）。
+#
+# 与 scripts/e2e-contract.sh 的区别：
+#   - e2e-contract.sh 默认用后端 STORE=fixture（内存态），只验证 HTTP 契约；
+#   - 本脚本用 PJGoIoT/scripts/stack-for-e2e.sh 起「真实 Postgres + 真实 API」，
+#     再跑同一套契约用例，并额外验证只有真实库才能构造的分支：
+#     cursor 失效 410 / series / metrics / export / 注销。
+#
+# 状态隔离：所有后端状态、日志与临时文件都放进 mktemp 目录（E2E_STATE_DIR），
+# 不读写 App 的开发 SQLite / UserDefaults；契约 runner 本身是纯网络、无本地状态。
+#
+# GitHub Actions 的 macOS runner 无法运行 Docker，因此本脚本**不进 CI**，仅本地执行。
+#
+# 用法：
+#   ./scripts/e2e-postgres.sh
+#   PJGOIOT_DIR=/path/to/PJGoIoT ./scripts/e2e-postgres.sh
+#   E2E_KEEP_STATE=1 ./scripts/e2e-postgres.sh   # 失败排查时保留临时目录
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+IOS_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+PJGOIOT_DIR="${PJGOIOT_DIR:-$IOS_ROOT/../PJGoIoT}"
+STACK_SCRIPT="$PJGOIOT_DIR/scripts/stack-for-e2e.sh"
+TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/codemagic-e2e-pg.XXXXXX")"
+export E2E_STATE_DIR="$TMP_ROOT/stack"
+mkdir -p "$E2E_STATE_DIR" "$TMP_ROOT/artifacts"
+
+PG_USER="pjgoiot"
+PG_DB="pjgoiot_e2e"
+STACK_STARTED=0
+KEEP_STATE="${E2E_KEEP_STATE:-0}"
+
+log() { printf '%s\n' "$*" >&2; }
+step() { printf '\n== %s ==\n' "$*" >&2; }
+fail() {
+    log "FAIL: $*"
+    exit 1
+}
+
+cleanup() {
+    local rc=$?
+    trap - EXIT INT TERM
+    if [ "$STACK_STARTED" = "1" ]; then
+        (cd "$PJGOIOT_DIR" && E2E_STATE_DIR="$E2E_STATE_DIR" "$STACK_SCRIPT" --stop >/dev/null 2>&1) || true
+    fi
+    if [ "$KEEP_STATE" = "1" ]; then
+        log "临时目录保留：$TMP_ROOT"
+    else
+        rm -rf "$TMP_ROOT"
+    fi
+    exit "$rc"
+}
+trap cleanup EXIT INT TERM
+
+[ -x "$STACK_SCRIPT" ] || fail "未找到可执行的后端起栈脚本：$STACK_SCRIPT"
+command -v docker >/dev/null 2>&1 || fail "未找到 docker（本项只能本地跑，不进 CI）"
+command -v python3 >/dev/null 2>&1 || fail "未找到 python3"
+command -v curl >/dev/null 2>&1 || fail "未找到 curl"
+
+step "起真实 Postgres + API（状态目录 ${E2E_STATE_DIR}）"
+STACK_OUT="$(cd "$PJGOIOT_DIR" && E2E_STATE_DIR="$E2E_STATE_DIR" "$STACK_SCRIPT" 2>"$TMP_ROOT/stack.log")" || {
+    cat "$TMP_ROOT/stack.log" >&2 || true
+    fail "起栈失败"
+}
+STACK_STARTED=1
+BASE_URL="$(printf '%s\n' "$STACK_OUT" | sed -n 's/^BASE_URL=//p' | tail -1)"
+[ -n "$BASE_URL" ] || fail "起栈脚本未输出 BASE_URL"
+# shellcheck disable=SC1090
+source "$E2E_STATE_DIR/stack.env"
+log "BASE_URL=$BASE_URL"
+log "PG_CONTAINER=$PG_CONTAINER DATABASE_URL=$DATABASE_URL"
+
+step "跑现有契约套件（复用真实栈）"
+E2E_EXTERNAL_BASE_URL="$BASE_URL" "$SCRIPT_DIR/e2e-contract.sh" || fail "现有契约套件未通过"
+
+step "匿名登录"
+LOGIN_JSON="$(curl -fsS -X POST "$BASE_URL/api/v1/auth/anonymous")"
+TOKEN="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])' <<<"$LOGIN_JSON")"
+USER_ID="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["userId"])' <<<"$LOGIN_JSON")"
+python3 - "$LOGIN_JSON" "$USER_ID" <<'PY'
+import json, sys
+body = json.loads(sys.argv[1])
+assert body.get("userId") == sys.argv[2]
+assert body.get("token"), "缺少 token"
+assert body.get("expiresAt"), "匿名登录必须返回 expiresAt（180 天 TTL）"
+print("PASS 匿名登录: userId=%s expiresAt=%s" % (body["userId"], body["expiresAt"]))
+PY
+
+step "推送 iOS 设备 + 读数（第一次）"
+DEVICE_ID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
+EXTERNAL_ID="$(uuidgen | tr '[:lower:]' '[:upper:]')"
+python3 - "$DEVICE_ID" "$EXTERNAL_ID" >"$TMP_ROOT/artifacts/push-1.json" <<'PY'
+import datetime as dt
+import json
+import sys
+import uuid
+
+device_id, external_id = sys.argv[1], sys.argv[2]
+now = dt.datetime.now(dt.timezone.utc)
+
+def iso(delta_minutes: int) -> str:
+    return (now + dt.timedelta(minutes=delta_minutes)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+device = {
+    "id": device_id,
+    "platform": "ios",
+    "externalId": external_id,
+    "advertisedName": "PJ-Sensor",
+    "alias": "E2E iOS 设备",
+    "updatedAt": iso(0),
+}
+readings = [
+    {
+        "id": str(uuid.uuid4()),
+        "platform": "ios",
+        "externalId": external_id,
+        "metric": "temperature_celsius",
+        "value": value,
+        "unit": "celsius",
+        "recordedAt": iso(offset),
+    }
+    for value, offset in [(21.0, -40), (21.5, -30), (22.0, -20)]
+]
+readings.append({
+    "id": str(uuid.uuid4()),
+    "platform": "ios",
+    "externalId": external_id,
+    "metric": "relative_humidity",
+    "value": 48.0,
+    "unit": "percent",
+    "recordedAt": iso(-10),
+})
+print(json.dumps({"clientId": "codemagic-e2e", "devices": [device], "readings": readings}))
+PY
+PUSH_1="$(curl -fsS -X POST "$BASE_URL/api/v1/sync/push" \
+    -H "Authorization: Bearer $TOKEN" \
+    -H "Content-Type: application/json" \
+    -H "Idempotency-Key: $(uuidgen)" \
+    -d @"$TMP_ROOT/artifacts/push-1.json")"
+python3 - "$PUSH_1" <<'PY'
+import json, sys
+body = json.loads(sys.argv[1])
+assert len(body.get("applied") or []) == 1, body
+assert body.get("appliedReadings") == 4, body
+assert body.get("skippedReadings") == 0, body
+print("PASS push#1: applied=%d appliedReadings=%d" % (len(body["applied"]), body["appliedReadings"]))
+PY
+
+step "再次更新同一设备（制造两条 change_log，供 410 构造间隙）"
+python3 - "$TMP_ROOT/artifacts/push-1.json" >"$TMP_ROOT/artifacts/push-2.json" <<'PY'
+import datetime as dt
+import json
+import sys
+
+body = json.load(open(sys.argv[1], encoding="utf-8"))
+body["devices"][0]["alias"] = "E2E iOS 设备（二次更新）"
+# LWW 按 updatedAt 比较（秒级）；+5s 保证第二条更新一定比第一条新，不触发 server_newer 冲突。
+body["devices"][0]["updatedAt"] = (
+    dt.datetime.now(dt.timezone.utc) + dt.timedelta(seconds=5)
+).strftime("%Y-%m-%dT%H:%M:%SZ")
+body["readings"] = []
+print(json.dumps(body))
+PY
+PUSH_2="$(curl -fsS -X POST "$BASE_URL/api/v1/sync/push" \
+    -H "Authorization: Bearer $TOKEN" \
+    -H "Content-Type: application/json" \
+    -H "Idempotency-Key: $(uuidgen)" \
+    -d @"$TMP_ROOT/artifacts/push-2.json")"
+python3 - "$PUSH_2" <<'PY'
+import json, sys
+body = json.loads(sys.argv[1])
+assert len(body.get("applied") or []) == 1, body
+print("PASS push#2: applied=%d" % len(body["applied"]))
+PY
+
+step "增量拉取（cursor=0）"
+CHANGES_JSON="$(curl -fsS -H "Authorization: Bearer $TOKEN" \
+    "$BASE_URL/api/v1/sync/changes?cursor=0&limit=500")"
+OLD_SEQ="$(python3 - "$CHANGES_JSON" <<'PY'
+import json, sys
+body = json.loads(sys.argv[1])
+changes = body.get("changes") or []
+assert len(changes) >= 2, "至少需要两条变更才能构造 410 间隙：%r" % body
+assert all(c["entity"] == "user_device" for c in changes)
+print(min(c["seq"] for c in changes))
+PY
+)"
+OLD_CURSOR=$((OLD_SEQ - 1))
+[ "$OLD_CURSOR" -gt 0 ] || fail "最老 seq=${OLD_SEQ} 无法构造正游标失效（cursor=0 永不 410）"
+log "最老 seq=${OLD_SEQ}，用 cursor=${OLD_CURSOR}（小于保留边界）构造 410"
+
+step "构造游标失效：最老 seq server_ts 改为 100 天前，再跑 cleanup(90 天)"
+docker exec "$PG_CONTAINER" psql -U "$PG_USER" -d "$PG_DB" -v ON_ERROR_STOP=1 \
+    -c "UPDATE change_log SET server_ts = now() - interval '100 days' WHERE user_id = '$USER_ID'::uuid AND seq = $OLD_SEQ;" >/dev/null
+(cd "$PJGOIOT_DIR" && DATABASE_URL="$DATABASE_URL" CHANGE_LOG_RETENTION_DAYS=90 go run ./cmd/cleanup) \
+    >"$TMP_ROOT/artifacts/cleanup.log" 2>&1 || {
+    cat "$TMP_ROOT/artifacts/cleanup.log" >&2
+    fail "cleanup 执行失败"
+}
+grep -q "change_log_deleted=1" "$TMP_ROOT/artifacts/cleanup.log" \
+    || fail "cleanup 未删除预期的 1 条 change_log"
+log "cleanup: $(grep 'change_log_deleted=' "$TMP_ROOT/artifacts/cleanup.log")"
+
+step "旧游标应返回 410 RESYNC_REQUIRED"
+GONE_CODE="$(curl -s -o "$TMP_ROOT/artifacts/410.json" -w '%{http_code}' \
+    -H "Authorization: Bearer $TOKEN" \
+    "$BASE_URL/api/v1/sync/changes?cursor=$OLD_CURSOR&limit=500")"
+[ "$GONE_CODE" = "410" ] || fail "期望 410，实际 ${GONE_CODE}：$(cat "$TMP_ROOT/artifacts/410.json")"
+python3 - "$TMP_ROOT/artifacts/410.json" <<'PY'
+import json, sys
+body = json.load(open(sys.argv[1], encoding="utf-8"))
+assert body["error"]["code"] == "RESYNC_REQUIRED", body
+print("PASS 410: code=%s message=%s" % (body["error"]["code"], body["error"]["message"]))
+PY
+
+step "cursor=0 全量重拉（永不 410）"
+FULL_JSON="$(curl -fsS -H "Authorization: Bearer $TOKEN" \
+    "$BASE_URL/api/v1/sync/changes?cursor=0&limit=500")"
+python3 - "$FULL_JSON" <<'PY'
+import json, sys
+body = json.loads(sys.argv[1])
+changes = body.get("changes") or []
+assert changes, "全量拉取应至少保留 1 条变更：%r" % body
+assert body["hasMore"] is False
+print("PASS 全量拉取: changes=%d nextCursor=%s" % (len(changes), body["nextCursor"]))
+PY
+
+step "series / metrics"
+FROM_TO="$(python3 - <<'PY'
+import datetime as dt
+now = dt.datetime.now(dt.timezone.utc)
+fmt = lambda d: d.strftime("%Y-%m-%dT%H:%M:%SZ")
+print(fmt(now - dt.timedelta(hours=2)), fmt(now))
+PY
+)"
+FROM="${FROM_TO%% *}"
+TO="${FROM_TO##* }"
+SERIES_JSON="$(curl -fsS -G -H "Authorization: Bearer $TOKEN" \
+    "$BASE_URL/api/v1/my/devices/ios/$EXTERNAL_ID/readings/series" \
+    --data-urlencode "metric=temperature_celsius" \
+    --data-urlencode "from=$FROM" \
+    --data-urlencode "to=$TO" \
+    --data-urlencode "bucket=1h")"
+python3 - "$SERIES_JSON" <<'PY'
+import json, sys
+body = json.loads(sys.argv[1])
+buckets = body.get("buckets") or []
+assert buckets, body
+assert sum(b["count"] for b in buckets) == 3, body
+print("PASS series: buckets=%d count=%d unit=%s" % (len(buckets), sum(b["count"] for b in buckets), body["unit"]))
+PY
+
+METRICS_JSON="$(curl -fsS -H "Authorization: Bearer $TOKEN" \
+    "$BASE_URL/api/v1/my/devices/ios/$EXTERNAL_ID/readings/metrics")"
+python3 - "$METRICS_JSON" <<'PY'
+import json, sys
+items = {item["metric"]: item for item in json.loads(sys.argv[1]).get("items") or []}
+assert items["temperature_celsius"]["count"] == 3, items
+assert items["relative_humidity"]["count"] == 1, items
+print("PASS metrics: %s" % ", ".join("%s=%d" % (k, v["count"]) for k, v in sorted(items.items())))
+PY
+
+step "export / 注销"
+EXPORT_JSON="$(curl -fsS -H "Authorization: Bearer $TOKEN" \
+    "$BASE_URL/api/v1/me/export?limit=5000")"
+python3 - "$EXPORT_JSON" "$USER_ID" <<'PY'
+import json, sys
+body = json.loads(sys.argv[1])
+assert body["user"]["id"] == sys.argv[2], body["user"]
+assert len(body["devices"]) == 1
+assert len(body["readings"]) == 4, len(body["readings"])
+assert body["hasMore"] is False
+print("PASS export: devices=%d readings=%d nextCursor=%r" % (
+    len(body["devices"]), len(body["readings"]), body["nextCursor"]))
+PY
+
+DELETE_CODE="$(curl -s -o /dev/null -w '%{http_code}' -X DELETE \
+    -H "Authorization: Bearer $TOKEN" "$BASE_URL/api/v1/me")"
+[ "$DELETE_CODE" = "204" ] || fail "注销期望 204，实际 $DELETE_CODE"
+AFTER_CODE="$(curl -s -o /dev/null -w '%{http_code}' \
+    -H "Authorization: Bearer $TOKEN" "$BASE_URL/api/v1/me/export")"
+[ "$AFTER_CODE" = "401" ] || fail "注销后旧 token 期望 401，实际 $AFTER_CODE"
+log "PASS 注销: DELETE=204，旧 token 再访问=401"
+
+printf '\n[e2e-postgres] PASS\n'

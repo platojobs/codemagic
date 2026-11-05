@@ -37,9 +37,10 @@ enum AppError: Error, Equatable {
         case .network:
             return "网络请求失败，请检查网络或本地服务是否启动"
         case .server(let statusCode):
-            return "服务端返回异常状态（HTTP \(statusCode)）"
-        case .api(let code, let statusCode, let message):
-            return "服务端错误（HTTP \(statusCode) / \(code)）：\(message)"
+            return Self.serverMessage(statusCode: statusCode)
+        case .api(let code, let statusCode, _):
+            let entry = APIErrorCatalog.entry(for: code)
+            return "\(entry.message)（HTTP \(statusCode) / \(code)）"
         case .sync(let detail):
             return detail
         case .decoding:
@@ -57,6 +58,37 @@ enum AppError: Error, Equatable {
         "\(code) \(message)"
     }
 
+    /// 服务端结构化错误码；非 `.api` 为 nil。
+    var apiCode: String? {
+        if case .api(let code, _, _) = self { return code }
+        return nil
+    }
+
+    /// 410 `RESYNC_REQUIRED`：游标早于最老保留行，必须全量重同步。
+    /// 无结构化错误体的 410 也按同一语义处理（不静默当成空页）。
+    var isResyncRequired: Bool {
+        switch self {
+        case .api(let code, _, _):
+            return code == "RESYNC_REQUIRED" || code == "GONE"
+        case .server(let statusCode):
+            return statusCode == 410
+        default:
+            return false
+        }
+    }
+
+    /// `TIMEOUT`（HTTP 503）或裸 503：服务端繁忙，走退避，绝不能按 410 处理。
+    var isServerBusy: Bool {
+        switch self {
+        case .api(let code, let statusCode, _):
+            return code == "TIMEOUT" || code == "UNAVAILABLE" || statusCode == 503
+        case .server(let statusCode):
+            return statusCode == 503
+        default:
+            return false
+        }
+    }
+
     /// 匿名 token 失效（HTTP 401）。此时必须由用户确认重新登录，不得静默新建匿名账号。
     var isUnauthorized: Bool {
         switch self {
@@ -64,6 +96,34 @@ enum AppError: Error, Equatable {
             return true
         default:
             return false
+        }
+    }
+
+    /// 是否值得自动重试（网络抖动、5xx、限流）。410 属终态分支，不在此列。
+    var isRetryable: Bool {
+        switch self {
+        case .network:
+            return true
+        case .server(let statusCode):
+            return statusCode >= 500 && statusCode != 501
+        case .api(let code, let statusCode, _):
+            if statusCode == 410 { return false }
+            return APIErrorCatalog.entry(for: code).handling == .retryWithBackoff
+        default:
+            return false
+        }
+    }
+
+    private static func serverMessage(statusCode: Int) -> String {
+        switch statusCode {
+        case 401:
+            return "登录已失效，请在「我的」页重新登录"
+        case 410:
+            return "云端变更记录已过期，需要全量重新同步"
+        case 503:
+            return "服务端繁忙，稍后重试"
+        default:
+            return "服务端返回异常状态（HTTP \(statusCode)）"
         }
     }
 }

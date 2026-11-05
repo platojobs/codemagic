@@ -58,6 +58,31 @@ final class FakeSyncAPI: SyncAPIServicing {
     }
 }
 
+/// 按顺序返回不同状态码的 HTTP 桩，用于验证 410 → 全量拉取的完整链路。
+final class SequencedHTTPClient: HTTPClient {
+    struct Stub {
+        let statusCode: Int
+        let data: Data
+    }
+
+    private(set) var requests: [HTTPRequest] = []
+    private var stubs: [Stub]
+
+    init(stubs: [Stub]) {
+        self.stubs = stubs
+    }
+
+    func send(_ request: HTTPRequest, completion: @escaping (Result<HTTPResponse, AppError>) -> Void) {
+        requests.append(request)
+        guard !stubs.isEmpty else {
+            completion(.failure(.network("没有更多桩响应")))
+            return
+        }
+        let stub = stubs.removeFirst()
+        completion(.success(HTTPResponse(statusCode: stub.statusCode, headers: [:], data: stub.data)))
+    }
+}
+
 final class InMemoryTokenStore: TokenStoring {
     var session: AnonymousSession?
 
@@ -162,6 +187,161 @@ final class SyncEngineTests: XCTestCase {
         _ = runSync(engine)
         XCTAssertEqual(api.authCount, 1, "已有 token 时不应重复匿名登录")
         XCTAssertEqual(api.changesRequests.last?.token, "token-1")
+    }
+
+    func testAnonymousLoginPersistsSessionExpiryForProfile() throws {
+        let expiry = Date(timeIntervalSince1970: 1_800_000_000)
+        api.authResult = .success(
+            AnonymousSession(userID: "user-1", token: "token-1", expiresAt: expiry)
+        )
+
+        let engine = makeEngine()
+        _ = runSync(engine)
+
+        XCTAssertEqual(metadata.sessionExpiresAt, expiry)
+        XCTAssertEqual(engine.status.sessionExpiresAt, expiry)
+    }
+
+    // MARK: - 410 全量重同步
+
+    func testResyncRequiredClearsCursorKeepsPendingAndPullsFromZero() throws {
+        let device = makeSavedDevice(name: "离线 90 天的待上传设备")
+        try savedDeviceStore.upsert(device)
+        metadata.cursor = 9
+        metadata.lastSyncAt = Date(timeIntervalSince1970: 1_700_000_000)
+        tokenStore.session = AnonymousSession(userID: "user-1", token: "token-1")
+
+        api.changesPages = [
+            .failure(.api(code: "RESYNC_REQUIRED", statusCode: 410, message: "cursor too old")),
+            .success(SyncChangesPage(changes: [], nextCursor: 3, hasMore: false)),
+        ]
+        api.pushResults = [.success(PushResult())]
+
+        let engine = makeEngine()
+        guard case .success = try XCTUnwrap(runSync(engine)) else {
+            return XCTFail("410 后应自动全量重拉并成功")
+        }
+
+        XCTAssertEqual(
+            api.changesRequests.map(\.cursor),
+            [9, 0],
+            "410 只处理一次：先按旧游标失败，再从 cursor=0 全量拉取"
+        )
+        XCTAssertEqual(metadata.cursor, 3, "全量拉取完成后写入新游标")
+        XCTAssertNotNil(metadata.lastSyncAt)
+        XCTAssertEqual(api.pushRequests.count, 1, "pending 设备不得丢弃，必须重新上传")
+        XCTAssertEqual(engine.status.pendingCount, 0)
+        XCTAssertFalse(engine.status.needsRelogin, "410 不是登录失效，不得引导重新登录")
+        let message = try XCTUnwrap(engine.status.lastOutcomeMessage)
+        XCTAssertTrue(
+            message.contains("云端变更记录已过期，已重新全量同步"),
+            "必须明确提示，不得静默：\(message)"
+        )
+
+        // 后续同步从新游标继续，而不是再次从 0 开始。
+        _ = runSync(engine)
+        XCTAssertEqual(api.changesRequests.last?.cursor, 3)
+    }
+
+    func testResyncRequiredOnlyHandledOnceWhenFullPullAlsoFails() throws {
+        tokenStore.session = AnonymousSession(userID: "user-1", token: "token-1")
+        metadata.cursor = 9
+        api.changesPages = [
+            .failure(.api(code: "RESYNC_REQUIRED", statusCode: 410, message: "too old")),
+            .failure(.api(code: "RESYNC_REQUIRED", statusCode: 410, message: "too old")),
+        ]
+
+        let engine = makeEngine()
+        guard case .failure = try XCTUnwrap(runSync(engine)) else {
+            return XCTFail("全量拉取仍 410 时应失败，避免死循环")
+        }
+        XCTAssertEqual(api.changesRequests.map(\.cursor), [9, 0], "410 属于终态，只处理一次")
+        XCTAssertEqual(metadata.cursor, 0)
+        XCTAssertFalse(engine.status.needsRelogin)
+        XCTAssertTrue(
+            engine.status.lastOutcomeMessage?.contains("重新全量同步失败") == true,
+            "失败也要明确说明：\(String(describing: engine.status.lastOutcomeMessage))"
+        )
+    }
+
+    func testResyncRequiredEndToEndThroughHTTPTransport() throws {
+        let device = makeSavedDevice(name: "待上传")
+        try savedDeviceStore.upsert(device)
+        metadata.cursor = 9
+        tokenStore.session = AnonymousSession(userID: "user-1", token: "token-1")
+
+        let gone = Data(#"{"error":{"code":"RESYNC_REQUIRED","message":"cursor too old"}}"#.utf8)
+        let fullPage = Data(#"{"changes":[],"nextCursor":3,"hasMore":false}"#.utf8)
+        let transport = SequencedHTTPClient(stubs: [
+            .init(statusCode: 410, data: gone),
+            .init(statusCode: 200, data: fullPage),
+            .init(statusCode: 200, data: Data("{}".utf8)),
+        ])
+        let configuration = APIConfiguration(baseURL: URL(string: "http://127.0.0.1:18080")!)
+        let engine = SyncEngine(
+            api: SyncAPIClient(configuration: configuration, httpClient: transport),
+            tokenStore: tokenStore,
+            metadataStore: metadata,
+            deviceStore: savedDeviceStore,
+            readingsStore: readingsStore,
+            logStore: logStore
+        )
+
+        let expectation = expectation(description: "410 后全量拉取成功")
+        var captured: Result<SyncEngine.Summary, AppError>?
+        engine.sync {
+            captured = $0
+            expectation.fulfill()
+        }
+        wait(for: [expectation], timeout: 2)
+
+        guard case .success = try XCTUnwrap(captured) else {
+            return XCTFail("410 后应全量拉取成功")
+        }
+        let cursors = transport.requests.compactMap { request -> String? in
+            URLComponents(url: request.url, resolvingAgainstBaseURL: false)?
+                .queryItems?.first { $0.name == "cursor" }?.value
+        }
+        XCTAssertEqual(cursors, ["9", "0"], "HTTP 层也必须以 cursor=0 重拉")
+        XCTAssertEqual(transport.requests.last?.url.path, "/api/v1/sync/push")
+        XCTAssertEqual(metadata.cursor, 3)
+        XCTAssertEqual(engine.status.pendingCount, 0)
+        XCTAssertTrue(engine.status.lastOutcomeMessage?.contains("已重新全量同步") == true)
+    }
+
+    // MARK: - 503 TIMEOUT 退避
+
+    func testTimeoutMapsToBusyAndEntersBackoffInsteadOfResync() throws {
+        tokenStore.session = AnonymousSession(userID: "user-1", token: "token-1")
+        metadata.cursor = 4
+        let fixedNow = Date(timeIntervalSince1970: 1_700_000_000)
+        api.changesPages = [
+            .failure(.api(code: "TIMEOUT", statusCode: 503, message: "query timeout")),
+        ]
+
+        let engine = makeEngine(now: { fixedNow })
+        guard case .failure(let error) = try XCTUnwrap(runSync(engine)) else {
+            return XCTFail("503 应失败")
+        }
+        XCTAssertFalse(error.isResyncRequired, "503 不得按 410 处理")
+        XCTAssertTrue(error.isServerBusy)
+        XCTAssertTrue(error.isRetryable)
+        XCTAssertEqual(metadata.cursor, 4, "503 不应改动游标")
+        XCTAssertFalse(engine.status.needsRelogin)
+        let message = try XCTUnwrap(engine.status.lastOutcomeMessage)
+        XCTAssertTrue(message.contains("服务端繁忙，稍后重试"), "映射文案：\(message)")
+        XCTAssertTrue(message.contains("30 秒后自动重试"), "应进退避：\(message)")
+
+        // 退避窗口内自动同步被闸门跳过，不再连续打点。
+        _ = engine.syncIfNeeded(minimumInterval: 0)
+        XCTAssertEqual(api.changesRequests.count, 1, "退避期间不应再次请求")
+    }
+
+    func testUnauthorizedMessageSaysLoginExpired() {
+        let error = AppError.api(code: "UNAUTHORIZED", statusCode: 401, message: "token expired")
+        XCTAssertTrue(error.isUnauthorized)
+        XCTAssertFalse(error.isRetryable)
+        XCTAssertTrue(error.message.contains("登录已失效"), "401 文案：\(error.message)")
     }
 
     // MARK: - Push 幂等

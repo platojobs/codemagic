@@ -1,10 +1,20 @@
 import CryptoKit
 import Foundation
 
-/// 匿名登录返回的会话；`token` 只存 Keychain，不落 UserDefaults。
+/// 匿名登录 / 接管返回的会话；`token` 只存 Keychain，不落 UserDefaults。
+///
+/// `expiresAt` 是服务端签发的 token 到期时间（默认 180 天），仅用于只读展示；
+/// 旧后端不返回该字段时为 nil，不臆造日期。
 struct AnonymousSession: Equatable {
     let userID: String
     let token: String
+    let expiresAt: Date?
+
+    init(userID: String, token: String, expiresAt: Date? = nil) {
+        self.userID = userID
+        self.token = token
+        self.expiresAt = expiresAt
+    }
 }
 
 /// RFC 3339 时间解析 / 序列化。服务端可能带或不带毫秒，解析两者都接受。

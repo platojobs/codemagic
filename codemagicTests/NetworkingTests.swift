@@ -356,4 +356,80 @@ final class NetworkingTests: XCTestCase {
         XCTAssertEqual(AppError.database("").code, "DB-001")
         XCTAssertEqual(AppError.bluetooth("").code, "BT-004")
     }
+
+    // MARK: - 分页上限（服务端 readings 500 / export 5000 / changes 500）
+
+    private func queryValue(_ name: String, in url: URL) -> String? {
+        URLComponents(url: url, resolvingAgainstBaseURL: false)?
+            .queryItems?.first { $0.name == name }?.value
+    }
+
+    func testChangesLimitIsClampedTo500() {
+        let stub = StubHTTPClient(handler: { _ in
+            .success(Data(#"{"changes":[],"nextCursor":0,"hasMore":false}"#.utf8))
+        })
+        let client = SyncAPIClient(
+            configuration: APIConfiguration(baseURL: baseURL),
+            httpClient: stub
+        )
+        _ = waitForResult {
+            client.fetchChanges(cursor: 3, limit: 9_000, token: "token", completion: $0)
+        }
+        let url = stub.requestedURLs.last
+        XCTAssertEqual(queryValue("limit", in: url!), "500")
+        XCTAssertEqual(queryValue("cursor", in: url!), "3")
+    }
+
+    func testReadingsLimitIsClampedTo500() {
+        let stub = StubHTTPClient(handler: { _ in
+            .success(Data(#"{"items":[],"hasMore":false}"#.utf8))
+        })
+        let tokenStore = InMemoryTokenStore()
+        tokenStore.session = AnonymousSession(userID: "user-1", token: "token-1")
+        let client = ReadingsAPIClient(
+            configuration: APIConfiguration(baseURL: baseURL),
+            httpClient: stub,
+            tokenStore: tokenStore
+        )
+        _ = waitForResult {
+            client.fetchReadings(
+                platform: "ios",
+                externalID: "UUID-1",
+                metric: .temperature,
+                limit: 12_345,
+                completion: $0
+            )
+        }
+        XCTAssertEqual(queryValue("limit", in: stub.requestedURLs.last!), "500")
+    }
+
+    func testExportLimitIsClampedTo5000() {
+        let stub = StubHTTPClient(handler: { _ in .success(Data("{}".utf8)) })
+        let client = AccountAPIClient(
+            configuration: APIConfiguration(baseURL: baseURL),
+            httpClient: stub
+        )
+        client.fetchExportPage(cursor: nil, limit: 9_999, token: "token") { _ in }
+        XCTAssertEqual(queryValue("limit", in: stub.requestedURLs.last!), "5000")
+    }
+
+    func testErrorCatalogMapsResyncTimeoutAndUnauthorized() {
+        let resync = AppError.api(code: "RESYNC_REQUIRED", statusCode: 410, message: "gone")
+        XCTAssertTrue(resync.isResyncRequired)
+        XCTAssertFalse(resync.isRetryable, "410 属终态，不进指数退避")
+        XCTAssertEqual(APIErrorCatalog.entry(for: "RESYNC_REQUIRED").handling, .resyncRequired)
+
+        let timeout = AppError.api(code: "TIMEOUT", statusCode: 503, message: "query timeout")
+        XCTAssertTrue(timeout.isServerBusy)
+        XCTAssertTrue(timeout.isRetryable)
+        XCTAssertFalse(timeout.isResyncRequired, "503 不得当作 410")
+        XCTAssertEqual(APIErrorCatalog.entry(for: "TIMEOUT").handling, .retryWithBackoff)
+
+        let conflict = AppError.api(code: "IDEMPOTENCY_CONFLICT", statusCode: 409, message: "conflict")
+        XCTAssertEqual(APIErrorCatalog.entry(for: "IDEMPOTENCY_CONFLICT").handling, .terminal)
+        XCTAssertTrue(conflict.message.contains("幂等键冲突"))
+
+        let unauthorized = AppError.api(code: "UNAUTHORIZED", statusCode: 401, message: "expired")
+        XCTAssertTrue(unauthorized.isUnauthorized)
+    }
 }

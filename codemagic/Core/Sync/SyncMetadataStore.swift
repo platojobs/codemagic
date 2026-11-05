@@ -10,6 +10,7 @@ final class SyncMetadataStore {
         static let clientID = "sync.clientId"
         static let reloginRequired = "sync.reloginRequired"
         static let lastBackgroundPushAt = "sync.lastBackgroundPushAt"
+        static let sessionExpiresAt = "sync.sessionExpiresAt"
     }
 
     private let defaults: UserDefaults
@@ -51,6 +52,23 @@ final class SyncMetadataStore {
         set { defaults.set(newValue, forKey: Key.reloginRequired) }
     }
 
+    /// 匿名会话 token 到期时间（服务端 180 天 TTL，`/auth/anonymous` 与 claim 返回）。
+    /// 仅用于「我的」页只读展示，不参与鉴权判断（401 才是唯一失效依据）。
+    var sessionExpiresAt: Date? {
+        get {
+            guard defaults.object(forKey: Key.sessionExpiresAt) != nil else { return nil }
+            let value = defaults.double(forKey: Key.sessionExpiresAt)
+            return value > 0 ? Date(timeIntervalSince1970: value) : nil
+        }
+        set {
+            if let newValue {
+                defaults.set(newValue.timeIntervalSince1970, forKey: Key.sessionExpiresAt)
+            } else {
+                defaults.removeObject(forKey: Key.sessionExpiresAt)
+            }
+        }
+    }
+
     /// 客户端标识，随安装持久；写入服务端 `clientId`，用于诊断最后写入方。
     var clientID: String {
         if let existing = defaults.string(forKey: Key.clientID), !existing.isEmpty {
@@ -89,5 +107,6 @@ final class SyncMetadataStore {
         defaults.removeObject(forKey: Key.userID)
         defaults.removeObject(forKey: Key.reloginRequired)
         defaults.removeObject(forKey: Key.lastBackgroundPushAt)
+        defaults.removeObject(forKey: Key.sessionExpiresAt)
     }
 }

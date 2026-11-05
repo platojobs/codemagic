@@ -27,6 +27,8 @@ final class SyncEngine {
         var lastOutcomeMessage: String?
         /// 匿名 token 已失效，等待用户确认重新登录。
         var needsRelogin: Bool = false
+        /// 会话到期时间（服务端 180 天 TTL）；仅用于「我的」页只读展示。
+        var sessionExpiresAt: Date?
     }
 
     private(set) var status = Status()
@@ -44,6 +46,12 @@ final class SyncEngine {
 
     private var isSyncing = false
     private var sessionConflictMessages: [String] = []
+    /// 本轮同步是否发生了 410 全量重同步；用于在结果文案中明确提示。
+    private var didFullResync = false
+    /// 可重试失败（网络 / 5xx / TIMEOUT / 限流）的连续次数，用于指数退避。
+    private var retryFailureCount = 0
+    /// 自动同步的退避闸门：未到点前 `syncIfNeeded` 直接跳过；手动同步不受限。
+    private var nextAutomaticRetryAt: Date?
 
     init(
         api: SyncAPIServicing,
@@ -62,7 +70,8 @@ final class SyncEngine {
         self.deviceStore = deviceStore
         self.readingsStore = readingsStore
         self.logStore = logStore
-        self.pageLimit = pageLimit
+        // 服务端 changes 上限 500，客户端自己收敛，避免越界 400。
+        self.pageLimit = APILimits.clamp(pageLimit, to: APILimits.changes)
         self.maxPages = maxPages
         self.now = now
         refreshStatus()
@@ -77,11 +86,17 @@ final class SyncEngine {
         status.pendingCount = pending
         status.isSyncing = isSyncing
         status.needsRelogin = metadataStore.reloginRequired
+        status.sessionExpiresAt = metadataStore.sessionExpiresAt
     }
 
     /// 前后台切换触发：距上次同步不足 `minimumInterval` 时直接跳过。
     func syncIfNeeded(minimumInterval: TimeInterval = 120, completion: ((Result<Summary, AppError>) -> Void)? = nil) {
         if isSyncing { return }
+        // 失败后的指数退避闸门：未到点前不再自动发起，避免对 503 连续打点。
+        if let nextAutomaticRetryAt, now() < nextAutomaticRetryAt {
+            completion?(.success(Summary()))
+            return
+        }
         if let lastSyncAt = metadataStore.lastSyncAt,
            now().timeIntervalSince(lastSyncAt) < minimumInterval {
             completion?(.success(Summary()))
@@ -97,6 +112,7 @@ final class SyncEngine {
         }
         isSyncing = true
         sessionConflictMessages = []
+        didFullResync = false
         status.isSyncing = true
         status.lastError = nil
         notify()
@@ -181,6 +197,7 @@ final class SyncEngine {
         tokenStore.clear()
         metadataStore.resetCursor()
         metadataStore.userID = nil
+        metadataStore.sessionExpiresAt = nil
         metadataStore.reloginRequired = true
 
         do {
@@ -207,6 +224,7 @@ final class SyncEngine {
                     self.recordLog("重新登录成功，但 token 写入 Keychain 失败：\(error)")
                 }
                 self.metadataStore.userID = session.userID
+                self.metadataStore.sessionExpiresAt = session.expiresAt
                 self.metadataStore.reloginRequired = false
                 self.status.needsRelogin = false
                 self.runSync(session: session, summary: Summary(), completion: completion)
@@ -237,6 +255,7 @@ final class SyncEngine {
                     self.recordLog("匿名登录成功，但 token 写入 Keychain 失败：\(error)")
                 }
                 self.metadataStore.userID = session.userID
+                self.metadataStore.sessionExpiresAt = session.expiresAt
                 completion(.success(session))
             case .failure(let error):
                 completion(.failure(error))
@@ -255,7 +274,8 @@ final class SyncEngine {
             cursor: metadataStore.cursor,
             token: session.token,
             page: 0,
-            summary: summary
+            summary: summary,
+            hasResynced: false
         ) { [weak self] pullResult in
             guard let self else { return }
             switch pullResult {
@@ -281,16 +301,21 @@ final class SyncEngine {
 
     // MARK: - Pull
 
+    /// 增量拉取。`hasResynced` 保证 410 只处理一次：第二次仍 410 直接失败，不再循环。
     private func pull(
         cursor: Int64,
         token: String,
         page: Int,
         summary: Summary,
+        hasResynced: Bool,
         completion: @escaping (Result<Summary, AppError>) -> Void
     ) {
         api.fetchChanges(cursor: cursor, limit: pageLimit, token: token) { [weak self] result in
             guard let self else { return }
             switch result {
+            case .failure(let error) where error.isResyncRequired && !hasResynced:
+                self.handleResyncRequired(token: token, summary: summary, completion: completion)
+
             case .failure(let error):
                 completion(.failure(error))
 
@@ -313,6 +338,7 @@ final class SyncEngine {
                         token: token,
                         page: page + 1,
                         summary: summary,
+                        hasResynced: hasResynced,
                         completion: completion
                     )
                 } else {
@@ -320,6 +346,31 @@ final class SyncEngine {
                 }
             }
         }
+    }
+
+    /// 410 `RESYNC_REQUIRED`：游标早于服务端最老保留行。
+    ///
+    /// 处理语义与首次拉取完全一致：
+    /// 1. 游标与同步元数据归零（`resetCursor()` 只清 cursor / lastSyncAt）；
+    /// 2. 本地 pending 设备与读数**不清理**，全量拉取后仍会由 `pushPending` 重新上传；
+    /// 3. 以 `cursor=0` 重新拉取，合并规则复用 `apply`；
+    /// 4. 属终态分支，不进指数退避，且只处理一次（再次 410 直接失败）。
+    private func handleResyncRequired(
+        token: String,
+        summary: Summary,
+        completion: @escaping (Result<Summary, AppError>) -> Void
+    ) {
+        didFullResync = true
+        metadataStore.resetCursor()
+        recordLog("同步游标已过期（410 RESYNC_REQUIRED）：已清空游标，从 0 全量重新同步", level: .warning)
+        pull(
+            cursor: 0,
+            token: token,
+            page: 0,
+            summary: summary,
+            hasResynced: true,
+            completion: completion
+        )
     }
 
     /// 应用一页变更，返回「实际写入条数」与冲突提示。
@@ -604,6 +655,8 @@ final class SyncEngine {
             status.lastError = nil
             metadataStore.reloginRequired = false
             status.needsRelogin = false
+            retryFailureCount = 0
+            nextAutomaticRetryAt = nil
             let base = "同步完成：拉取 \(summary.pulled) 条，同步 \(summary.pushed) 条"
             var message = summary.conflicts > 0
                 ? "\(base)，冲突 \(summary.conflicts) 条（已采用云端版本）"
@@ -611,8 +664,12 @@ final class SyncEngine {
             if summary.pushedReadings > 0 || summary.skippedReadings > 0 {
                 message += "，读数 \(summary.pushedReadings) 条（跳过重复 \(summary.skippedReadings) 条）"
             }
-            status.lastOutcomeMessage = message
+            // 410 全量重同步不得静默：结果文案必须明确告知用户。
+            status.lastOutcomeMessage = didFullResync
+                ? "云端变更记录已过期，已重新全量同步；\(message)"
+                : message
             status.lastConflictMessages = sessionConflictMessages
+            status.sessionExpiresAt = metadataStore.sessionExpiresAt
 
         case .failure(let error):
             status.lastError = error
@@ -621,10 +678,29 @@ final class SyncEngine {
                 // 401：token 已失效。保留本地数据与 token，等待用户在「我的」页确认重新登录。
                 metadataStore.reloginRequired = true
                 status.needsRelogin = true
-                status.lastOutcomeMessage = "登录已失效：匿名 token 已过期，请点「重新登录」；本地数据仍可用"
+                retryFailureCount = 0
+                nextAutomaticRetryAt = nil
+                status.lastOutcomeMessage = "登录已失效：匿名会话 token 已过期，请点「重新登录」；本地数据仍可用"
                 recordLog("登录已失效（HTTP 401）：等待用户重新登录", level: .warning)
+            } else if error.isResyncRequired {
+                // 已重同步一次仍失败：终态，不进退避、不重复处理。
+                nextAutomaticRetryAt = nil
+                let prefix = didFullResync ? "云端变更记录已过期，重新全量同步失败：" : ""
+                status.lastOutcomeMessage = "\(prefix)\(error.code) \(error.message)；本地数据仍可用"
+                recordLog("游标失效后全量重同步失败：\(error.code) \(error.message)", level: .warning)
+            } else if error.isRetryable {
+                // 503 TIMEOUT / 网络 / 5xx：指数退避，绝对不是 410。
+                retryFailureCount += 1
+                let delay = Self.retryDelay(failureCount: retryFailureCount)
+                nextAutomaticRetryAt = now().addingTimeInterval(delay)
+                let prefix = didFullResync ? "云端变更记录已过期，已重新全量同步；但后续同步失败：" : "同步失败："
+                status.lastOutcomeMessage = "\(prefix)\(error.code) \(error.message)；本地数据仍可用，\(Int(delay)) 秒后自动重试"
+                recordLog("同步失败（可重试，第 \(retryFailureCount) 次）：\(error.code) \(error.message)", level: .warning)
             } else {
-                status.lastOutcomeMessage = "同步失败：\(error.code) \(error.message)；本地数据仍可用，稍后自动重试"
+                retryFailureCount = 0
+                nextAutomaticRetryAt = nil
+                let prefix = didFullResync ? "云端变更记录已过期，已重新全量同步；但后续同步失败：" : "同步失败："
+                status.lastOutcomeMessage = "\(prefix)\(error.code) \(error.message)；本地数据仍可用"
                 recordLog("同步失败：\(error.code) \(error.message)", level: .warning)
             }
         }
@@ -637,6 +713,12 @@ final class SyncEngine {
     }
 
     // MARK: - Helpers
+
+    /// 30s 起步、逐次翻倍、上限 5 分钟；仅用于可重试失败。
+    private static func retryDelay(failureCount: Int) -> TimeInterval {
+        let exponent = max(failureCount - 1, 0)
+        return min(pow(2, Double(exponent)) * 30, 300)
+    }
 
     private func conflictMessage(name: String, reason: String) -> String {
         "另一台设备改过这条：「\(name)」（\(reason)），已采用云端版本"
