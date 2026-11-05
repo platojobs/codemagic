@@ -12,25 +12,25 @@
 
 | 项 | 结果 |
 | --- | --- |
-| 版本 | **v0.13.0**（`MARKETING_VERSION 0.13.0`，`CURRENT_PROJECT_VERSION 21`，tag `v0.13.0`：房间归属 + 首页按房间分区，契约沿用 `PJGoIoT` v0.9.0 / openapi 0.7.0） |
+| 版本 | **v0.14.0**（`MARKETING_VERSION 0.14.0`，`CURRENT_PROJECT_VERSION 22`，tag `v0.14.0`：家庭 / 邀请码 / 成员共享与房间远端归属，契约对齐 `PJGoIoT` v0.12.0 / openapi 0.8.0） |
 | 五模块（首页 / 智能 / 产品 / 市场 / 我的） | 已实现，纯代码 UIKit，真实数据路径；设备管理并入首页，规则与场景集中在「智能」 |
 | CoreBluetooth 扫描 + 连接 | 已实现（`CBCentralManager`，真实 RSSI） |
 | BLE 读数采集 | 已实现：连接后订阅心率 `0x2A37`、电量 `0x2A19`、温度 `0x2A6E`、Nordic UART TX `6E400003-…`；各特征独立解析器，失败静默丢弃并写本地日志 |
 | 长周期读数图表 | 已实现：1 小时 / 24 小时 / 7 天 / 30 天区间切换（映射 `1m` / `1h` / `1h` / `1d`），X 轴按桶 `start` 真实时间比例定位，缺口断线，`avg` 折线 + `min`–`max` 区间带，Y 轴自适应并带单位；**v0.11.0 支持点选 / 长按桶查看 start–end、min/max/avg/last 与条数（本地时区），点空白取消，Y 轴不变，并给出无障碍摘要** |
-| 本地持久化 | 已实现（SQLite3，含同步字段；迁移 **v8** 新增仅本机的 `rooms` 表并为 `saved_devices` 增加可空 `room_id`（NULL = 未分配），v7 为 `rules` 加指标阈值字段并回填旧规则，v6 新增仅本机的 `scenarios` 表；v5 新增 `readings` 表，本地保留 7 天；v4 区分 `advertised_name` 与用户别名并记录三态 patch） |
-| 房间（v0.13.0，仅本机） | **已实现**：房间 CRUD 存 SQLite `rooms` 表，设备经 `saved_devices.room_id` 归属；首页按房间分区、标题可展开 / 收起，「未分配」固定最后；详情页与首页长按均可移入 / 移出；删除房间二次确认后设备回到未分配。房间**不参与 push / changes**，界面标注「仅本机」；`Room.remoteID` 为远端家庭 / 房间映射预留 |
+| 本地持久化 | 已实现（SQLite3，含同步字段；迁移 **v9** 新增 `households`（`id` / `remote_id` / `name` / `is_personal` / `role`）与 `device_assignment_pending`（设备归属上报队列），为 `rooms` 启用 `remote_id` 并增加 `household_id` / `sync_state` / `deleted`，为 `saved_devices` 增加 `household_id` / `remote_room_id` / `remote_household_id`；v8 新增 `rooms` 表与可空 `room_id`，v7 为 `rules` 加指标阈值字段，v6 新增仅本机的 `scenarios` 表；v5 新增 `readings` 表，本地保留 7 天；v4 区分 `advertised_name` 与用户别名并记录三态 patch） |
+| 家庭（v0.14.0） | **已接入后端**：登录后 `GET /households` 落库并持久化当前家庭；房间以服务端为准（本机 `local` / `pending` 作为离线与未同步状态）；「我的 → 家庭管理」可创建家庭、生成 8 位一次性邀请码（服务端 `expiresAt` 倒计时 / 复制 / 过期重生成）、输入邀请码加入、查看成员与角色；首页多于一个家庭时显示切换入口。设备归属走独立 `PATCH /my/devices/{platform}/{externalId}`（三态：缺失 = 不变、空串 = 清除、非空 = 覆盖），失败进入 `pending` 队列下次同步重试；member 写操作降级为可读提示，跨家庭按服务端 404 |
 | 本地化（v0.12.0） | **已实现**：全部界面文案走 `L10n.t` / `L10n.f`，资源为 `Resources/zh-Hans.lproj/Localizable.strings` 与 `en.lproj/Localizable.strings`；工程 `knownRegions` 含 `zh-Hans`，`CFBundleLocalizations = [en, zh-Hans]`，设置跟随系统语言；术语双语见第 11 节；单测强制扫描 View / ViewModel 源码不得硬编码中文，并校验两语言 key 集合与占位符一致 |
 | 动态字体（v0.12.0） | **已实现**：字号统一走 `AppText`（`UIFontMetrics` 缩放）+ `applyFont(_:)`（`adjustsFontForContentSizeCategory = true`）；表格行高自适应；图表 Y 轴左侧留白随字号测量增长，超大字号缩为 3 个刻度且不与绘图区重叠 |
 | 设计系统（v0.8.0） | **已落地**：`Palette` 36 个语义色（浅/深 `UIColor(dynamicProvider:)`）、`Layout` 4pt 阶梯 / 16 页边距 / 56·72·88 行高 / 12 圆角 / 1dp 描边、`AppText` 10 级字号与等宽数字；代码内无硬编码色值与字号（单测强制扫描） |
-| 网络层 | 已实现（URLSession + Codable；设备/型号/同步/账号对齐 `PJGoIoT` v0.9.0 openapi 0.7.0；读数查询 / summary / series / metrics 对齐 v0.5.1 起；详情页远端刷新 800ms 去抖动 + 失败指数退避 ≤5 分钟，不可见/后台不请求；分页上限 changes 500 / readings 500 / export 5000 客户端先收敛） |
+| 网络层 | 已实现（URLSession + Codable；家庭 / 邀请码 / 房间 / 设备归属对齐 `PJGoIoT` v0.12.0 openapi 0.8.0；设备/型号/同步/账号对齐 openapi 0.7.0 起的既有契约；读数查询 / summary / series / metrics 对齐 v0.5.1 起；详情页远端刷新 800ms 去抖动 + 失败指数退避 ≤5 分钟，不可见/后台不请求；分页上限 changes 500 / readings 500 / export 5000 客户端先收敛） |
 | 同步 | **已实现**：匿名登录、增量拉取、批量推送（设备 ≤100/批 + 读数 ≤200/批、幂等键含读数）、冲突提示、tombstone、Keychain token、前后台 / BGTask 触发、断网累积补传；后台唤醒仅做受限推送（不拉增量、不建号、≥15 分钟间隔）；**410 `RESYNC_REQUIRED` 自动全量重同步（pending 不丢）**，503 `TIMEOUT` 指数退避 |
 | 自绘 RSSI + 自绘折线图 + 代码组装空状态 | 已实现（读数图表纯 `draw(_:)`，无第三方图表库） |
 | 首启引导 | **已实现**：3 步（蓝牙 / 通知 / 后台采集），仅首次或未走完时出现，可跳过；步骤与完成标记持久化到 `UserDefaults` |
-| 单元测试 | **284 个用例，0 失败**（`** TEST SUCCEEDED **`，2026-11-05，Xcode 27.2 / iPhone Duo · iOS 27.2 模拟器；含房间迁移 v7→v8、增删改、设备移入移出、按房间分区与搜索隐藏空房间、推荐规则模板生成与一键写入、本地化 key / 占位符一致性与硬编码中文审计、`AppText` 默认与 AX5 字号差与布局固有高度、指标阈值规则（比较符边界 / 防抖 1–5 条 / 恢复一次 / 单位 / 旧规则 v6→v7 升级仍生效）、图表点选几何、CSV 文件名与 BOM、410 全量重同步、503 TIMEOUT 退避、错误码映射、分页上限、设计令牌审计、场景动作、通知节流、接管码、注销、首启与术语审计） |
+| 单元测试 | **293 个用例，0 失败**（`** TEST SUCCEEDED **`，2026-11-05，Xcode 27.2 / iPhone 18 Pro · iOS 27.2 模拟器；含家庭首次接入房间合并、同名认领、已删家庭房间脱钩、设备归属 403 终态与网络失败 pending 重试、未分配空串清除、切换家庭、离线建房、`RemoteDevice` 编解码；以及房间迁移 v7→v8、增删改、设备移入移出、按房间分区与搜索隐藏空房间、推荐规则模板生成与一键写入、本地化 key / 占位符一致性与硬编码中文审计、`AppText` 默认与 AX5 字号差与布局固有高度、指标阈值规则、图表点选几何、CSV 文件名与 BOM、410 全量重同步、503 TIMEOUT 退避、错误码映射、分页上限、设计令牌审计、场景动作、通知节流、接管码、注销、首启与术语审计） |
 | 模拟器构建 | **通过**（`xcodebuild ... build`，`** BUILD SUCCEEDED **`） |
 | CI | **GitHub Actions 已实际运行 success**：v0.10.0 tag run [41979289081](https://github.com/platojobs/codemagic/actions/runs/41979289081)（success，提交 `74f14c4`），并行 `Build & Test`（**236 单测**）与 `E2E contract`（**151 项，0 SKIP**）；同 sha 的 `main` run [41979270921](https://github.com/platojobs/codemagic/actions/runs/41979270921) 经重跑同样 success；v0.9.0 run [41973731269](https://github.com/platojobs/codemagic/actions/runs/41973731269) 为上一基线；`codemagic.yaml` 作为可选替代保留但未验证 |
 | 真机 BLE / 签名 | **未验证**：本机无真机与 Apple 开发者账号；读数采集与图表需真机 / 可穿戴设备验证（见第 9 节） |
-| 真实后端同步 | **契约已联调**：`scripts/e2e-contract.sh` 对本地 `PJGoIoT` **v0.9.0**（`STORE=fixture`）跑 **151 项断言，全部 PASS**；另用 `scripts/e2e-postgres.sh` 对真实 Postgres 跑通 410 分支 / series / metrics / export / 注销（输出见 [docs/e2e-postgres.md](docs/e2e-postgres.md)）；App 内同步 UI 仍需真机手动验证 |
+| 真实后端同步 | **契约已联调**：`scripts/e2e-contract.sh` 对本地 `PJGoIoT` **v0.12.0**（`STORE=fixture`）跑 **224 项断言，全部 PASS**（含家庭链路：创建家庭 → 邀请码 → 第二账号领取 → 成员可见设备 → member 改房间 403 → 跨家庭 404 → 删除家庭后设备回到个人家庭）；另用 `scripts/e2e-postgres.sh` 对真实 Postgres 跑通 410 分支 / series / metrics / export / 注销（输出见 [docs/e2e-postgres.md](docs/e2e-postgres.md)）；App 内同步 UI 仍需真机手动验证 |
 | 上架材料 | **已补齐**：`docs/store-listing.md`、`docs/privacy-policy.md`、`docs/app-privacy.md` 与 `codemagic/Resources/PrivacyInfo.xcprivacy`（未使用能力不声明） |
 
 ---
@@ -39,7 +39,7 @@
 
 ### 信息架构（v0.8.0，对齐米家）
 - 五个 Tab：**首页 / 智能 / 产品 / 市场 / 我的**。原「设备」Tab 取消，设备管理（搜索 / 排序 / 房间）并入首页；规则与场景入口统一放在「智能」，不留重复入口。
-- **首页**：设备卡片网格（名称、连接状态、最近一条读数、信号条），**v0.13.0 起按房间分段**（房间标题 + 该房间设备，标题可展开 / 收起，「未分配」固定最后）；顶部搜索与排序、右上角房间管理；顶部一行「今日告警摘要」（真实触发条数，点击进入「智能」）；下方「快捷场景」横向卡（前 3 个场景，点击执行并提示结果）。点卡片进设备详情。
+- **首页**：设备卡片网格（名称、连接状态、最近一条读数、信号条），**v0.13.0 起按房间分段**（房间标题 + 该房间设备，标题可展开 / 收起，「未分配」固定最后）；顶部搜索与排序、右上角房间管理；**v0.14.0 起「我的 → 家庭管理」可创建家庭 / 邀请成员，首页多于一个家庭时右上角提供切换**；顶部一行「今日告警摘要」（真实触发条数，点击进入「智能」）；下方「快捷场景」横向卡（前 3 个场景，点击执行并提示结果）。点卡片进设备详情。
 - **智能**：分段控件切换「自动化」与「场景」。自动化 = 现有规则增删启停 + 最近触发记录；场景见下节。
 - **产品 / 市场 / 我的**：保留 v0.7.0 全部能力，仅做设计令牌与几何收口，不新增功能。
 
@@ -64,15 +64,16 @@
 - 一键执行按顺序逐个动作，任一动作失败**不阻断后续**，结束后汇总「成功 N / 失败 M」并逐条给出原因；执行中显示进度浮层（当前动作 + 已完成状态）。
 - 动作语义：连接前校验蓝牙权限与设备存在、已连接则返回失败原因；断开要求当前已连接；后台采集重复开启 / 未开启即停止均给出明确提示；静音校验 10/30/60 且告警未被关闭、未处于静音；同步复用现有 `SyncEngine` 并返回真实推送/拉取条数。
 
-### 房间（v0.13.0，仅本机）
-- 对齐米家的「家庭 / 房间」结构：房间有 `id` / `name` / `sort_order` / `created_at`，设备通过可空 `saved_devices.room_id` 归属，`NULL` = 未分配；`rooms` 与 `room_id` 见迁移 **v8**，旧库升级保留原数据，原 `group_name` 仅作兼容字段。
-- 房间管理（首页右上角）：新建 / 重命名 / 删除；删除前二次确认，房间内设备**回到未分配**（先逐台 `UPDATE room_id = NULL` 再删房间，设备不丢）；列表展示每个房间的设备数。
-- 设备移入 / 移出：详情页「房间」行可直接选择目标房间或「未分配」；首页卡片长按也有「移入房间」。两种入口都只更新 `room_id`，不触碰同步状态与 `updated_at`。
-- 仅本机：房间与归属**不参与 push / changes**，房间管理页脚与相关入口均标注「仅本机」；`Room.remoteID` 保留远端映射字段，后端若提供家庭 / 房间接口可按本地 `id` ↔ `remoteID` 对接，无需改表结构。
+### 家庭与房间（v0.14.0，服务端为准）
+- **数据模型**：`households` 表（`id` 复用远端 UUID、`remote_id`、`name`、`is_personal`、`role`），`rooms` 的 `remote_id` 真正启用并增加 `household_id` / `sync_state`（`local` / `pending` / `synced`）/ `deleted`，设备增加 `household_id` / `remote_room_id` / `remote_household_id`；迁移 **v9** 条件补列，旧库升级不丢任何房间与归属。
+- **首次接入合并策略（不静默丢弃）**：本机未归属房间认领到当前家庭，按 `sort_order` 顺序推到服务端；服务端已有同名房间时**认领本地房间**（保留本地 `id` 与设备归属），不重复创建；推送失败保留 `local / pending` 下次重试；服务端已删除的家庭，其房间脱钩为未归属并在本轮不被重新认领，离线仍可见。
+- **房间以服务端为准**：登录 / 同步时拉取当前家庭房间并落库；本机新建 / 改名 / 删除先落本地 `pending` 或墓碑，联网后补报；界面标注「未同步」。房间不再参与 `sync/push`，避免与 LWW 冲突。
+- **切换家庭**：首页多于一个家庭时右上角提供切换入口，单家庭不显示；切换后按该家庭展示设备与房间，当前家庭持久化到 `SyncMetadataStore`。
+- **角色与权限**：owner 可建 / 改 / 删房间与签发邀请码；member 只读，写入口禁用并提示「你没有修改该家庭 / 房间的权限」；跨家庭读取由服务端返回 404，界面统一为可读文案，不弹错误码或整页报错。
 
 ### 设备详情（`Modules/Devices`）
 - 设备详情：连接蓝牙 → `GET /api/v1/my/devices/ios/{externalId}` 拉取云端设备记录，**优先展示云端 `deviceType` / `vendor` / `firmwareVersion` / `compatibility`**；云端字段为 `null` 时显示「型号未知」/「—」/「暂无兼容性说明」，绝不出 `"null"`；未注册型号仍展示别名、分组、房间与最近出现时间，并在「云端记录」区展示同步信息；网络失败才降级本地缓存并标注缓存时间，无缓存显示失败空状态与重试。
-- **房间归属（v0.13.0）**：详情页「房间」行展示当前房间（未分配显示「未分配」），点击弹出房间列表（含「未分配」），选中即写本地 `room_id` 并刷新；房间仅本机，不推送。
+- **房间归属（v0.14.0）**：详情页「房间」行展示当前房间（未分配显示「未分配」），点击弹出当前家庭可见房间（含「未分配」）；选中先落本机，再通过 `PATCH /my/devices/{platform}/{externalId}` 上报 `roomId` / `householdId`，失败保留 `pending` 并在下次同步重试；member 或跨家庭错误降级为可读提示。
 - **图表点选（v0.11.0）**：轻点 / 长按折线桶选中该桶，顶部摘要条展示 `start–end`、最小 / 最大 / 平均 / 最新与条数（本地时区）；点空白处取消；选中态不改变 Y 轴；图表 `accessibilityLabel` 在未选中时给出「指标，最近区间，最低 / 最高，共 N 个数据点」，选中后替换为当前桶摘要。
 - **读数 CSV 导出（v0.6.0 起，v0.11.0 扩展文件名）**：当前设备 + 指标 + 区间；7 天内读本地、更长走服务端分页（上限 5 万条）；UTF-8 BOM / ISO8601 UTC / RFC 4180 转义；文件名含设备名、设备标识末 8 位、指标、区间起止与 UTC 时间（如 `readings-温湿度计-4A2F9C31-temperature-20261105T010000Z-20261105T020000Z-1a2b3c4d.csv`）；临时文件分享后删除，进度真实可重试。
 - 跨平台设备：服务端拉回的 `platform = android` 设备标注「来自 Android，本机不可连接」，无展开箭头、禁用点击与连接，不进入详情。
@@ -92,6 +93,7 @@
 - 本地扫描日志列表、计数与清空。
 - **同步状态**：上次同步时间、待同步条数、「立即同步」按钮、匿名账号；失败时展示错误码与降级说明，冲突时提示「另一台设备改过这条」。
 - **登录失效（401）**：token 过期时显示「登录已失效」，出现「重新登录」入口；确认弹窗说明旧账号云端数据不自动合并、本机设备会重新同步，确认后才换新匿名账号（游标重置为 0）。未确认前前后台自动同步不会静默建号，见 `docs/troubleshooting.md` 第 3.1 节。
+- **家庭管理（v0.14.0）**：「我的 → 家庭管理」展示当前家庭与角色、成员列表（owner / member、账号类型）、房间数量；支持创建家庭、生成 8 位一次性邀请码（服务端 `expiresAt` 倒计时、复制、过期后重新生成）、输入邀请码加入（复用 8 位输入规范化与 404 / 429 文案）；member 的写入口隐藏并给出只读说明。
 - 基础设置：自动记录最近设备、启动自动扫描、**后台采集**（v0.7.0，默认开启并说明耗电；关闭后进入后台立即断开连接，状态实时显示）。
 - **账号与数据（v0.7.0）**：迁移到新设备（8 位一次性接管码、真实倒计时、复制/重新生成）、从旧设备接管（自动大写/过滤易混字符、404 统一提示、429 按 `Retry-After` 冷却）、导出我的数据（分页拉全 + 临时文件分享后删除 + 真实进度）、注销账号（二次确认永久删除；成功后清 Keychain / 全部业务表 / 同步元数据，401 与网络错误分别处理）。
 - **阈值告警设置（v0.6.0）**：真实开关、节流窗口（1 / 5 / 30 分钟）与通知权限状态；拒绝时提示前往系统设置。
@@ -103,9 +105,10 @@
 - 增量拉取 `GET /api/v1/sync/changes`（游标持久化，`hasMore` 循环，最多 10 页）。
 - 批量推送 `POST /api/v1/sync/push`（每批 ≤100，`Idempotency-Key` 由批次内容哈希派生）；`deviceType` 为可选字段，已知型号才随推送上传，未知时省略不填假值。
 - 冲突按服务端 LWW：云端获胜时写回并提示，**不静默覆盖本地修改**；tombstone 删除同样上传 / 写回。
+- 家庭与归属（v0.14.0）：每次同步先 `GET /households` 合并家庭、选择当前家庭、拉取房间并补报本地房间 / 设备归属，再走原有 pull → push；设备归属**不塞进 push**，用 `PATCH /my/devices/{platform}/{externalId}` 单独上报，失败进 `device_assignment_pending` 队列，下次同步重试；401 交给同步流程，403 / 404 为终态（移出队列并记可读文案）。
 - 触发：回到前台（节流 120s）、进入后台（`BGAppRefreshTask`）、手动按钮。
 - 后台唤醒（v0.7.0）：仅推送、不拉增量、不创建匿名账号；单次 ≤100 设备 / ≤200 读数，最小间隔 15 分钟（失败同样节流）。`bluetooth-central` 后台模式下连接设备继续接收 notify 并入库，7 天保留清理只删 `synced`，pending 受保护。
-- 契约联调：`scripts/e2e-contract.sh` 直连本地 Go 服务，覆盖双平台推送、device-types/catalog（含 vendor/compatibility）、复合键详情、UserDevice 新字段与 null 降级、别名/广播名分离、group 三态、幂等重放、LWW 冲突、401/404；已纳入 GitHub Actions `e2e-contract` job（见 4.2）。
+- 契约联调：`scripts/e2e-contract.sh` 直连本地 Go 服务，覆盖双平台推送、device-types/catalog（含 vendor/compatibility）、复合键详情、UserDevice 新字段与 null 降级、别名/广播名分离、group 三态、幂等重放、LWW 冲突、401/404；**v0.14.0 起新增家庭链路**（创建家庭 → 邀请码 → 第二账号领取 → 成员可见设备 → member 改房间 403 → 跨家庭 404 → 设备归属三态 → 删除家庭级联）；已纳入 GitHub Actions `e2e-contract` job（见 4.2）。
 
 ---
 
@@ -119,6 +122,7 @@ codemagic/
 │   ├── Networking/         # APIConfiguration、HTTPClient、ProductAPIClient、AppError
 │   ├── Persistence/        # SQLiteDatabase + SavedDevice/DeviceRule/Readings/RecentDevice/ScanLog/Scenario/同步元数据 Store
 │   ├── Sync/               # SyncEngine、SyncAPIClient、SyncModels、KeychainTokenStore、SyncMetadataStore
+│   ├── Household/          # HouseholdService、HouseholdAPIClient、HouseholdStore、HouseholdModels（家庭 / 邀请码 / 房间 / 设备归属）
 │   ├── Bluetooth/          # CoreBluetoothService
 │   ├── Rules/              # RuleEvaluator、RuleAlertCoordinator、ScenarioExecutor
 │   ├── Export/             # ReadingsCSV、ReadingsExportService
@@ -131,6 +135,7 @@ codemagic/
 │   ├── Devices/            # 设备详情、规则编辑、读数图表
 │   ├── Products/
 │   ├── Market/
+│   ├── Households/         # 家庭管理、邀请码、加入家庭（v0.14.0）
 │   └── Profile/
 └── Resources/              # Info.plist、Assets.xcassets
 Config/
@@ -139,7 +144,7 @@ Config/
 scripts/
 ├── e2e-contract.sh         # 启动本地 fixture 服务 + 运行联调 runner（CI 的 e2e-contract job 复用）
 └── e2e-contract.swift      # 独立 Swift 可执行 runner，真实 URLSession 直连 localhost
-codemagicTests/             # 226 个 XCTest 用例（设计令牌审计 / 场景执行 / 迁移 v6 / 黄金读数 / 图表几何 / 节流退避 / 通知 / 导出 / 接管码 / 注销 / 后台推送 / 首启持久化与术语审计）
+codemagicTests/             # 293 个 XCTest 用例（设计令牌审计 / 场景执行 / 迁移 v9 / 家庭与邀请码 / 黄金读数 / 图表几何 / 节流退避 / 通知 / 导出 / 接管码 / 注销 / 后台推送 / 首启持久化与术语审计）
 docs/
 ├── architecture.md
 ├── consistency.md
@@ -304,7 +309,7 @@ cd /path/to/codemagic
 
 数据库位置：`Application Support/com.platojobs.codemagic/codemagic.sqlite`。磁盘库失败时回退内存库，并在「我的」页提示。
 
-迁移：`PRAGMA user_version` 线性递增。v1 建五张表；**v2（v0.2.0）** 为 `saved_devices` 增加 `platform`（默认 `ios`）与 `external_id`，由 `peripheral_id` 大写回填，并建立 `(platform, external_id) WHERE deleted_at IS NULL` 唯一索引；**v3（v0.3.3）** 增加 `device_type TEXT`（可空，旧库升级后为 `NULL`，由云端详情回填）；**v4（v0.3.6）** 增加 `advertised_name TEXT`（由历史 `name` 回填广播名）与 `alias_patch` / `advertised_name_patch` / `group_patch`（`absent` / `clear` / `set` 三态）；**v5（v0.4.0）** 新增 `readings` 表（`id` 主键、`device_id`、`metric`、`value`、`unit`、`recorded_at`、`sync_state`），并按 `(device_id, metric, recorded_at DESC)` 建索引，支撑最近 60 点查询与 7 天清理；**v6（v0.8.0）** 新增本地 `scenarios` 表（`id` / `name` / `actions` JSON / `created_at` / `updated_at`），**不含 `sync_state` / `deleted_at` / `platform` / `external_id`，不参与同步**；**v8（v0.13.0）** 新增本地 `rooms` 表（`id` / `name` / `sort_order` / `remote_id`（预留远端映射）/ `created_at` / `updated_at`）并为 `saved_devices` 增加可空 `room_id`（NULL = 未分配），原 `group_name` 保留为兼容字段；`rooms` **不参与 push / changes**。旧库升级后无需重装或清数据。
+迁移：`PRAGMA user_version` 线性递增。v1 建五张表；**v2（v0.2.0）** 为 `saved_devices` 增加 `platform`（默认 `ios`）与 `external_id`，由 `peripheral_id` 大写回填，并建立 `(platform, external_id) WHERE deleted_at IS NULL` 唯一索引；**v3（v0.3.3）** 增加 `device_type TEXT`（可空，旧库升级后为 `NULL`，由云端详情回填）；**v4（v0.3.6）** 增加 `advertised_name TEXT`（由历史 `name` 回填广播名）与 `alias_patch` / `advertised_name_patch` / `group_patch`（`absent` / `clear` / `set` 三态）；**v5（v0.4.0）** 新增 `readings` 表（`id` 主键、`device_id`、`metric`、`value`、`unit`、`recorded_at`、`sync_state`），并按 `(device_id, metric, recorded_at DESC)` 建索引，支撑最近 60 点查询与 7 天清理；**v6（v0.8.0）** 新增本地 `scenarios` 表（`id` / `name` / `actions` JSON / `created_at` / `updated_at`），**不含 `sync_state` / `deleted_at` / `platform` / `external_id`，不参与同步**；**v8（v0.13.0）** 新增本地 `rooms` 表（`id` / `name` / `sort_order` / `remote_id` / `created_at` / `updated_at`）并为 `saved_devices` 增加可空 `room_id`（NULL = 未分配），原 `group_name` 保留为兼容字段；**v9（v0.14.0）** 新增 `households`（`id` / `remote_id` / `name` / `is_personal` / `role`）与 `device_assignment_pending`，`rooms` 启用 `remote_id` 并增加 `household_id` / `sync_state` / `deleted`（离线墓碑），`saved_devices` 增加 `household_id` / `remote_room_id` / `remote_household_id`；全部条件 ALTER，旧库升级后无需重装或清数据，房间与归属不丢。
 
 ---
 
@@ -385,6 +390,21 @@ HTTP/1.1 410 Gone
 
 测试：`SyncEngineTests` 中 410 游标归零 / pending 保留 / 二次从 0 / 文案断言 / HTTP fake transport 全量拉取成功；`NetworkingTests` 锁定 `TIMEOUT` 与 `RESYNC_REQUIRED` 的映射；真实 Postgres 分支由 `scripts/e2e-postgres.sh` 触发，输出见 [docs/e2e-postgres.md](docs/e2e-postgres.md)。
 
+### 7.6 家庭 / 邀请码 / 房间 / 设备归属（v0.14.0，契约对齐 PJGoIoT v0.12.0 / openapi 0.8.0）
+
+| 接口 | 方法 | 说明 |
+| --- | --- | --- |
+| `/api/v1/households` | `GET` / `POST` | `GET` 返回 `{items}`（含自动创建的个人家庭）；`POST {name}` 201 返回家庭，创建者为 `owner` |
+| `/api/v1/households/{id}` | `GET` / `PATCH` / `DELETE` | `PATCH {name}`；`DELETE` 204；个人家庭不可删（403 `FORBIDDEN`）；跨家庭 404 |
+| `/api/v1/households/{id}/members` | `GET` | `{items}`：`userId` / `role` / `kind` / `joinedAt` |
+| `/api/v1/households/{id}/invitations` | `POST` | 201 `{code, expiresAt}`：8 位、一次性、默认 24 小时；仅 owner |
+| `/api/v1/households/invitations/claim` | `POST` | `{code}`（大小写不敏感）→ 200 家庭对象（`role=member`）；无效 / 已用 / 过期 404；限流 429 带 `Retry-After` |
+| `/api/v1/households/{id}/rooms` | `GET` / `POST` | `{items}`；`POST {name, sortOrder}` 201；仅 owner，member 403 `FORBIDDEN` |
+| `/api/v1/households/{id}/rooms/{roomId}` | `PATCH` / `DELETE` | 改名 / 排序 / 删除；仅 owner；跨家庭 404 |
+| `/api/v1/my/devices/{platform}/{externalId}` | `PATCH` | `alias` / `roomId` / `householdId` **三态**：字段缺失 = 不变、空串 = 清除（`null`）、非空 = 覆盖；非本人设备 404 |
+
+客户端口径：设备归属与 `sync/push` 解耦（避免 LWW 覆盖），失败进 `device_assignment_pending`；403 / 404 为终态并转为可读文案；删除家庭后服务端把设备回落到个人家庭并清空 `roomId`，客户端按下一轮拉取对齐。契约由 `scripts/e2e-contract.sh` 第 9 节覆盖。
+
 ---
 
 ## 8. 持续集成
@@ -454,6 +474,7 @@ HTTP/1.1 410 Gone
 
 ## 10. 版本记录
 
+- `v0.14.0`：家庭接入后端 —— 家庭归属、成员共享与房间服务端化（`MARKETING_VERSION 0.14.0` / build 22，tag `v0.14.0`）。SQLite 迁移 **v9** 新增 `households`（`id` 复用远端 UUID / `remote_id` / `name` / `is_personal` / `role`）与 `device_assignment_pending`；`rooms.remote_id` 真正启用并增加 `household_id` / `sync_state` / `deleted`；`saved_devices` 增加 `household_id` / `remote_room_id` / `remote_household_id`，条件 ALTER，旧库不丢房间与归属。登录后 `GET /households` 落库并持久化当前家庭，切换家庭按该家庭拉设备与房间；首次接入把本机未归属房间按 `sort_order` 推服务端，服务端同名房间**认领**本地房间而非重复创建，失败保留 `pending` 重试，**不静默丢弃**；服务端已删除家庭的房间脱钩保留、不自动搬入其他家庭。设备归属独立走 `PATCH /my/devices/{platform}/{externalId}` 三态（缺失 / 空串 / 非空），不塞进 push，失败进 pending 队列。新增「我的 → 家庭管理」（当前家庭与角色、成员列表、创建家庭、8 位一次性邀请码 + 服务端倒计时 / 复制 / 过期重生成、输入码加入）、首页多家庭切换、member 只读与 403 可读降级、跨家庭 404、离线「未同步」标注。新增单测 9 个（共 **293** 个，0 失败），E2E **224** 项全 PASS（新增家庭链路）。后端 `PJGoIoT` v0.12.0（openapi 0.8.0）。
 - `v0.13.0`：房间归属 + 首页按房间分区（`MARKETING_VERSION 0.13.0` / build 21，tag `v0.13.0`）。SQLite 迁移 **v8** 新增 `rooms` 表（`id` / `name` / `sort_order` / `remote_id` / `created_at` / `updated_at`）与 `saved_devices.room_id`（可空，NULL = 未分配），旧数据与原 `group_name` 原样保留；首页从扁平分组改为**按房间分区**，房间标题可展开 / 收起、「未分配」固定最后，无房间显示「还没有房间」+「新建房间」、房间空显示扫描引导；右上角房间管理支持新建 / 重命名 / 删除（二次确认后设备回到未分配），设备可在详情页或首页长按移入 / 移出；房间与归属仅本机、不参与 push / changes，`Room.remoteID` 为远端家庭 / 房间接口预留映射。交互取舍：搜索只匹配设备并隐藏空房间、排序只在房间内生效、分区顺序固定，首页原「分组筛选」移除，`group_name` 仅兼容保留。新增单测 7 个（共 284 个），E2E 151 项无契约变更。
 - `v0.12.0`：推荐规则 + 中英双语 + 动态字体（`MARKETING_VERSION 0.12.0` / build 20，tag `v0.12.0`）。推荐规则只按设备真实出现过的指标生成（温度 > 30℃、湿度 > 70%、电量 < 20%、心率 > 120、CO₂ > 1000ppm），一键写入现有 `readingThreshold` 规则并立即出现在列表，不新建模型、不改数据库；无设备 / 无读数分别给真实空态。全部界面文案抽到 `zh-Hans` / `en` 两份 `Localizable.strings`（685 key，key 集合与 `%@` 占位符一致由单测强制），`InfoPlist.strings` 双语权限文案，工程 `knownRegions` 含 `zh-Hans`、`CFBundleLocalizations = [en, zh-Hans]`，设置跟随系统语言；术语 Device / Reading / Sync / Scan / Group / Alert / Transfer Code。字号统一 `AppText` + `UIFontMetrics` + `adjustsFontForContentSizeCategory`，表格行高自适应，图表 Y 轴左侧留白按字号测量、超大字号下 3 个刻度且不压绘图区；数字与日期显式 `Locale.current`（CSV 仍 POSIX + UTC）。新增单测 17 个（共 277 个），E2E 151 项无契约变更。
 - `v0.11.0`：指标阈值规则 + 图表点选 + CSV 区间文件名（`MARKETING_VERSION 0.11.0` / build 19，tag `v0.11.0`）。规则条件扩为「指标 + 比较符 + 阈值 + 连续 N 条（1–5，默认 1）」，判定接在 `ReadingsIngestor` → `RuleEvaluator` 同一链路，命中日志带触发值 / 阈值 / 时间 / 设备并进「智能 → 最近触发」，恢复只在确实发过触发通知后补一条；SQLite v7 为 `rules` 增加 `metric` / `comparison` / `reading_threshold` / `consecutive` 并回填旧规则（仍按 RSSI / 断开生效）。图表支持点选 / 长按桶查看 `start–end`、min/max/avg/last 与条数（本地时区），点空白取消、Y 轴不变、无障碍摘要随选中更新；几何命中（最近桶 / 24pt 近邻阈值 / 空白不命中）为纯函数。CSV 文件名含设备名、设备标识末 8 位、指标与 UTC 区间起止。新增单测 24 个（共 260 个）。规则仅本机，不改变网络契约。
@@ -509,4 +530,4 @@ HTTP/1.1 410 Gone
 | [`docs/app-privacy.md`](docs/app-privacy.md) | `PrivacyInfo.xcprivacy` 与代码位置逐项对照，含必需理由 API（UserDefaults `CA92.1`、文件时间戳 `C617.1`、系统启动时间 `35F9.1`） |
 | [`codemagic/Resources/PrivacyInfo.xcprivacy`](codemagic/Resources/PrivacyInfo.xcprivacy) | 实际打包进 App 的隐私清单：非追踪、5 类收集数据（Device ID / User ID / Other User Content / Health / Other Usage Data）、3 类必需理由 API |
 
-> 上架文案与版本说明一致：当前为 `v0.13.0`（build 21），详见 [`docs/releasenotes.md`](docs/releasenotes.md)。
+> 上架文案与版本说明一致：当前为 `v0.14.0`（build 22），详见 [`docs/releasenotes.md`](docs/releasenotes.md)。

@@ -40,6 +40,8 @@ final class SyncEngine {
     private let deviceStore: SavedDeviceStore
     private let readingsStore: ReadingsStore
     private let logStore: ScanLogStore
+    /// 家庭 / 房间 / 设备归属协调器；未配置时退化为纯设备同步（老版本行为）。
+    private let householdService: HouseholdService?
     private let now: () -> Date
     private let pageLimit: Int
     private let maxPages: Int
@@ -60,6 +62,7 @@ final class SyncEngine {
         deviceStore: SavedDeviceStore,
         readingsStore: ReadingsStore,
         logStore: ScanLogStore,
+        householdService: HouseholdService? = nil,
         pageLimit: Int = 200,
         maxPages: Int = 10,
         now: @escaping () -> Date = Date.init
@@ -70,6 +73,7 @@ final class SyncEngine {
         self.deviceStore = deviceStore
         self.readingsStore = readingsStore
         self.logStore = logStore
+        self.householdService = householdService
         // 服务端 changes 上限 500，客户端自己收敛，避免越界 400。
         self.pageLimit = APILimits.clamp(pageLimit, to: APILimits.changes)
         self.maxPages = maxPages
@@ -270,33 +274,58 @@ final class SyncEngine {
         completion: ((Result<Summary, AppError>) -> Void)?
     ) {
         metadataStore.userID = session.userID
-        pull(
-            cursor: metadataStore.cursor,
-            token: session.token,
-            page: 0,
-            summary: summary,
-            hasResynced: false
-        ) { [weak self] pullResult in
+        // 先拉家庭 / 房间并补报上次失败的归属，再做增量拉取；家庭接口失败不阻断设备同步。
+        prepareHouseholds(token: session.token) { [weak self] in
             guard let self else { return }
-            switch pullResult {
-            case .failure(let error):
-                self.finish(.failure(error), completion: completion)
-            case .success(let summary):
-                self.pushPending(
-                    token: session.token,
-                    summary: summary
-                ) { [weak self] pushResult in
-                    guard let self else { return }
-                    switch pushResult {
-                    case .failure(let error):
-                        self.finish(.failure(error), completion: completion)
-                    case .success(let finalSummary):
-                        self.metadataStore.lastSyncAt = self.now()
-                        self.finish(.success(finalSummary), completion: completion)
+            self.pull(
+                cursor: self.metadataStore.cursor,
+                token: session.token,
+                page: 0,
+                summary: summary,
+                hasResynced: false
+            ) { [weak self] pullResult in
+                guard let self else { return }
+                switch pullResult {
+                case .failure(let error):
+                    self.finish(.failure(error), completion: completion)
+                case .success(let summary):
+                    self.pushPending(
+                        token: session.token,
+                        summary: summary
+                    ) { [weak self] pushResult in
+                        guard let self else { return }
+                        switch pushResult {
+                        case .failure(let error):
+                            self.finish(.failure(error), completion: completion)
+                        case .success(let finalSummary):
+                            self.flushAssignments(token: session.token) {
+                                self.metadataStore.lastSyncAt = self.now()
+                                self.finish(.success(finalSummary), completion: completion)
+                            }
+                        }
                     }
                 }
             }
         }
+    }
+
+    /// 家庭准备阶段失败不阻断设备同步；401 由后续拉取统一处理（避免双次 finish）。
+    private func prepareHouseholds(token: String, completion: @escaping () -> Void) {
+        guard let householdService else {
+            completion()
+            return
+        }
+        householdService.prepareForSync(token: token) { _ in
+            completion()
+        }
+    }
+
+    private func flushAssignments(token: String, completion: @escaping () -> Void) {
+        guard let householdService else {
+            completion()
+            return
+        }
+        householdService.flushPendingAssignments(token: token, completion: completion)
     }
 
     // MARK: - Pull
@@ -404,7 +433,9 @@ final class SyncEngine {
             }
 
             guard let existing else {
-                try deviceStore.upsert(remote.makeLocalDevice())
+                var local = remote.makeLocalDevice()
+                applyAssignment(remote, to: &local)
+                try deviceStore.upsert(local)
                 pulled += 1
                 continue
             }
@@ -418,7 +449,12 @@ final class SyncEngine {
                 let advertisedChanged = remote.advertisedName.map {
                     !$0.isEmpty && $0 != existing.advertisedName
                 } ?? false
-                if remote.updatedAt > existing.updatedAt || aliasChanged || groupChanged || advertisedChanged {
+                let assignmentChanged = !hasPendingAssignment(existing.id) && (
+                    (remote.hasRoomField && remote.roomID != existing.remoteRoomID)
+                        || (remote.householdID != nil && remote.householdID != existing.remoteHouseholdID)
+                )
+                if remote.updatedAt > existing.updatedAt || aliasChanged || groupChanged
+                    || advertisedChanged || assignmentChanged {
                     try deviceStore.upsert(merge(remote, into: existing))
                     pulled += 1
                 }
@@ -640,7 +676,27 @@ final class SyncEngine {
         merged.advertisedNamePatch = .absent
         merged.groupPatch = .absent
         merged.syncState = .synced
+        applyAssignment(remote, to: &merged)
         return merged
+    }
+
+    /// 把服务端归属映射到本机：本地有待上报的移动时不覆盖用户刚改的归属。
+    private func applyAssignment(_ remote: RemoteDevice, to device: inout SavedDevice) {
+        guard let householdService, remote.householdID != nil || remote.hasRoomField else { return }
+        if hasPendingAssignment(device.id) { return }
+        if let remoteHouseholdID = remote.householdID {
+            let householdID = householdService.localize(remoteHouseholdID: remoteHouseholdID, remoteRoomID: nil).householdID
+            device.householdID = householdID
+            device.remoteHouseholdID = remoteHouseholdID
+        }
+        if remote.hasRoomField {
+            device.remoteRoomID = remote.roomID
+            device.roomID = householdService.localRoomID(remoteID: remote.roomID)
+        }
+    }
+
+    private func hasPendingAssignment(_ deviceID: UUID) -> Bool {
+        householdService?.hasPendingAssignment(deviceID: deviceID) ?? false
     }
 
     // MARK: - Finish

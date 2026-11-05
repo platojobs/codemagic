@@ -56,8 +56,14 @@ struct SavedDevice: Identifiable, Equatable {
     /// 用户别名；用户编辑写入，扫描路径不触碰。
     var remark: String
     var groupName: String
-    /// 本机房间归属；`nil` 表示未分配。仅本机字段，不参与同步。
+    /// 本机房间归属；`nil` 表示未分配。与服务端 `remoteRoomID` 通过房间远端 id 映射。
     var roomID: UUID?
+    /// 本地家庭归属；`nil` 表示尚未接入家庭 / 离线新增，界面标注「未同步」。
+    var householdID: UUID?
+    /// 服务端房间真值（`roomId`），用于判断本机归属是否已上报成功。
+    var remoteRoomID: String?
+    /// 服务端家庭真值（`householdId`）。
+    var remoteHouseholdID: String?
     var mac: String?
     var vendor: String?
     var deviceType: String?
@@ -84,6 +90,9 @@ struct SavedDevice: Identifiable, Equatable {
         remark: String = "",
         groupName: String = SavedDevice.defaultGroupName,
         roomID: UUID? = nil,
+        householdID: UUID? = nil,
+        remoteRoomID: String? = nil,
+        remoteHouseholdID: String? = nil,
         mac: String? = nil,
         vendor: String? = nil,
         deviceType: String? = nil,
@@ -108,6 +117,9 @@ struct SavedDevice: Identifiable, Equatable {
         self.remark = remark
         self.groupName = groupName.isEmpty ? SavedDevice.defaultGroupName : groupName
         self.roomID = roomID
+        self.householdID = householdID
+        self.remoteRoomID = remoteRoomID
+        self.remoteHouseholdID = remoteHouseholdID
         self.mac = mac
         self.vendor = vendor
         self.deviceType = deviceType

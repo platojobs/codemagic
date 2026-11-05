@@ -11,6 +11,9 @@ final class SyncMetadataStore {
         static let reloginRequired = "sync.reloginRequired"
         static let lastBackgroundPushAt = "sync.lastBackgroundPushAt"
         static let sessionExpiresAt = "sync.sessionExpiresAt"
+        static let currentHouseholdRemoteID = "household.currentRemoteId"
+        static let seededHouseholdRemoteID = "household.seededRemoteId"
+        static let lastAssignmentError = "household.lastAssignmentError"
     }
 
     private let defaults: UserDefaults
@@ -84,6 +87,24 @@ final class SyncMetadataStore {
         lastSyncAt = nil
     }
 
+    /// 当前家庭的服务端 id；登录后拉取家庭列表时优先恢复该值，不存在则落到个人家庭。
+    var currentHouseholdRemoteID: String? {
+        get { defaults.string(forKey: Key.currentHouseholdRemoteID) }
+        set { defaults.set(newValue, forKey: Key.currentHouseholdRemoteID) }
+    }
+
+    /// 首次接入家庭时把本机房间种子到服务端的标记；完成后不再搬迁。
+    var seededHouseholdRemoteID: String? {
+        get { defaults.string(forKey: Key.seededHouseholdRemoteID) }
+        set { defaults.set(newValue, forKey: Key.seededHouseholdRemoteID) }
+    }
+
+    /// 最近一次设备归属上报失败的可读原因（403 / 404 等），供同步状态展示。
+    var lastAssignmentError: String? {
+        get { defaults.string(forKey: Key.lastAssignmentError) }
+        set { defaults.set(newValue, forKey: Key.lastAssignmentError) }
+    }
+
     /// 后台唤醒推送的最小间隔记录：避免系统在省电窗口内频繁唤醒造成网络风暴。
     var lastBackgroundPushAt: Date? {
         get {
@@ -108,5 +129,8 @@ final class SyncMetadataStore {
         defaults.removeObject(forKey: Key.reloginRequired)
         defaults.removeObject(forKey: Key.lastBackgroundPushAt)
         defaults.removeObject(forKey: Key.sessionExpiresAt)
+        defaults.removeObject(forKey: Key.currentHouseholdRemoteID)
+        defaults.removeObject(forKey: Key.seededHouseholdRemoteID)
+        defaults.removeObject(forKey: Key.lastAssignmentError)
     }
 }

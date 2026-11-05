@@ -22,6 +22,7 @@ final class ProfileViewModel {
     private let pairingService: PairingServicing
     private let accountExportService: AccountExportService
     private let accountDeletionService: AccountDeletionService
+    private let householdService: HouseholdService?
 
     init(
         bluetooth: BluetoothServicing,
@@ -33,7 +34,8 @@ final class ProfileViewModel {
         accountDeletionService: AccountDeletionService,
         baseURLText: String,
         startupWarning: String?,
-        notifications: LocalNotificationServing = UserNotificationService.shared
+        notifications: LocalNotificationServing = UserNotificationService.shared,
+        householdService: HouseholdService? = nil
     ) {
         self.bluetooth = bluetooth
         self.scanLogStore = scanLogStore
@@ -43,6 +45,7 @@ final class ProfileViewModel {
         self.accountExportService = accountExportService
         self.accountDeletionService = accountDeletionService
         self.notifications = notifications
+        self.householdService = householdService
         self.baseURLText = baseURLText
         self.startupWarning = startupWarning
     }
@@ -234,6 +237,23 @@ final class ProfileViewModel {
 
     func makePairingClaimViewModel() -> PairingClaimViewModel {
         PairingClaimViewModel(service: pairingService)
+    }
+
+    // MARK: - Household
+
+    /// 「家庭管理」行副标题：当前家庭 + 角色；未接入时给出明确说明。
+    var householdText: String {
+        guard let current = householdService?.currentHousehold() else {
+            return L10n.t("household.empty")
+        }
+        return "\(current.name) · \(current.role.displayName)"
+    }
+
+    var hasHouseholdService: Bool { householdService != nil }
+
+    func makeHouseholdViewModel() -> HouseholdManagementViewModel? {
+        guard let householdService else { return nil }
+        return HouseholdManagementViewModel(service: householdService)
     }
 
     // MARK: - Alerts

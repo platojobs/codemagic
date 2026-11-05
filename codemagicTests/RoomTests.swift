@@ -70,16 +70,26 @@ final class RoomTests: XCTestCase {
         defer { migrated.close() }
 
         let version = try migrated.query("PRAGMA user_version;").first?.integer("user_version")
-        XCTAssertEqual(version, 8)
+        XCTAssertEqual(version, 9)
 
         let roomColumns = try migrated.query("PRAGMA table_info(rooms);").compactMap { $0.text("name") }
         XCTAssertEqual(
             Set(roomColumns),
-            ["id", "name", "sort_order", "remote_id", "created_at", "updated_at"]
+            [
+                "id", "name", "sort_order", "remote_id", "created_at", "updated_at",
+                "household_id", "sync_state", "deleted",
+            ]
         )
 
         let deviceColumns = try migrated.query("PRAGMA table_info(saved_devices);").compactMap { $0.text("name") }
         XCTAssertTrue(deviceColumns.contains("room_id"))
+        XCTAssertTrue(deviceColumns.contains("household_id"))
+        XCTAssertTrue(deviceColumns.contains("remote_room_id"))
+        XCTAssertTrue(deviceColumns.contains("remote_household_id"))
+        XCTAssertTrue(try migrated.query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'households';").count == 1)
+        XCTAssertTrue(try migrated.query(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'device_assignment_pending';"
+        ).count == 1)
 
         let devices = try SavedDeviceStore(database: migrated).fetchAll()
         XCTAssertEqual(devices.count, 1)

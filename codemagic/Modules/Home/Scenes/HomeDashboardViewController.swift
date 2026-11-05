@@ -21,6 +21,12 @@ final class HomeDashboardViewController: UIViewController {
     private let searchBar = UISearchBar()
     private let sortButton = AppButton(style: .filterChip, title: L10n.t("devices.sort"), symbolName: "arrow.up.arrow.down")
     private let roomButton = AppButton(style: .filterChip, title: L10n.t("room.manage"), symbolName: "square.grid.2x2")
+    /// 仅在用户拥有多于一个家庭时显示；单家庭不出现切换控件。
+    private let householdButton = AppButton(
+        style: .filterChip,
+        title: L10n.t("household.switch"),
+        symbolName: "person.2"
+    )
     private let controlsView = UIStackView()
     private var titleHost: LargeTitleHost?
 
@@ -140,8 +146,9 @@ final class HomeDashboardViewController: UIViewController {
 
         sortButton.addTarget(self, action: #selector(handleSort), for: .touchUpInside)
         roomButton.addTarget(self, action: #selector(handleRooms), for: .touchUpInside)
+        householdButton.addTarget(self, action: #selector(handleHouseholdSwitch), for: .touchUpInside)
 
-        let chips = UIStackView(arrangedSubviews: [sortButton, roomButton, UIView()])
+        let chips = UIStackView(arrangedSubviews: [sortButton, roomButton, householdButton, UIView()])
         chips.axis = .horizontal
         chips.spacing = Layout.space8
         chips.alignment = .center
@@ -158,6 +165,13 @@ final class HomeDashboardViewController: UIViewController {
         roomButton.configuration?.title = viewModel.hasRooms
             ? L10n.f("room.manageWithCount", String(describing: viewModel.rooms.count))
             : L10n.t("room.manage")
+        // 单家庭不出现切换控件。
+        householdButton.isHidden = !viewModel.showsHouseholdSwitcher
+        if let current = viewModel.currentHousehold {
+            householdButton.configuration?.title = current.name
+        } else {
+            householdButton.configuration?.title = L10n.t("household.switch")
+        }
     }
 
     private func makeLayout() -> UICollectionViewLayout {
@@ -404,8 +418,29 @@ final class HomeDashboardViewController: UIViewController {
         presentSheet(sheet, source: sortButton)
     }
 
+    @objc private func handleHouseholdSwitch() {
+        let sheet = UIAlertController(title: L10n.t("household.switch.title"), message: nil, preferredStyle: .actionSheet)
+        for household in viewModel.households {
+            let isCurrent = household.id == viewModel.currentHousehold?.id
+            let title = isCurrent
+                ? "✓ \(household.name) · \(household.role.displayName)"
+                : "\(household.name) · \(household.role.displayName)"
+            sheet.addAction(UIAlertAction(title: title, style: .default) { [weak self] _ in
+                self?.viewModel.switchHousehold(localID: household.id) { [weak self] in
+                    self?.environment.syncEngine.sync { _ in }
+                }
+            })
+        }
+        sheet.addAction(UIAlertAction(title: L10n.t("common.cancel"), style: .cancel))
+        presentSheet(sheet, source: householdButton)
+    }
+
     @objc private func handleRooms() {
-        let viewModel = RoomManagementViewModel(roomStore: environment.roomStore, deviceStore: environment.savedDeviceStore)
+        let viewModel = RoomManagementViewModel(
+            roomStore: environment.roomStore,
+            deviceStore: environment.savedDeviceStore,
+            householdService: environment.householdService
+        )
         let controller = RoomManagementViewController(viewModel: viewModel) { [weak self] in
             self?.viewModel.reload()
         }
@@ -635,7 +670,8 @@ extension HomeDashboardViewController: UICollectionViewDataSource {
                 device: device,
                 isConnected: viewModel.isConnected(device),
                 readingText: viewModel.readingText(for: device),
-                rssi: viewModel.rssi(for: device)
+                rssi: viewModel.rssi(for: device),
+                isUnsynced: viewModel.isUnsynced(device)
             ) { [weak self] in
                 self?.openDetail(for: device)
             }
@@ -697,7 +733,10 @@ extension HomeDashboardViewController: UICollectionViewDataSource {
         case .scenarios, .scenarioEmpty:
             header.configure(title: L10n.t("home.quickScenarios"))
         case .room(let room, _, let totalCount):
-            let title = "\(room?.name ?? L10n.t("room.unassigned")) · \(totalCount)"
+            let baseTitle = "\(room?.name ?? L10n.t("room.unassigned")) · \(totalCount)"
+            // 本机 / 离线房间明确标注「未同步」，与服务端房间区分。
+            let title = room.map { $0.syncState == .synced ? baseTitle : "\(baseTitle) · \(L10n.t("household.room.unsynced"))" }
+                ?? baseTitle
             if let room {
                 let collapsed = collapsedRoomIDs.contains(room.id)
                 header.configure(title: title, collapsed: collapsed) { [weak self] in

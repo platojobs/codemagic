@@ -67,6 +67,7 @@ final class DeviceDetailViewModel {
     private let readingsIngestor: ReadingsIngestor?
     private let exportService: ReadingsExportService
     private let roomStore: RoomStore?
+    private let householdService: HouseholdService?
     private var refreshPolicy: ReadingsRefreshPolicy
     private var remoteRefreshWorkItem: DispatchWorkItem?
     /// 详情页是否可见；不可见时不发任何远端读数请求。
@@ -85,6 +86,7 @@ final class DeviceDetailViewModel {
         readingsIngestor: ReadingsIngestor? = nil,
         exportService: ReadingsExportService? = nil,
         roomStore: RoomStore? = nil,
+        householdService: HouseholdService? = nil,
         refreshPolicy: ReadingsRefreshPolicy = ReadingsRefreshPolicy()
     ) {
         self.device = device
@@ -100,6 +102,7 @@ final class DeviceDetailViewModel {
             readingsService: readingsService
         )
         self.roomStore = roomStore
+        self.householdService = householdService
         self.refreshPolicy = refreshPolicy
     }
 
@@ -226,7 +229,7 @@ final class DeviceDetailViewModel {
 
     // MARK: - Rooms
 
-    var canChangeRoom: Bool { roomStore != nil }
+    var canChangeRoom: Bool { roomStore != nil || householdService != nil }
 
     var roomName: String {
         guard let roomID = device.roomID, let room = availableRooms().first(where: { $0.id == roomID }) else {
@@ -236,18 +239,34 @@ final class DeviceDetailViewModel {
     }
 
     func availableRooms() -> [Room] {
-        (try? roomStore?.fetchAll()) ?? []
+        if let householdService {
+            return householdService.visibleRooms()
+        }
+        return (try? roomStore?.fetchAll()) ?? []
     }
 
-    /// 移入 / 移出房间：仅改本机 `room_id`，不置同步状态。
+    /// 移入 / 移出房间：先落本机，再由 `HouseholdService` 用 PATCH 上报；
+    /// 失败进入 pending，下次同步重试，403 / 404 转成可读提示。
     func updateRoom(_ roomID: UUID?) {
-        guard let roomStore else { return }
-        do {
-            try savedDeviceStore.setRoom(id: device.id, roomID: roomID)
-            device.roomID = roomID
-            onChange?()
-        } catch {
-            notice = L10n.f("room.moveFailed", String(describing: error))
+        let room = roomID.flatMap { target in availableRooms().first(where: { $0.id == target }) }
+        guard let householdService else {
+            guard let roomStore else { return }
+            do {
+                try savedDeviceStore.setRoom(id: device.id, roomID: roomID)
+                device.roomID = roomID
+                onChange?()
+            } catch {
+                notice = L10n.f("room.moveFailed", String(describing: error))
+            }
+            return
+        }
+        householdService.assignDevice(device, room: room) { [weak self] result in
+            guard let self else { return }
+            self.device.roomID = roomID
+            if let message = result.errorMessage {
+                self.notice = message
+            }
+            self.onChange?()
         }
     }
 

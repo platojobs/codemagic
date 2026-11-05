@@ -96,6 +96,12 @@ struct RemoteDevice: Decodable, Equatable {
     let alias: String?
     let advertisedName: String?
     let group: String?
+    /// 服务端家庭 id（openapi 0.8.0）。旧后端缺省时保持本地归属不变。
+    let householdID: String?
+    /// 服务端房间 id；`nil` 表示未分配。
+    let roomID: String?
+    /// 响应里是否真的出现了 `roomId` 键：缺省（旧后端）与显式 `null` 语义不同。
+    let hasRoomField: Bool
     let updatedAt: Date
     let deletedAt: Date?
     let serverSeq: Int64?
@@ -109,6 +115,8 @@ struct RemoteDevice: Decodable, Equatable {
         case alias
         case advertisedName
         case group
+        case householdId
+        case roomId
         case updatedAt
         case deletedAt
         case serverSeq
@@ -124,6 +132,9 @@ struct RemoteDevice: Decodable, Equatable {
         alias = try? container.decodeIfPresent(String.self, forKey: .alias)
         advertisedName = try? container.decodeIfPresent(String.self, forKey: .advertisedName)
         group = try? container.decodeIfPresent(String.self, forKey: .group)
+        householdID = try? container.decodeIfPresent(String.self, forKey: .householdId)
+        roomID = try? container.decodeIfPresent(String.self, forKey: .roomId)
+        hasRoomField = container.contains(.roomId)
         updatedAt = SyncDateCodec.parse(
             (try? container.decodeIfPresent(String.self, forKey: .updatedAt)) ?? ""
         ) ?? Date(timeIntervalSince1970: 0)
@@ -143,6 +154,9 @@ struct RemoteDevice: Decodable, Equatable {
         alias: String? = nil,
         advertisedName: String? = nil,
         group: String? = nil,
+        householdID: String? = nil,
+        roomID: String? = nil,
+        hasRoomField: Bool = true,
         updatedAt: Date,
         deletedAt: Date? = nil,
         serverSeq: Int64? = nil
@@ -155,6 +169,9 @@ struct RemoteDevice: Decodable, Equatable {
         self.alias = alias
         self.advertisedName = advertisedName
         self.group = group
+        self.householdID = householdID
+        self.roomID = roomID
+        self.hasRoomField = hasRoomField
         self.updatedAt = updatedAt
         self.deletedAt = deletedAt
         self.serverSeq = serverSeq
@@ -187,6 +204,8 @@ struct RemoteDevice: Decodable, Equatable {
             advertisedName: advertisedText,
             remark: aliasText,
             groupName: groupText.isEmpty ? SavedDevice.defaultGroupName : groupText,
+            remoteRoomID: roomID,
+            remoteHouseholdID: householdID,
             mac: (mac?.isEmpty ?? true) ? nil : mac,
             vendor: nil,
             firmwareVersion: nil,

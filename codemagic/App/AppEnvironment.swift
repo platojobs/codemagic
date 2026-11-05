@@ -30,8 +30,13 @@ final class AppEnvironment {
     let accountDeletionService: AccountDeletionService
     let scenarioStore: ScenarioStore
     let scenarioExecutor: ScenarioExecutor
-    /// 房间：仅本机数据，不参与同步。
+    /// 房间：接入家庭后以服务端为准；离线 / 未同步时保留本机数据。
     let roomStore: RoomStore
+    let householdStore: HouseholdStore
+    let pendingAssignmentStore: DeviceAssignmentPendingStore
+    let householdAPI: HouseholdAPIServicing
+    /// 家庭 / 邀请码 / 房间 / 设备归属业务协调器。
+    let householdService: HouseholdService
 
     /// 启动期降级说明，非空时在「我的」页展示。
     private(set) var startupWarning: String?
@@ -58,6 +63,9 @@ final class AppEnvironment {
         scanLogStore = ScanLogStore(database: resolved.database)
         recentDeviceStore = RecentDeviceStore(database: resolved.database)
         deviceInfoCacheStore = DeviceInfoCacheStore(database: resolved.database)
+        roomStore = RoomStore(database: resolved.database)
+        householdStore = HouseholdStore(database: resolved.database)
+        pendingAssignmentStore = DeviceAssignmentPendingStore(database: resolved.database)
         self.settingsStore = settingsStore
         let notifications: LocalNotificationServing = UserNotificationService.shared
         notificationService = notifications
@@ -68,19 +76,35 @@ final class AppEnvironment {
 
         if let configuration = try? APIConfiguration.fromBundle() {
             apiConfiguration = configuration
-            tokenStore = KeychainTokenStore()
-            productService = ProductAPIClient(configuration: configuration, tokenStore: tokenStore)
+            let sessionTokenStore = KeychainTokenStore()
+            tokenStore = sessionTokenStore
+            productService = ProductAPIClient(configuration: configuration, tokenStore: sessionTokenStore)
             readingsStore = ReadingsStore(database: resolved.database)
-            readingsService = ReadingsAPIClient(configuration: configuration, tokenStore: tokenStore)
+            readingsService = ReadingsAPIClient(configuration: configuration, tokenStore: sessionTokenStore)
             accountAPI = AccountAPIClient(configuration: configuration)
-            syncMetadataStore = SyncMetadataStore()
+            let metadata = SyncMetadataStore()
+            syncMetadataStore = metadata
+            let householdClient = HouseholdAPIClient(configuration: configuration)
+            householdAPI = householdClient
+            let coordinator = HouseholdService(
+                api: householdClient,
+                tokenStore: sessionTokenStore,
+                householdStore: householdStore,
+                roomStore: roomStore,
+                deviceStore: savedDeviceStore,
+                pendingStore: pendingAssignmentStore,
+                metadataStore: metadata,
+                logStore: scanLogStore
+            )
+            householdService = coordinator
             syncEngine = SyncEngine(
                 api: SyncAPIClient(configuration: configuration),
-                tokenStore: tokenStore,
-                metadataStore: syncMetadataStore,
+                tokenStore: sessionTokenStore,
+                metadataStore: metadata,
                 deviceStore: savedDeviceStore,
                 readingsStore: readingsStore,
-                logStore: scanLogStore
+                logStore: scanLogStore,
+                householdService: coordinator
             )
         } else {
             apiConfiguration = nil
@@ -88,15 +112,31 @@ final class AppEnvironment {
             readingsStore = ReadingsStore(database: resolved.database)
             readingsService = UnavailableReadingsAPI()
             accountAPI = UnavailableAccountAPI()
-            syncMetadataStore = SyncMetadataStore()
-            tokenStore = KeychainTokenStore()
+            let metadata = SyncMetadataStore()
+            syncMetadataStore = metadata
+            let sessionTokenStore = KeychainTokenStore()
+            tokenStore = sessionTokenStore
+            let householdClient = UnavailableHouseholdAPI()
+            householdAPI = householdClient
+            let coordinator = HouseholdService(
+                api: householdClient,
+                tokenStore: sessionTokenStore,
+                householdStore: householdStore,
+                roomStore: roomStore,
+                deviceStore: savedDeviceStore,
+                pendingStore: pendingAssignmentStore,
+                metadataStore: metadata,
+                logStore: scanLogStore
+            )
+            householdService = coordinator
             syncEngine = SyncEngine(
                 api: UnavailableSyncAPI(),
-                tokenStore: tokenStore,
-                metadataStore: syncMetadataStore,
+                tokenStore: sessionTokenStore,
+                metadataStore: metadata,
                 deviceStore: savedDeviceStore,
                 readingsStore: readingsStore,
-                logStore: scanLogStore
+                logStore: scanLogStore,
+                householdService: coordinator
             )
             if startupWarning == nil {
                 startupWarning = L10n.f("app.env.productsUnavailable", AppError.configuration("").code)
@@ -133,7 +173,6 @@ final class AppEnvironment {
         }
 
         scenarioStore = ScenarioStore(database: resolved.database)
-        roomStore = RoomStore(database: resolved.database)
         let engine = syncEngine
         scenarioExecutor = ScenarioExecutor(
             dependencies: ScenarioExecutor.Dependencies(

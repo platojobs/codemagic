@@ -1,6 +1,7 @@
 import UIKit
 
-/// 房间管理：新建 / 重命名 / 删除房间。房间仅本机，删除前二次确认，房内设备回到未分配。
+/// 房间管理：新建 / 重命名 / 删除房间。接入家庭后写服务端，离线落本机并标注未同步；
+/// member 只读，服务端 403 降级为可读提示。
 final class RoomManagementViewController: UIViewController {
     private let viewModel: RoomManagementViewModel
     private let onChanged: () -> Void
@@ -28,6 +29,7 @@ final class RoomManagementViewController: UIViewController {
             primaryAction: UIAction { [weak self] _ in self?.presentCreateAlert() }
         )
         navigationItem.rightBarButtonItem?.accessibilityLabel = L10n.t("room.create")
+        navigationItem.rightBarButtonItem?.isEnabled = viewModel.canManageRooms
         navigationItem.leftBarButtonItem = UIBarButtonItem(
             title: L10n.t("common.done"),
             primaryAction: UIAction { [weak self] _ in self?.dismiss(animated: true) }
@@ -60,12 +62,13 @@ final class RoomManagementViewController: UIViewController {
 
     private func reload() {
         tableView.reloadData()
+        navigationItem.rightBarButtonItem?.isEnabled = viewModel.canManageRooms
         emptyView.isHidden = !viewModel.rooms.isEmpty
         emptyView.configure(
             symbolName: "house",
             title: L10n.t("room.emptyTitle"),
-            message: L10n.t("room.emptyMessage"),
-            actionTitle: L10n.t("room.create")
+            message: viewModel.footnoteText,
+            actionTitle: viewModel.canManageRooms ? L10n.t("room.create") : nil
         ) { [weak self] in
             self?.presentCreateAlert()
         }
@@ -73,18 +76,55 @@ final class RoomManagementViewController: UIViewController {
     }
 
     private func presentCreateAlert() {
+        guard viewModel.canManageRooms else {
+            presentPermissionNotice()
+            return
+        }
         presentNameAlert(title: L10n.t("room.createTitle"), initial: "") { [weak self] name in
             guard let self else { return }
-            if !self.viewModel.create(name: name) {
-                self.presentError()
+            self.viewModel.create(name: name) { [weak self] succeeded in
+                guard let self else { return }
+                if succeeded {
+                    self.presentPendingNoticeIfNeeded()
+                } else {
+                    self.presentError()
+                }
             }
         }
     }
 
     private func presentRenameAlert(for room: Room) {
-        presentNameAlert(title: L10n.t("room.renameTitle"), initial: room.name) { [weak self] name in
-            self?.viewModel.rename(id: room.id, name: name)
+        guard viewModel.canManageRooms else {
+            presentPermissionNotice()
+            return
         }
+        presentNameAlert(title: L10n.t("room.renameTitle"), initial: room.name) { [weak self] name in
+            guard let self else { return }
+            self.viewModel.rename(id: room.id, name: name)
+            if let error = self.viewModel.lastError {
+                let alert = UIAlertController(title: L10n.t("room.saveFailedTitle"), message: error, preferredStyle: .alert)
+                alert.addAction(UIAlertAction(title: L10n.t("common.ok"), style: .default))
+                self.present(alert, animated: true)
+            } else {
+                self.presentPendingNoticeIfNeeded()
+            }
+        }
+    }
+
+    /// 403 降级为可读提示，不弹错误码、不整页报错。
+    private func presentPermissionNotice() {
+        let alert = UIAlertController(
+            title: L10n.t("household.notOwner"),
+            message: L10n.t("household.forbidden"),
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: L10n.t("common.ok"), style: .default))
+        present(alert, animated: true)
+    }
+
+    private func presentPendingNoticeIfNeeded() {
+        guard viewModel.lastNotice != nil else { return }
+        ToastView.show(L10n.t("household.assignment.pending"), kind: .info, in: self)
     }
 
     private func presentNameAlert(title: String, initial: String, onSave: @escaping (String) -> Void) {
@@ -108,7 +148,14 @@ final class RoomManagementViewController: UIViewController {
         )
         alert.addAction(UIAlertAction(title: L10n.t("common.cancel"), style: .cancel))
         alert.addAction(UIAlertAction(title: L10n.t("common.delete"), style: .destructive) { [weak self] _ in
-            self?.viewModel.delete(id: room.id)
+            self?.viewModel.delete(id: room.id) { [weak self] succeeded in
+                guard let self else { return }
+                if succeeded {
+                    self.presentPendingNoticeIfNeeded()
+                } else {
+                    self.presentError()
+                }
+            }
         })
         present(alert, animated: true)
     }
@@ -116,7 +163,7 @@ final class RoomManagementViewController: UIViewController {
     private func presentError() {
         let alert = UIAlertController(
             title: L10n.t("room.saveFailedTitle"),
-            message: viewModel.lastError?.localizedDescription,
+            message: viewModel.lastError,
             preferredStyle: .alert
         )
         alert.addAction(UIAlertAction(title: L10n.t("common.ok"), style: .default))
@@ -134,7 +181,10 @@ extension RoomManagementViewController: UITableViewDataSource {
         let room = viewModel.rooms[indexPath.row]
         var configuration = cell.defaultContentConfiguration()
         configuration.text = room.name
-        configuration.secondaryText = L10n.f("room.deviceCount", String(describing: viewModel.deviceCount(for: room)))
+        let countText = L10n.f("room.deviceCount", String(describing: viewModel.deviceCount(for: room)))
+        configuration.secondaryText = room.syncState == .synced
+            ? countText
+            : "\(countText) · \(L10n.t("household.room.unsynced"))"
         configuration.textProperties.font = AppText.body.font()
         configuration.secondaryTextProperties.font = AppText.caption.font()
         cell.contentConfiguration = configuration
@@ -144,13 +194,14 @@ extension RoomManagementViewController: UITableViewDataSource {
     }
 
     func tableView(_ tableView: UITableView, titleForFooterInSection section: Int) -> String? {
-        L10n.t("room.localOnlyNote")
+        viewModel.footnoteText
     }
 
     func tableView(
         _ tableView: UITableView,
         trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath
     ) -> UISwipeActionsConfiguration? {
+        guard viewModel.canManageRooms else { return nil }
         let room = viewModel.rooms[indexPath.row]
         let delete = UIContextualAction(style: .destructive, title: L10n.t("common.delete")) { [weak self] _, _, completion in
             self?.confirmDelete(room)

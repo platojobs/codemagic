@@ -9,7 +9,10 @@ final class HomeDashboardViewModel {
     private(set) var searchText: String = ""
     private(set) var sort: DeviceSort
     private(set) var lastError: AppError?
+    private(set) var lastNotice: String?
     private(set) var isLoading = false
+    private(set) var households: [Household] = []
+    private(set) var currentHousehold: Household?
 
     var onChange: (() -> Void)?
 
@@ -22,6 +25,7 @@ final class HomeDashboardViewModel {
     private let scenarioStore: ScenarioStore
     private let roomStore: RoomStore
     private let executor: ScenarioExecutor
+    private let householdService: HouseholdService?
     private var recentRSSI: [UUID: Int] = [:]
     private var latestReadings: [UUID: DeviceReading] = [:]
 
@@ -34,7 +38,8 @@ final class HomeDashboardViewModel {
         readingsStore: ReadingsStore,
         scenarioStore: ScenarioStore,
         roomStore: RoomStore,
-        executor: ScenarioExecutor
+        executor: ScenarioExecutor,
+        householdService: HouseholdService? = nil
     ) {
         self.bluetooth = bluetooth
         self.savedDeviceStore = savedDeviceStore
@@ -45,6 +50,7 @@ final class HomeDashboardViewModel {
         self.scenarioStore = scenarioStore
         self.roomStore = roomStore
         self.executor = executor
+        self.householdService = householdService
         self.sort = settingsStore.deviceSort
     }
 
@@ -52,8 +58,16 @@ final class HomeDashboardViewModel {
         isLoading = true
         defer { isLoading = false }
         do {
-            devices = try savedDeviceStore.fetchAll()
-            rooms = try roomStore.fetchAll()
+            let current = householdService?.currentHousehold()
+            currentHousehold = current
+            households = householdService?.households() ?? []
+            let all = try savedDeviceStore.fetchAll()
+            devices = all.filter { isVisible($0, in: current) }
+            if let householdService {
+                rooms = householdService.visibleRooms()
+            } else {
+                rooms = try roomStore.fetchAll()
+            }
             scenarios = try scenarioStore.fetchAll()
             let recent = (try? recentDeviceStore.fetchAll(limit: 100)) ?? []
             recentRSSI = Dictionary(
@@ -98,6 +112,31 @@ final class HomeDashboardViewModel {
         executor.execute(scenario) { result in
             completion(result)
         }
+    }
+
+    // MARK: - 家庭
+
+    /// 多于一个家庭时才显示切换控件；单家庭保持首页简洁。
+    var showsHouseholdSwitcher: Bool { households.count > 1 }
+
+    func switchHousehold(localID: UUID, completion: @escaping () -> Void) {
+        householdService?.switchHousehold(localID: localID)
+        reload()
+        completion()
+    }
+
+    /// 设备卡片是否「未同步」：从未接入家庭，或本机仍有待上报修改。
+    func isUnsynced(_ device: SavedDevice) -> Bool {
+        device.householdID == nil || device.syncState != .synced
+    }
+
+    private func isVisible(_ device: SavedDevice, in current: Household?) -> Bool {
+        guard householdService != nil, let current else { return true }
+        guard let householdID = device.householdID else {
+            // 老数据 / 离线新增：个人家庭下展示并标注未同步，其他家庭不混入。
+            return current.isPersonal
+        }
+        return householdID == current.id
     }
 
     // MARK: - 过滤与房间分段
@@ -251,54 +290,89 @@ final class HomeDashboardViewModel {
         }
     }
 
-    // MARK: - 房间（仅本机）
+    // MARK: - 房间 / 设备归属
 
-    @discardableResult
-    func createRoom(name: String) -> Room? {
-        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
-        do {
-            let room = try roomStore.create(name: trimmed)
+    /// 房间增删改统一走 `HouseholdService`：联网写服务端，离线落本机并标注未同步。
+    func createRoom(name: String, completion: (() -> Void)? = nil) {
+        guard let householdService else {
+            _ = try? roomStore.create(name: name.trimmingCharacters(in: .whitespacesAndNewlines))
             reload()
-            return room
-        } catch {
-            lastError = .database(L10n.f("room.saveFailed", String(describing: error)))
-            onChange?()
-            return nil
+            completion?()
+            return
+        }
+        householdService.createRoom(name: name) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success(let mutation):
+                if !mutation.synced {
+                    self.lastNotice = L10n.t("household.assignment.pending")
+                }
+                self.lastError = nil
+            case .failure(let error):
+                self.lastError = .api(
+                    code: "HOUSEHOLD",
+                    statusCode: 400,
+                    message: error.userMessage
+                )
+            }
+            self.reload()
+            completion?()
         }
     }
 
     func renameRoom(id: UUID, name: String) {
-        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        do {
-            try roomStore.rename(id: id, name: trimmed)
+        guard let householdService else {
+            try? roomStore.rename(id: id, name: name)
             reload()
-        } catch {
-            lastError = .database(L10n.f("room.saveFailed", String(describing: error)))
-            onChange?()
+            return
+        }
+        householdService.renameRoom(id: id, name: name) { [weak self] result in
+            guard let self else { return }
+            if case .failure(let error) = result {
+                self.lastError = .api(code: "HOUSEHOLD", statusCode: 400, message: error.userMessage)
+            }
+            self.reload()
         }
     }
 
     func deleteRoom(id: UUID) {
-        do {
-            try roomStore.delete(id: id, deviceStore: savedDeviceStore)
+        guard let householdService else {
+            try? roomStore.delete(id: id, deviceStore: savedDeviceStore)
             reload()
-        } catch {
-            lastError = .database(L10n.f("room.deleteFailed", String(describing: error)))
-            onChange?()
+            return
+        }
+        householdService.deleteRoom(id: id) { [weak self] result in
+            guard let self else { return }
+            if case .failure(let error) = result {
+                self.lastError = .api(code: "HOUSEHOLD", statusCode: 400, message: error.userMessage)
+            }
+            self.reload()
         }
     }
 
-    /// 移入 / 移出房间：只改本机 `room_id`，不置同步状态、不参与 push / changes。
+    /// 移入 / 移出房间：先落本机，再由 `HouseholdService` 用 PATCH 上报；
+    /// 归属不走 push，可重试失败保留 pending，下次同步自动补报。
     func moveDevice(id: UUID, to roomID: UUID?) {
-        do {
-            try savedDeviceStore.setRoom(id: id, roomID: roomID)
-            reload()
-        } catch {
-            lastError = .database(L10n.f("room.moveFailed", String(describing: error)))
-            onChange?()
+        guard let device = devices.first(where: { $0.id == id }) else { return }
+        let targetRoom = roomID.flatMap { target in rooms.first(where: { $0.id == target }) }
+        guard let householdService else {
+            do {
+                try savedDeviceStore.setRoom(id: id, roomID: roomID)
+                reload()
+            } catch {
+                lastError = .database(L10n.f("room.moveFailed", String(describing: error)))
+                onChange?()
+            }
+            return
         }
+        householdService.assignDevice(device, room: targetRoom) { [weak self] result in
+            guard let self else { return }
+            if let message = result.errorMessage {
+                self.lastNotice = message
+            }
+            self.reload()
+        }
+        reload()
     }
 
     // MARK: - Private

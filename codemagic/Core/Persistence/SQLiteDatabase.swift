@@ -108,7 +108,9 @@ final class SQLiteDatabase {
                 "recent_devices",
                 "device_info_cache",
                 "scenarios",
-                "rooms"
+                "rooms",
+                "households",
+                "device_assignment_pending"
             ]
             try performExecute("BEGIN IMMEDIATE;", [])
             do {
@@ -150,6 +152,9 @@ final class SQLiteDatabase {
         }
         if version < 8 {
             try migrateToVersion8()
+        }
+        if version < 9 {
+            try migrateToVersion9()
         }
     }
 
@@ -376,11 +381,75 @@ final class SQLiteDatabase {
         try executeScript(script)
     }
 
+    /// v9：家庭接入。
+    ///
+    /// - `households` 保存服务端家庭快照；`remote_id` 唯一，`is_personal` / `role` 用于
+    ///   判断「个人家庭不可删」与成员权限；本地 `id` 与远端 id 之间不做重映射，直接复用同一个 UUID。
+    /// - `rooms` 启用 `remote_id` 与 `household_id`，并以 `sync_state` 记录 `local / pending / synced`；
+    ///   `deleted` 作为离线删除墓碑，联网重试成功后物理删除。旧房间 `household_id` 保持 NULL，
+    ///   首次接入家庭时由 `HouseholdService` 认领并推送到服务端，绝不静默丢弃。
+    /// - `saved_devices` 增加本地 `household_id` 与服务端真值 `remote_room_id / remote_household_id`，
+    ///   以便离线时按本机房间展示、联网后核对。
+    /// - `device_assignment_pending` 记录待上报的设备归属（`roomId` 三态：空串 = 清除），
+    ///   与 `saved_devices.sync_state` 解耦，避免把归属塞进 push 触发 LWW 冲突。
+    private func migrateToVersion9() throws {
+        let deviceColumns = Set(try performQuery("PRAGMA table_info(saved_devices);", [])
+            .compactMap { $0.text("name") })
+        let roomColumns = Set(try performQuery("PRAGMA table_info(rooms);", [])
+            .compactMap { $0.text("name") })
+        var script = """
+        CREATE TABLE IF NOT EXISTS households (
+            id TEXT PRIMARY KEY NOT NULL,
+            remote_id TEXT NOT NULL DEFAULT '',
+            name TEXT NOT NULL,
+            is_personal INTEGER NOT NULL DEFAULT 0,
+            role TEXT NOT NULL DEFAULT 'member',
+            member_count INTEGER NOT NULL DEFAULT 0,
+            device_count INTEGER NOT NULL DEFAULT 0,
+            created_at REAL NOT NULL,
+            updated_at REAL NOT NULL
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_households_remote ON households(remote_id);
+
+        CREATE TABLE IF NOT EXISTS device_assignment_pending (
+            device_id TEXT PRIMARY KEY NOT NULL,
+            platform TEXT NOT NULL,
+            external_id TEXT NOT NULL,
+            room_remote_id TEXT NOT NULL DEFAULT '',
+            household_remote_id TEXT NOT NULL DEFAULT '',
+            attempts INTEGER NOT NULL DEFAULT 0,
+            created_at REAL NOT NULL,
+            updated_at REAL NOT NULL
+        );
+        """
+        if !deviceColumns.isEmpty {
+            for column in ["household_id", "remote_room_id", "remote_household_id"]
+            where !deviceColumns.contains(column) {
+                script += "ALTER TABLE saved_devices ADD COLUMN \(column) TEXT;\n"
+            }
+        }
+        if !roomColumns.isEmpty {
+            if !roomColumns.contains("household_id") {
+                script += "ALTER TABLE rooms ADD COLUMN household_id TEXT;\n"
+            }
+            if !roomColumns.contains("sync_state") {
+                script += "ALTER TABLE rooms ADD COLUMN sync_state TEXT NOT NULL DEFAULT 'local';\n"
+            }
+            if !roomColumns.contains("deleted") {
+                script += "ALTER TABLE rooms ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0;\n"
+            }
+        }
+        script += """
+        CREATE INDEX IF NOT EXISTS idx_rooms_household ON rooms(household_id, sort_order);
+        PRAGMA user_version = 9;
+        """
+        try executeScript(script)
+    }
+
     private func currentUserVersion() throws -> Int {
         let rows = try performQuery("PRAGMA user_version;", [])
         return Int(rows.first?.integer("user_version") ?? 0)
     }
-
     /// 迁移脚本包含多条语句，必须用 sqlite3_exec 一次性执行；
     /// sqlite3_prepare_v2 只会预处理第一条语句。
     private func executeScript(_ script: String) throws {

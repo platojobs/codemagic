@@ -81,8 +81,9 @@ final class SavedDeviceStore {
             INSERT OR REPLACE INTO saved_devices
             (id, peripheral_id, platform, external_id, name, advertised_name, remark, group_name, room_id, mac,
              vendor, device_type, firmware_version, last_seen_at, created_at, updated_at, deleted_at,
-             sync_state, alias_patch, advertised_name_patch, group_patch)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+             sync_state, alias_patch, advertised_name_patch, group_patch,
+             household_id, remote_room_id, remote_household_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """,
             [
                 .text(device.id.uuidString),
@@ -107,11 +108,14 @@ final class SavedDeviceStore {
                 .text(device.aliasPatch.persistedState),
                 .text(device.advertisedNamePatch.persistedState),
                 .text(device.groupPatch.persistedState),
+                device.householdID.map { .text($0.uuidString) } ?? .null,
+                device.remoteRoomID.map(SQLValue.text) ?? .null,
+                device.remoteHouseholdID.map(SQLValue.text) ?? .null,
             ]
         )
     }
 
-    /// 仅更新本机房间归属：不触碰同步状态与 `updated_at`，房间不参与 push / changes。
+    /// 仅更新本机房间归属：不触碰同步状态与 `updated_at`，归属通过 `PATCH /my/devices` 单独上报。
     func setRoom(id: UUID, roomID: UUID?) throws {
         try database.execute(
             "UPDATE saved_devices SET room_id = ? WHERE id = ?;",
@@ -120,6 +124,59 @@ final class SavedDeviceStore {
                 .text(id.uuidString),
             ]
         )
+    }
+
+    /// 本地归属变更后同步家庭与服务端真值字段，并保留本机 `sync_state`（归属不进 push）。
+    func setAssignment(
+        id: UUID,
+        householdID: UUID?,
+        roomID: UUID?,
+        remoteRoomID: String?,
+        remoteHouseholdID: String?
+    ) throws {
+        try database.execute(
+            """
+            UPDATE saved_devices
+            SET household_id = ?, room_id = ?, remote_room_id = ?, remote_household_id = ?
+            WHERE id = ?;
+            """,
+            [
+                householdID.map { .text($0.uuidString) } ?? .null,
+                roomID.map { .text($0.uuidString) } ?? .null,
+                remoteRoomID.map(SQLValue.text) ?? .null,
+                remoteHouseholdID.map(SQLValue.text) ?? .null,
+                .text(id.uuidString),
+            ]
+        )
+    }
+
+    /// 拉取后落库服务端归属真值：本地房间按 `roomID` 映射，`nil` 表示未分配。
+    func applyRemoteAssignment(
+        id: UUID,
+        householdID: UUID?,
+        roomID: UUID?,
+        remoteRoomID: String?,
+        remoteHouseholdID: String?
+    ) throws {
+        try setAssignment(
+            id: id,
+            householdID: householdID,
+            roomID: roomID,
+            remoteRoomID: remoteRoomID,
+            remoteHouseholdID: remoteHouseholdID
+        )
+    }
+
+    func devices(householdID: UUID) throws -> [SavedDevice] {
+        let rows = try database.query(
+            """
+            SELECT * FROM saved_devices
+            WHERE deleted_at IS NULL AND (household_id = ? OR household_id IS NULL)
+            ORDER BY updated_at DESC;
+            """,
+            [.text(householdID.uuidString)]
+        )
+        return rows.compactMap(Self.makeDevice)
     }
 
     func softDelete(id: UUID, at date: Date = Date()) throws {
@@ -229,6 +286,9 @@ final class SavedDeviceStore {
             remark: remark,
             groupName: groupName,
             roomID: row.text("room_id").flatMap(UUID.init(uuidString:)),
+            householdID: row.text("household_id").flatMap(UUID.init(uuidString:)),
+            remoteRoomID: row.text("remote_room_id"),
+            remoteHouseholdID: row.text("remote_household_id"),
             mac: row.text("mac"),
             vendor: row.text("vendor"),
             deviceType: row.text("device_type"),

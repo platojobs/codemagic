@@ -1,10 +1,11 @@
 import UIKit
 
-/// 「我的」页：蓝牙权限自检、本地扫描日志入口、同步状态、基础设置与关于。
+/// 「我的」页：蓝牙权限自检、本地扫描日志入口、家庭管理、同步状态、基础设置与关于。
 final class ProfileViewController: UIViewController {
     private enum Section: Int, CaseIterable {
         case bluetooth
         case localData
+        case household
         case sync
         case account
         case alerts
@@ -16,10 +17,22 @@ final class ProfileViewController: UIViewController {
     private let tableView = UITableView(frame: .zero, style: .insetGrouped)
     private let viewModel: ProfileViewModel
     private let scanLogStore: ScanLogStore
+    private let roomStore: RoomStore?
+    private let savedDeviceStore: SavedDeviceStore?
+    private let householdService: HouseholdService?
 
-    init(viewModel: ProfileViewModel, scanLogStore: ScanLogStore) {
+    init(
+        viewModel: ProfileViewModel,
+        scanLogStore: ScanLogStore,
+        roomStore: RoomStore? = nil,
+        savedDeviceStore: SavedDeviceStore? = nil,
+        householdService: HouseholdService? = nil
+    ) {
         self.viewModel = viewModel
         self.scanLogStore = scanLogStore
+        self.roomStore = roomStore
+        self.savedDeviceStore = savedDeviceStore
+        self.householdService = householdService
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -175,6 +188,29 @@ final class ProfileViewController: UIViewController {
         navigationController?.pushViewController(about, animated: true)
     }
 
+    // MARK: - Household
+
+    private func openHousehold() {
+        guard let viewModel = viewModel.makeHouseholdViewModel(),
+              let roomStore,
+              let savedDeviceStore,
+              let householdService
+        else {
+            presentMessage(
+                title: L10n.t("household.title"),
+                message: L10n.t("household.empty")
+            )
+            return
+        }
+        let controller = HouseholdManagementViewController(
+            viewModel: viewModel,
+            roomStore: roomStore,
+            savedDeviceStore: savedDeviceStore,
+            householdService: householdService
+        )
+        navigationController?.pushViewController(controller, animated: true)
+    }
+
     // MARK: - Account
 
     private func openPairingCode() {
@@ -314,6 +350,7 @@ extension ProfileViewController: UITableViewDataSource {
         switch section {
         case .bluetooth: return 3
         case .localData: return 2
+        case .household: return 1
         case .sync: return 5 + (viewModel.needsRelogin ? 1 : 0)
         case .account: return 4
         case .alerts: return 3
@@ -328,6 +365,7 @@ extension ProfileViewController: UITableViewDataSource {
         switch section {
         case .bluetooth: return L10n.t("profile.section.bluetooth")
         case .localData: return L10n.t("device.detail.sourceLocal")
+        case .household: return L10n.t("profile.section.household")
         case .sync: return L10n.t("profile.section.sync")
         case .account: return L10n.t("profile.section.account")
         case .alerts: return L10n.t("profile.section.alerts")
@@ -356,6 +394,8 @@ extension ProfileViewController: UITableViewDataSource {
             return viewModel.startupWarning ?? L10n.t("profile.footnote.consistency")
         case .localData:
             return nil
+        case .household:
+            return L10n.t("household.rooms.serverNote")
         }
     }
 
@@ -385,6 +425,13 @@ extension ProfileViewController: UITableViewDataSource {
                 )
             }
             return makeActionCell(title: L10n.t("profile.clearScanLog"), color: AppTheme.Palette.promotion)
+
+        case .household:
+            return makeValueCell(
+                title: L10n.t("household.manage"),
+                value: viewModel.householdText,
+                showsDisclosure: true
+            )
 
         case .sync:
             switch indexPath.row {
@@ -514,6 +561,8 @@ extension ProfileViewController: UITableViewDelegate {
             openLogs()
         case .localData where indexPath.row == 1:
             confirmClearLogs()
+        case .household:
+            openHousehold()
         case .sync where indexPath.row == 2:
             viewModel.manualSync()
         case .sync where indexPath.row == 5:

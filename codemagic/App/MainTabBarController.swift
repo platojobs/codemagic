@@ -32,7 +32,8 @@ final class MainTabBarController: UITabBarController {
                     readingsStore: environment.readingsStore,
                     scenarioStore: environment.scenarioStore,
                     roomStore: environment.roomStore,
-                    executor: environment.scenarioExecutor
+                    executor: environment.scenarioExecutor,
+                    householdService: environment.householdService
                 ),
                 environment: environment
             ),
@@ -87,9 +88,13 @@ final class MainTabBarController: UITabBarController {
                     accountDeletionService: environment.accountDeletionService,
                     baseURLText: environment.apiConfiguration?.displayString ?? L10n.t("tab.unconfigured"),
                     startupWarning: environment.startupWarning,
-                    notifications: environment.notificationService
+                    notifications: environment.notificationService,
+                    householdService: environment.householdService
                 ),
-                scanLogStore: environment.scanLogStore
+                scanLogStore: environment.scanLogStore,
+                roomStore: environment.roomStore,
+                savedDeviceStore: environment.savedDeviceStore,
+                householdService: environment.householdService
             ),
             title: L10n.t("tab.profile"),
             imageName: SymbolName.profileTab,

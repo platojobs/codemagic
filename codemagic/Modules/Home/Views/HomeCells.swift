@@ -79,6 +79,7 @@ final class DeviceCardCell: UICollectionViewCell {
         isConnected: Bool,
         readingText: String,
         rssi: Int?,
+        isUnsynced: Bool = false,
         onTap: @escaping () -> Void
     ) {
         nameLabel.text = device.displayName
@@ -95,11 +96,14 @@ final class DeviceCardCell: UICollectionViewCell {
         readingLabel.text = readingText
         signalView.isSignalUnavailable = rssi == nil
         signalView.rssi = rssi ?? -100
+        let timeText: String
         if let lastSeenAt = device.lastSeenAt {
-            timeLabel.text = Self.relativeFormatter.localizedString(for: lastSeenAt, relativeTo: Date())
+            timeText = Self.relativeFormatter.localizedString(for: lastSeenAt, relativeTo: Date())
         } else {
-            timeLabel.text = L10n.t("home.status.notConnectedYet")
+            timeText = L10n.t("home.status.notConnectedYet")
         }
+        // 离线 / 未接入家庭的设备保留展示，但明确标注「未同步」，不假装已同步。
+        timeLabel.text = isUnsynced ? "\(timeText) · \(L10n.t("device.sync.unsynced"))" : timeText
         card.onTap(onTap)
         accessibilityLabel = L10n.f("home.a11y.card", device.displayName, statusLabel.text ?? "", readingText)
     }

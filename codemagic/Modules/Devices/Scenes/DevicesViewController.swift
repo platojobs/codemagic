@@ -259,7 +259,8 @@ final class DevicesViewController: UIViewController {
             readingsStore: environment.readingsStore,
             readingsService: environment.readingsService,
             readingsIngestor: environment.readingsIngestor,
-            roomStore: environment.roomStore
+            roomStore: environment.roomStore,
+            householdService: environment.householdService
         )
         let detail = DeviceDetailViewController(viewModel: detailViewModel)
         navigationController?.pushViewController(detail, animated: true)

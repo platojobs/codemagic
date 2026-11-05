@@ -1123,6 +1123,282 @@ private func run() -> Int32 {
     let exportOldToken = client.request("GET", "me/export", token: tokenA)
     report.check(exportOldToken.status == 401, "注销后旧 token 也失效（401）", "status=\(exportOldToken.status)")
 
+    // MARK: 9. 家庭链路（创建 / 邀请码 / 成员可见 / 权限降级）
+
+    report.section("9. 家庭：创建 / 邀请码 / 成员可见设备 / 403 与跨家庭 404")
+
+    func anonymousAccount(_ label: String) -> (token: String, userID: String)? {
+        let response = client.request("POST", "auth/anonymous", json: [String: Any]())
+        let object = jsonObject(response.body) ?? [:]
+        let token = text(object, "token")
+        let userID = text(object, "userId")
+        report.check(
+            (response.status == 200 || response.status == 201) && !token.isEmpty && !userID.isEmpty,
+            "匿名登录（\(label)）",
+            "status=\(response.status) body=\(bodyText(response.body))"
+        )
+        guard !token.isEmpty else { return nil }
+        return (token, userID)
+    }
+
+    guard let ownerAccount = anonymousAccount("owner"),
+          let memberAccount = anonymousAccount("member"),
+          let outsiderAccount = anonymousAccount("outsider")
+    else {
+        print("\n家庭链路所需账号创建失败。")
+        return 1
+    }
+
+    // 9.1 个人家庭自动创建且不可删除
+    let ownerHouseholds = client.request("GET", "households", token: ownerAccount.token)
+    let ownerHouseholdItems = list((jsonObject(ownerHouseholds.body) ?? [:])["items"])
+    let ownerPersonal = ownerHouseholdItems.first { ($0["personal"] as? Bool) == true } ?? [:]
+    report.check(ownerHouseholds.status == 200, "owner 家庭列表返回 200", "status=\(ownerHouseholds.status)")
+    report.check(ownerPersonal.isEmpty == false, "账号自动拥有个人家庭", "items=\(ownerHouseholdItems.count)")
+    report.check(text(ownerPersonal, "role") == "owner", "个人家庭角色为 owner")
+    let ownerPersonalID = text(ownerPersonal, "id")
+    let deletePersonal = client.request("DELETE", "households/\(ownerPersonalID)", token: ownerAccount.token)
+    report.check(deletePersonal.status == 403, "个人家庭不可删除（403）", "status=\(deletePersonal.status)")
+    report.check(errorCode(deletePersonal.body) == "FORBIDDEN", "个人家庭删除错误码为 FORBIDDEN", "code=\(errorCode(deletePersonal.body))")
+
+    // 9.2 创建家庭
+    let createdHousehold = client.request(
+        "POST", "households", token: ownerAccount.token, json: ["name": "e2e-家庭"]
+    )
+    let householdObject = jsonObject(createdHousehold.body) ?? [:]
+    let householdID = text(householdObject, "id")
+    report.check(createdHousehold.status == 201, "创建家庭返回 201", "status=\(createdHousehold.status) body=\(bodyText(createdHousehold.body))")
+    report.check(!householdID.isEmpty, "创建家庭返回 id")
+    report.check(text(householdObject, "role") == "owner", "创建者为 owner", "role=\(text(householdObject, "role"))")
+    report.check((householdObject["personal"] as? Bool) == false, "新建家庭不是个人家庭")
+    report.check((householdObject["memberCount"] as? NSNumber)?.intValue == 1, "新建家庭成员数为 1")
+
+    // 9.3 邀请码：8 位、未来到期、一次性
+    let invitation = client.request("POST", "households/\(householdID)/invitations", token: ownerAccount.token, json: [String: Any]())
+    let invitationObject = jsonObject(invitation.body) ?? [:]
+    let invitationCode = text(invitationObject, "code")
+    let invitationExpiry = parsedDate(invitationObject, "expiresAt")
+    report.check(invitation.status == 201, "签发邀请码返回 201", "status=\(invitation.status) body=\(bodyText(invitation.body))")
+    report.check(
+        invitationCode.count == 8 && invitationCode.allSatisfy { $0.isUppercase || $0.isNumber },
+        "邀请码为 8 位大写字母/数字",
+        "code=\(invitationCode)"
+    )
+    report.check(
+        invitationExpiry.map { $0 > Date() } ?? false,
+        "邀请码 expiresAt 为未来时间",
+        "expiresAt=\(text(invitationObject, "expiresAt"))"
+    )
+
+    // 9.4 第二个账号用邀请码加入（小写码应被规范化）
+    let joinResponse = client.request(
+        "POST", "households/invitations/claim", token: memberAccount.token,
+        json: ["code": invitationCode.lowercased()]
+    )
+    let joinedObject = jsonObject(joinResponse.body) ?? [:]
+    report.check(joinResponse.status == 200, "成员领取邀请码返回 200", "status=\(joinResponse.status) body=\(bodyText(joinResponse.body))")
+    report.check(text(joinedObject, "id") == householdID, "领取后返回同一家庭", "id=\(text(joinedObject, "id"))")
+    report.check(text(joinedObject, "role") == "member", "领取者角色为 member", "role=\(text(joinedObject, "role"))")
+    report.check((joinedObject["memberCount"] as? NSNumber)?.intValue == 2, "加入后成员数为 2")
+
+    let memberHouseholds = client.request("GET", "households", token: memberAccount.token)
+    let memberItems = list((jsonObject(memberHouseholds.body) ?? [:])["items"])
+    let memberShared = memberItems.first { text($0, "id") == householdID } ?? [:]
+    report.check(memberHouseholds.status == 200, "成员家庭列表返回 200", "status=\(memberHouseholds.status)")
+    report.check(memberItems.count == 2, "成员可见共享家庭与个人家庭", "items=\(memberItems.count)")
+    report.check(text(memberShared, "role") == "member", "成员在共享家庭中角色为 member")
+
+    let membersResponse = client.request("GET", "households/\(householdID)/members", token: memberAccount.token)
+    let memberList = list((jsonObject(membersResponse.body) ?? [:])["items"])
+    report.check(membersResponse.status == 200, "成员列表返回 200", "status=\(membersResponse.status)")
+    report.check(memberList.count == 2, "成员列表包含 owner 与 member", "items=\(memberList.count)")
+    report.check(
+        memberList.contains { text($0, "userId") == ownerAccount.userID && text($0, "role") == "owner" }
+            && memberList.contains { text($0, "userId") == memberAccount.userID && text($0, "role") == "member" },
+        "成员角色与账号对应"
+    )
+
+    // 9.5 房间归属设备，成员可见
+    let roomResponse = client.request(
+        "POST", "households/\(householdID)/rooms", token: ownerAccount.token,
+        json: ["name": "客厅", "sortOrder": 1]
+    )
+    let roomObject = jsonObject(roomResponse.body) ?? [:]
+    let roomID = text(roomObject, "id")
+    report.check(roomResponse.status == 201, "创建房间返回 201", "status=\(roomResponse.status) body=\(bodyText(roomResponse.body))")
+    report.check(text(roomObject, "householdId") == householdID, "房间归属该家庭")
+    report.check((roomObject["sortOrder"] as? NSNumber)?.intValue == 1, "房间排序写入")
+
+    let householdDeviceID = "55555555-5555-4555-8555-555555555555"
+    let householdExternalID = householdDeviceID.uppercased()
+    let householdPush = client.request(
+        "POST", "sync/push", token: ownerAccount.token,
+        idempotencyKey: "e2e-household-\(Int(Date().timeIntervalSince1970))",
+        json: [
+            "clientId": clientID,
+            "devices": [madeDevice(
+                id: householdDeviceID,
+                platform: "ios",
+                externalID: householdExternalID,
+                mac: nil,
+                alias: "家庭设备",
+                updatedAt: Date(timeIntervalSinceNow: -5)
+            )],
+        ]
+    )
+    report.check(householdPush.status == 200, "家庭设备 push 返回 200", "status=\(householdPush.status) body=\(bodyText(householdPush.body))")
+
+    let assignResponse = client.request(
+        "PATCH", "my/devices/ios/\(householdExternalID)", token: ownerAccount.token,
+        json: ["householdId": householdID, "roomId": roomID]
+    )
+    let assignedObject = jsonObject(assignResponse.body) ?? [:]
+    report.check(assignResponse.status == 200, "PATCH 设备归属返回 200", "status=\(assignResponse.status) body=\(bodyText(assignResponse.body))")
+    report.check(text(assignedObject, "householdId") == householdID, "设备 householdId 已覆盖", "householdId=\(text(assignedObject, "householdId"))")
+    report.check(text(assignedObject, "roomId") == roomID, "设备 roomId 已覆盖", "roomId=\(text(assignedObject, "roomId"))")
+
+    let memberDevices = client.request("GET", "my/devices", token: memberAccount.token)
+    let memberDeviceItems = list((jsonObject(memberDevices.body) ?? [:])["items"])
+    let visibleDevice = memberDeviceItems.first { text($0, "id") == householdDeviceID }
+    report.check(memberDevices.status == 200, "成员设备列表返回 200", "status=\(memberDevices.status)")
+    report.check(visibleDevice != nil, "成员可见家庭内他人设备", "items=\(memberDeviceItems.count)")
+    if let visibleDevice {
+        report.check(text(visibleDevice, "householdId") == householdID, "成员看到的设备归属该家庭")
+        report.check(text(visibleDevice, "roomId") == roomID, "成员看到的设备在房间内")
+    }
+
+    let outsiderDevices = client.request("GET", "my/devices", token: outsiderAccount.token)
+    report.check(
+        list((jsonObject(outsiderDevices.body) ?? [:])["items"]).contains { text($0, "id") == householdDeviceID } == false,
+        "非成员看不到该设备",
+        "items=\(list((jsonObject(outsiderDevices.body) ?? [:])["items"]).count)"
+    )
+
+    // 9.6 member 写操作 403 FORBIDDEN（可读降级）
+    let memberRoomPatch = client.request(
+        "PATCH", "households/\(householdID)/rooms/\(roomID)", token: memberAccount.token,
+        json: ["name": "成员改房"]
+    )
+    report.check(memberRoomPatch.status == 403, "member 改房间返回 403", "status=\(memberRoomPatch.status) body=\(bodyText(memberRoomPatch.body))")
+    report.check(errorCode(memberRoomPatch.body) == "FORBIDDEN", "member 改房间错误码为 FORBIDDEN", "code=\(errorCode(memberRoomPatch.body))")
+
+    let memberRoomCreate = client.request(
+        "POST", "households/\(householdID)/rooms", token: memberAccount.token,
+        json: ["name": "成员建房"]
+    )
+    report.check(memberRoomCreate.status == 403, "member 建房返回 403", "status=\(memberRoomCreate.status)")
+
+    let memberInvitation = client.request(
+        "POST", "households/\(householdID)/invitations", token: memberAccount.token, json: [String: Any]()
+    )
+    report.check(memberInvitation.status == 403, "member 签发邀请码返回 403", "status=\(memberInvitation.status)")
+
+    let memberHouseholdPatch = client.request(
+        "PATCH", "households/\(householdID)", token: memberAccount.token, json: ["name": "成员改名"]
+    )
+    report.check(memberHouseholdPatch.status == 403, "member 改家庭名返回 403", "status=\(memberHouseholdPatch.status)")
+
+    let memberDevicePatch = client.request(
+        "PATCH", "my/devices/ios/\(householdExternalID)", token: memberAccount.token,
+        json: ["alias": "成员改别名"]
+    )
+    report.check(memberDevicePatch.status == 404, "member 改他人设备返回 404（不泄露存在性）", "status=\(memberDevicePatch.status)")
+
+    // 9.7 跨家庭 / 一次性邀请码 / 非成员一律 404
+    let secondHousehold = client.request(
+        "POST", "households", token: ownerAccount.token, json: ["name": "e2e-第二家庭"]
+    )
+    let secondHouseholdID = text(jsonObject(secondHousehold.body) ?? [:], "id")
+    report.check(secondHousehold.status == 201 && !secondHouseholdID.isEmpty, "owner 创建第二个家庭", "status=\(secondHousehold.status)")
+
+    for path in ["households/\(secondHouseholdID)", "households/\(secondHouseholdID)/members", "households/\(secondHouseholdID)/rooms"] {
+        let crossResponse = client.request("GET", path, token: memberAccount.token)
+        report.check(crossResponse.status == 404, "跨家庭读取 \(path) 返回 404", "status=\(crossResponse.status)")
+        report.check(errorCode(crossResponse.body) == "NOT_FOUND", "跨家庭错误码为 NOT_FOUND（\(path)）", "code=\(errorCode(crossResponse.body))")
+    }
+    let outsiderGet = client.request("GET", "households/\(householdID)", token: outsiderAccount.token)
+    report.check(outsiderGet.status == 404, "非成员读取家庭返回 404", "status=\(outsiderGet.status)")
+    let outsiderRoomPatch = client.request(
+        "PATCH", "households/\(householdID)/rooms/\(roomID)", token: outsiderAccount.token,
+        json: ["name": "外人改房"]
+    )
+    report.check(outsiderRoomPatch.status == 404, "非成员改房间返回 404", "status=\(outsiderRoomPatch.status)")
+
+    let reusedInvitation = client.request(
+        "POST", "households/invitations/claim", token: outsiderAccount.token,
+        json: ["code": invitationCode]
+    )
+    report.check(reusedInvitation.status == 404, "邀请码一次性（重复领取 404）", "status=\(reusedInvitation.status)")
+    report.check(errorCode(reusedInvitation.body) == "NOT_FOUND", "重复邀请码错误码为 NOT_FOUND", "code=\(errorCode(reusedInvitation.body))")
+    let invalidInvitation = client.request(
+        "POST", "households/invitations/claim", token: outsiderAccount.token,
+        json: ["code": "ZZZZZZZZ"]
+    )
+    report.check(invalidInvitation.status == 404, "不存在邀请码返回 404", "status=\(invalidInvitation.status)")
+
+    // 9.8 设备归属三态：缺失=不变 / 空串=清除 / 非空=覆盖
+    let aliasOnly = client.request(
+        "PATCH", "my/devices/ios/\(householdExternalID)", token: ownerAccount.token,
+        json: ["alias": "家庭设备·改名"]
+    )
+    let aliasOnlyObject = jsonObject(aliasOnly.body) ?? [:]
+    report.check(aliasOnly.status == 200, "仅改 alias 返回 200", "status=\(aliasOnly.status)")
+    report.check(text(aliasOnlyObject, "alias") == "家庭设备·改名", "alias 已覆盖")
+    report.check(text(aliasOnlyObject, "roomId") == roomID, "缺失 roomId 时归属不变", "roomId=\(text(aliasOnlyObject, "roomId"))")
+    report.check(text(aliasOnlyObject, "householdId") == householdID, "缺失 householdId 时归属不变")
+
+    let clearRoom = client.request(
+        "PATCH", "my/devices/ios/\(householdExternalID)", token: ownerAccount.token,
+        json: ["roomId": ""]
+    )
+    let clearRoomObject = jsonObject(clearRoom.body) ?? [:]
+    report.check(clearRoom.status == 200, "空串清房间返回 200", "status=\(clearRoom.status)")
+    report.check(clearRoomObject["roomId"] is NSNull, "空串清除 roomId", "body=\(bodyText(clearRoom.body))")
+    report.check(text(clearRoomObject, "householdId") == householdID, "清房间不影响 householdId")
+
+    let setRoomAgain = client.request(
+        "PATCH", "my/devices/ios/\(householdExternalID)", token: ownerAccount.token,
+        json: ["roomId": roomID]
+    )
+    report.check(setRoomAgain.status == 200 && text(jsonObject(setRoomAgain.body) ?? [:], "roomId") == roomID, "非空值覆盖 roomId")
+
+    let clearHousehold = client.request(
+        "PATCH", "my/devices/ios/\(householdExternalID)", token: ownerAccount.token,
+        json: ["householdId": ""]
+    )
+    let clearHouseholdObject = jsonObject(clearHousehold.body) ?? [:]
+    report.check(clearHousehold.status == 200, "空串清家庭返回 200", "status=\(clearHousehold.status)")
+    report.check(text(clearHouseholdObject, "householdId") == ownerPersonalID, "空串 householdId 回到个人家庭", "householdId=\(text(clearHouseholdObject, "householdId"))")
+    report.check(clearHouseholdObject["roomId"] is NSNull, "回到个人家庭后 roomId 为 null")
+
+    // 9.9 删除共享家庭：房间与成员级联清理，设备回到个人家庭
+    let backToHousehold = client.request(
+        "PATCH", "my/devices/ios/\(householdExternalID)", token: ownerAccount.token,
+        json: ["householdId": householdID, "roomId": roomID]
+    )
+    report.check(backToHousehold.status == 200, "设备重新归属共享家庭", "status=\(backToHousehold.status)")
+
+    let deleteShared = client.request("DELETE", "households/\(householdID)", token: ownerAccount.token)
+    report.check(deleteShared.status == 204, "owner 删除共享家庭返回 204", "status=\(deleteShared.status) body=\(bodyText(deleteShared.body))")
+
+    let afterDeleteDetail = client.request("GET", "households/\(householdID)", token: ownerAccount.token)
+    report.check(afterDeleteDetail.status == 404, "删除后家庭 404", "status=\(afterDeleteDetail.status)")
+    let memberAfterDelete = client.request("GET", "households", token: memberAccount.token)
+    let memberAfterDeleteItems = list((jsonObject(memberAfterDelete.body) ?? [:])["items"])
+    report.check(
+        memberAfterDeleteItems.contains { text($0, "id") == householdID } == false,
+        "成员列表不再包含已删家庭",
+        "items=\(memberAfterDeleteItems.count)"
+    )
+    let deviceAfterDelete = client.request("GET", "my/devices/ios/\(householdExternalID)", token: ownerAccount.token)
+    let deviceAfterDeleteObject = jsonObject(deviceAfterDelete.body) ?? [:]
+    report.check(deviceAfterDelete.status == 200, "设备本身未被删除", "status=\(deviceAfterDelete.status)")
+    report.check(
+        text(deviceAfterDeleteObject, "householdId") == ownerPersonalID && deviceAfterDeleteObject["roomId"] is NSNull,
+        "删除家庭后设备回到个人家庭且房间清空",
+        "body=\(bodyText(deviceAfterDelete.body))"
+    )
+
     // MARK: 汇总
 
     print("\n=== E2E 合同联调结果 ===")
