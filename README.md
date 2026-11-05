@@ -12,18 +12,19 @@
 
 | 项 | 结果 |
 | --- | --- |
-| 版本 | **v0.3.6**（`MARKETING_VERSION 0.3.6`，`CURRENT_PROJECT_VERSION 10`，tag `v0.3.6`，契约对齐 Go 0.3.3） |
+| 版本 | **v0.4.0**（`MARKETING_VERSION 0.4.0`，`CURRENT_PROJECT_VERSION 11`，tag `v0.4.0`，契约对齐 Go 读数链路 main，尚未打 v0.4.0 tag） |
 | 五模块（首页 / 设备 / 产品 / 市场 / 我的） | 已实现，纯代码 UIKit，真实数据路径 |
 | CoreBluetooth 扫描 + 连接 | 已实现（`CBCentralManager`，真实 RSSI） |
-| 本地持久化 | 已实现（SQLite3，含同步字段；迁移 v4 区分 `advertised_name` 与用户别名，并记录 `alias_patch` / `advertised_name_patch` / `group_patch` 三态） |
-| 网络层 | 已实现（URLSession + Codable，对齐 `openapi.yaml` 0.3.3：device-types / catalog / 复合键详情 / 别名与广播名分离 / 缺省字段三态） |
-| 同步 | **已实现**：匿名登录、增量拉取、批量推送（幂等键 + 可选 `deviceType`）、冲突提示、tombstone、Keychain token、前后台 / BGTask 触发、401 登录失效确认重登 |
-| 自绘 RSSI + 代码组装空状态 | 已实现 |
-| 单元测试 | **81 个用例，0 失败**（`** TEST SUCCEEDED **`，2026-11-05，Xcode 27.2 / iPhone 17 模拟器） |
+| BLE 读数采集 | 已实现：连接后订阅心率 `0x2A37`、电量 `0x2A19`、温度 `0x2A6E`、Nordic UART TX `6E400003-…`；各特征独立解析器，失败静默丢弃并写本地日志 |
+| 本地持久化 | 已实现（SQLite3，含同步字段；迁移 **v5** 新增 `readings` 表，本地保留 7 天；v4 区分 `advertised_name` 与用户别名并记录三态 patch） |
+| 网络层 | 已实现（URLSession + Codable；设备/型号对齐 openapi 0.3.3；读数查询与 summary 按冻结的 0.4.0 契约） |
+| 同步 | **已实现**：匿名登录、增量拉取、批量推送（设备 ≤100/批 + 读数 ≤200/批、幂等键含读数）、冲突提示、tombstone、Keychain token、前后台 / BGTask 触发、断网累积补传 |
+| 自绘 RSSI + 自绘折线图 + 代码组装空状态 | 已实现（读数图表纯 `draw(_:)`，无第三方图表库） |
+| 单元测试 | **122 个用例，0 失败**（`** TEST SUCCEEDED **`，2026-11-05，Xcode 27.2 / iPhone 17 模拟器） |
 | 模拟器构建 | **通过**（`xcodebuild ... build`，`** BUILD SUCCEEDED **`） |
-| CI | **GitHub Actions 已实际运行 success**（tag 运行 [41913477079](https://github.com/platojobs/codemagic/actions/runs/41913477079)，macos-15 + Xcode 16.4；并行 `build-test`（81 单测）与 `e2e-contract`（87 项）；artifact 上传；同 sha 的 main 运行按 concurrency 去重被取消）；`codemagic.yaml` 作为可选替代保留但未验证 |
-| 真机 BLE / 签名 | **未验证**：本机无真机与 Apple 开发者账号，需自行验证（见第 9 节） |
-| 真实后端同步 | **契约已联调**：`scripts/e2e-contract.sh` 对本地 `PJGoIoT` 0.3.3（`STORE=fixture`）跑 **87 项断言，全部 PASS**；App 内同步 UI 仍需真机手动验证 |
+| CI | **GitHub Actions**：macOS runner 上并行 `build-test`（122 单测）与 `e2e-contract`（106 项）；v0.4.0 的 run 链接在发布后补充（v0.3.6 运行 [41913477079](https://github.com/platojobs/codemagic/actions/runs/41913477079)）；`codemagic.yaml` 作为可选替代保留但未验证 |
+| 真机 BLE / 签名 | **未验证**：本机无真机与 Apple 开发者账号；读数采集与图表需真机 / 可穿戴设备验证（见第 9 节） |
+| 真实后端同步 | **契约已联调**：`scripts/e2e-contract.sh` 对本地 `PJGoIoT` main `7acab36`（`STORE=fixture`）跑 **106 项断言，全部 PASS**（含读数推送/倒序/summary/重复 id/NaN 400）；App 内同步 UI 仍需真机手动验证 |
 
 ---
 
@@ -97,7 +98,7 @@ Config/
 scripts/
 ├── e2e-contract.sh         # 启动本地 fixture 服务 + 运行联调 runner（CI 的 e2e-contract job 复用）
 └── e2e-contract.swift      # 独立 Swift 可执行 runner，真实 URLSession 直连 localhost
-codemagicTests/             # 81 个 XCTest 用例
+codemagicTests/             # 122 个 XCTest 用例
 docs/
 ├── architecture.md
 ├── consistency.md
@@ -178,8 +179,9 @@ cd /path/to/codemagic
 - 联调 runner：`scripts/e2e-contract.swift` 由 `swiftc` 编译为独立 macOS 可执行文件，使用真实 `URLSession` 直连 `127.0.0.1`，**不走 iOS 模拟器**。
 - 依赖本地 Go 服务与 fixture 数据；GitHub Actions `ios.yml` 的 `e2e-contract` job 会 checkout `PJGoIoT` 并执行同一脚本（`PJGOIOT_DIR` 指向 checkout 目录），不使用 `|| true`。
 - CI 中 `build-test` 与 `e2e-contract` 并行，按 `github.sha` 去重（同一次提交的 main push 与 tag 只跑一轮）。
+- 读数断言（第 7 节）采用**能力门控**：探针 `GET .../readings/summary` 返回 404（后端尚未发布 readings）时输出 `[SKIP]` 且不计通过；后端上线后自动执行真实断言。本地 agent 以 `RATE_LIMIT_PER_MINUTE=0` 启动 fixture 服务，避免 ~100 次请求触发 429。
 
-本机 2026-11-05 实际运行（后端 0.3.3，端口 8080）：
+本机 2026-11-05 实际运行（后端 main `7acab36`，端口 8080）：
 
 ```
 [e2e] health 200
@@ -192,13 +194,14 @@ cd /path/to/codemagic
 [4. 同 Idempotency-Key 重放] 5/5 PASS
 [5. LWW 冲突：旧版本不静默覆盖新版本] 9/9 PASS
 [6. 无 token 401 / 跨用户 404] 9/9 PASS（含复合键越权）
+[7. 设备读数 readings（推送 / 倒序 / summary / 重复 id / NaN）] 19/19 PASS
 
 === E2E 合同联调结果 ===
-通过：87 项，失败：0 项
+通过：106 项，跳过：0 项，失败：0 项
 结论：PASS
 ```
 
-> 3.5 断言固件全部带 `vendor` 与 `compatibility.platforms`、配件全部带 `compatibility` 对象；3.6 断言已注册型号补全 `deviceType` / `vendor` / `compatibility`，未注册型号三者均为 `null` 但 `alias` / `group` 保留；3.7 断言扫描只写 `advertisedName`、编辑别名不覆盖广播名、缺省 `group` 保留原值、`"group": ""` 显式清除、同内容重放与换键均不 409。
+> 读数一节断言：推送 3 条 → `appliedReadings=3` / `skippedReadings=0`；`GET readings` 返回 3 条且按 `recordedAt` 倒序；`summary` 的 count/min/max/avg/last/unit/window 全部正确；重复 id 再推返回 200、`appliedReadings=0`、`skippedReadings=3`；`value="NaN"` 返回 400。3.5 / 3.6 / 3.7 断言含义同前（固件 vendor/compatibility、未注册型号 null 降级、别名与广播名隔离、group 三态）。
 
 服务端日志写入 `.build/e2e/pjgoiot-server.log`；脚本退出时通过 `trap` 关闭后端进程。
 
@@ -229,7 +232,7 @@ cd /path/to/codemagic
 
 数据库位置：`Application Support/com.platojobs.codemagic/codemagic.sqlite`。磁盘库失败时回退内存库，并在「我的」页提示。
 
-迁移：`PRAGMA user_version` 线性递增。v1 建五张表；**v2（v0.2.0）** 为 `saved_devices` 增加 `platform`（默认 `ios`）与 `external_id`，由 `peripheral_id` 大写回填，并建立 `(platform, external_id) WHERE deleted_at IS NULL` 唯一索引；**v3（v0.3.3）** 增加 `device_type TEXT`（可空，旧库升级后为 `NULL`，由云端详情回填）；**v4（v0.3.6）** 增加 `advertised_name TEXT`（由历史 `name` 回填广播名）与 `alias_patch` / `advertised_name_patch` / `group_patch`（`absent` / `clear` / `set` 三态）。旧库升级后无需重装或清数据。
+迁移：`PRAGMA user_version` 线性递增。v1 建五张表；**v2（v0.2.0）** 为 `saved_devices` 增加 `platform`（默认 `ios`）与 `external_id`，由 `peripheral_id` 大写回填，并建立 `(platform, external_id) WHERE deleted_at IS NULL` 唯一索引；**v3（v0.3.3）** 增加 `device_type TEXT`（可空，旧库升级后为 `NULL`，由云端详情回填）；**v4（v0.3.6）** 增加 `advertised_name TEXT`（由历史 `name` 回填广播名）与 `alias_patch` / `advertised_name_patch` / `group_patch`（`absent` / `clear` / `set` 三态）；**v5（v0.4.0）** 新增 `readings` 表（`id` 主键、`device_id`、`metric`、`value`、`unit`、`recorded_at`、`sync_state`），并按 `(device_id, metric, recorded_at DESC)` 建索引，支撑最近 60 点查询与 7 天清理。旧库升级后无需重装或清数据。
 
 ---
 
@@ -241,11 +244,13 @@ cd /path/to/codemagic
 | --- | --- | --- |
 | `/api/v1/auth/anonymous` | `POST` | 返回 `{userId, token}`；token 存 Keychain |
 | `/api/v1/sync/changes?cursor=&limit=` | `GET` | 返回 `{changes[], nextCursor, hasMore}`，需 `Authorization: Bearer <token>` |
-| `/api/v1/sync/push` | `POST` | Body `{clientId, devices[]}`；Header `Idempotency-Key`；返回 `{applied[], conflicts[], nextCursor}` |
+| `/api/v1/sync/push` | `POST` | Body `{clientId, devices[], readings[]}`；`readings` 可选，≤500/批（客户端 ≤200）；Header `Idempotency-Key`；返回 `{applied[], conflicts[], nextCursor, appliedReadings, skippedReadings}` |
 | `/api/v1/device-types` | `GET` | 型号列表（`{items}`，兼容裸数组） |
 | `/api/v1/device-types/{type}` | `GET` | 型号元数据（不依赖 MAC） |
 | `/api/v1/device-types/{type}/catalog` | `GET` | 一次返回型号元数据 + `firmwares` + `accessories` |
 | `/api/v1/my/devices/ios/{externalId}` | `GET` | iOS 单台设备详情，需 Bearer token；跨用户 404 |
+| `/api/v1/my/devices/{platform}/{externalId}/readings` | `GET` | 读数列表，`metric` / `from` / `to` / `limit` / `cursor`；返回 `{items[], nextCursor, hasMore}`，倒序 |
+| `/api/v1/my/devices/{platform}/{externalId}/readings/summary` | `GET` | 24h 汇总，`metric` / `hours`；返回 `{metric, unit, count, min, max, avg, last, windowStart, windowEnd}` |
 
 错误体 `{"error":{"code","message"}}` 解析为 `AppError.api`（客户端码 `NET-002`，保留服务端 code）。字段解码容忍未知字段与缺失字段。
 
@@ -256,6 +261,14 @@ cd /path/to/codemagic
 - 设备详情：`GET /api/v1/my/devices/ios/{externalId}`（大写 UUID，Bearer token），云端优先、失败降级本地缓存
 
 字段（0.3.2/0.3.3）：`DeviceType` 为 `type, name, vendor, description, gattServices[{uuid,name,characteristics?}]`；`DeviceCatalog` 为 `deviceType, firmwares[{id,version,releaseNotes,releasedAt,vendor,compatibility}], accessories[{id,name,sku,description,vendor,compatibility}]`；`UserDevice` 为 `id, clientId, platform, externalId, mac, alias, advertisedName, group, deviceType, vendor, firmwareVersion, compatibility, updatedAt, deletedAt, serverSeq`。`deviceType` / `vendor` / `firmwareVersion` / `compatibility` 可为 `null`，客户端归一为 `nil`，展示层用「型号未知 / — / 暂无兼容性说明」，不渲染 `"null"`。`PushDevice` 的 `deviceType` 可选，未知时整体省略；`alias` / `advertisedName` / `group` 为三态（缺省省略 / `""` 显式清除 / 具体值），未上报字段不参与 LWW 与幂等哈希。错误码见 `docs/consistency.md` 第 4 节。
+
+### 7.3 设备读数（v0.4.0，契约已冻结）
+
+- 推送：`readings` 与设备并入同一 `POST /api/v1/sync/push`，客户端每批 ≤200；条目为 `{id(uuid), platform, externalId, metric, value, unit, recordedAt(RFC3339)}`。按 `id` 幂等，重复 id 返回 `skippedReadings` 而非报错；`readings` 为空时整个字段省略，兼容 0.3.3 后端。
+- 查询：`GET /api/v1/my/devices/{platform}/{externalId}/readings?metric=&from=&to=&limit=100&cursor=` → `{items[], nextCursor, hasMore}`，按 `recordedAt` 倒序。
+- 汇总：`GET .../readings/summary?metric=&hours=24` → `{metric, unit, count, min, max, avg, last, windowStart, windowEnd}`。
+- 保留：服务端 90 天；客户端本地 7 天（启动与同步成功后清理已同步数据，未上传读数保留至补传）。
+- 采集：CoreBluetooth notify 订阅心率 `0x2A37`、电量 `0x2A19`、温度 `0x2A6E`、Nordic UART TX `6E400003-…`；解析规则见 `docs/consistency.md` 3.7。解析失败静默丢弃并写本地日志（分类「读数」），不崩溃、不写脏数据。
 
 ---
 
@@ -299,6 +312,8 @@ cd /path/to/codemagic
 - [ ] 真实 BLE 扫描能否发现设备、名称 / 标识符 / RSSI 是否随距离变化。
 - [ ] 连接设备后的状态流转、断开事件，以及 12s 连接超时。
 - [ ] 断开规则在设备离开范围后是否按预期触发（10s 未出现判定）。
+- [ ] 读数采集：真实可穿戴设备的 notify 频率、心率 / 电量 / 温度 / NUS 实际帧格式是否与解析器假设一致。
+- [ ] 设备详情「数据」区在真机上的图表渲染、指标切换与离线标注。
 - [ ] RSSI 阈值规则的触发 / 恢复重新武装。
 - [ ] 后台 / 锁屏后的扫描与回调行为（当前未申请后台蓝牙模式）。
 - [ ] 真实后端域名下的产品 / 市场 / 设备详情 UI（服务端契约已由 E2E 覆盖，Release mock 尚未验证 0.3.3 端点与新字段）。
@@ -308,15 +323,17 @@ cd /path/to/codemagic
 
 其他限制：
 
-- 模拟器无真实蓝牙，状态为 `unsupported`；产品 / 市场 / 详情依赖网络，需运行 0.3.3 的本地 Go 服务或已更新到 0.3.3 的 mock。
-- 未实现真实 GATT 服务发现 / 读写 / OTA，GATT 仅展示 catalog 返回的元数据。
-- 契约已用本地 fixture 服务端到端验证（87 项断言 PASS）；App 内的 Keychain token、BGTask 调度与真实网络环境仍需真机验证。
+- 模拟器无真实蓝牙，状态为 `unsupported`；产品 / 市场 / 详情依赖网络，需运行包含 readings 链路的本地 Go 服务或已更新的 mock。
+- 已实现 GATT 服务发现与四个读数特征的 notify 订阅；**未实现特征写入 / OTA**，GATT 元数据仍来自 catalog。
+- 契约已用本地 fixture 服务端到端验证（106 项断言 PASS）；App 内的 Keychain token、BGTask 调度与真实网络环境仍需真机验证。
+- 后端 `PJGoIoT` 已合入 readings（main `7acab36`），但**尚未打 v0.4.0 tag**；iOS 本轮按冻结契约实现，CI 若 checkout 到无 readings 的后端，e2e 第 7 节会明确 SKIP。
 - Release 签名与 App Store 上架未验证（无 Apple 开发者账号 / 证书）。
 
 ---
 
 ## 10. 版本记录
 
+- `v0.4.0`：接入设备读数链路（`MARKETING_VERSION 0.4.0` / build 11，tag `v0.4.0`）。连接后订阅心率 `0x2A37` / 电量 `0x2A19` / 温度 `0x2A6E` / Nordic UART TX，四个独立解析器（失败静默丢弃 + 本地「读数」日志）；SQLite 迁移 **v5** 新增 `readings` 表并做 7 天保留清理；读数并入 `/sync/push`（≤200/批，按 `id` 幂等，幂等键含读数）；设备详情新增「数据」区（真实指标选择 + 最近 60 点自绘折线图 + 24h 汇总 + 最近记录 + 离线标注 + 三种真实空状态）；单测 122 个，E2E 106 项（新增 19 项读数断言）。后端 `PJGoIoT` 使用当前 main（尚未打 v0.4.0 tag）。
 - `v0.3.6`：对齐 `openapi.yaml` **0.3.3**（`MARKETING_VERSION 0.3.6` / build 10，tag `v0.3.6`）。`UserDevice` 新增 `advertisedName`，本地迁移 **v4** 区分用户别名与广播名；`alias` / `advertisedName` / `group` 采用 `Patch` 三态（未修改省略、`""` 显式清除、具体值上报），清空分组上报 `"group": ""` 且再次同步不复活；缺省字段不参与 LWW 与幂等哈希；冲突响应缺省字段按 absent 解析；单测 81 个，E2E 87 项（新增 3.7 的 16 项断言）。
 - `v0.3.5`：CI 与 Android 对齐（`MARKETING_VERSION 0.3.5` / build 9，tag `v0.3.5`）。`actions/checkout` / `upload-artifact` / `setup-go` 全部升到 **v7**，消除 Node 20 弃用告警；新增并行 `e2e-contract` job（checkout `PJGoIoT` + `setup-go` 读 go.mod + 运行 `scripts/e2e-contract.sh`，失败上传日志）；`concurrency` 改为按 `github.sha` 分组去重；真实 run 41906015761 两个 job 均 success（74 单测 + 71 项 E2E）。
 - `v0.3.4`：CI 落地（`MARKETING_VERSION 0.3.4` / build 8，tag `v0.3.4`）。新增 `.github/workflows/ios.yml`（macos-15 + Xcode 16.4，build + 74 单测 + xcresult artifact，仅 main/tag 触发）；GitHub Actions 首次真实运行 success（run 41902292283）；`codemagic.yaml` 保留为可选替代但未验证。

@@ -4,7 +4,7 @@
 
 - Android 侧口径以 `PKotlinApp/README.md` 与 `PJGoIoT/api/openapi.yaml` 为准。
 - iOS 侧以本仓库 `README.md`、`docs/architecture.md` 为准。
-- 后端 `openapi.yaml` 当前标注版本 **0.3.3**（本地 `PJGoIoT` tag `v0.3.3`）。iOS v0.3.6（`MARKETING_VERSION 0.3.6`，build 10）契约对齐 0.3.3：`UserDevice` 新增 `advertisedName`，本地区分「用户别名 alias」与「广播名 advertisedName」；`alias` / `advertisedName` / `group` 支持**缺省 / 显式清除 / 设置**三态，缺省字段不参与 LWW 与幂等哈希；冲突响应中缺省字段按 absent 解析。0.3.2 的 `deviceType` / `vendor` / `firmwareVersion` / `compatibility` 与 catalog `vendor` / `compatibility` 保持不变。
+- 后端 `openapi.yaml` 当前标注版本 **0.3.3**，但 `PJGoIoT` main 已合入读数链路（提交 `292e493`，**尚未打 v0.4.0 tag**）。iOS v0.4.0（`MARKETING_VERSION 0.4.0`，build 11）按冻结的 readings 契约实现：推送 `readings`（≤500/批、按 `id` 幂等）、查询 `readings`（倒序、cursor）、`readings/summary`（24h min/max/avg/last）；服务端保留 90 天，客户端本地保留 7 天。0.3.3 的 `advertisedName` 与三态语义保持不变。
 
 ---
 
@@ -33,7 +33,7 @@ iOS 设备详情页独立于底部导航：`Modules/Devices/Scenes/DeviceDetailV
 | 产品 | 网络型号库 | Retrofit `GET api/products` | `GET /api/v1/device-types` + `GET /api/v1/device-types/{type}/catalog` |
 | 市场 | 网络配件与固件信息 | Retrofit `GET api/market` | `GET /api/v1/device-types/{type}/catalog` 聚合 firmware + accessories |
 | 我的 | 系统权限状态 + 本地扫描日志 + 版本信息 + 同步状态 | 系统 API + Room `scan_logs` + 同步引擎 | `CBManager.authorization` + SQLite `scan_logs` + `SyncEngine` 状态 |
-| 设备详情 | 连接蓝牙后拉取设备信息，失败降级本地缓存 | Retrofit `GET /api/v1/devices/{mac}` + Room 缓存 | `GET /api/v1/my/devices/ios/{externalId}`（复合键）优先；云端字段缺失或断网时降级 SQLite `device_info_cache` / `saved_devices` |
+| 设备详情 | 连接蓝牙后拉取设备信息，失败降级本地缓存；读数来自本地采集 + 云端汇总 | Retrofit `GET /api/v1/devices/{mac}` + Room 缓存 | `GET /api/v1/my/devices/ios/{externalId}`（复合键）优先；云端字段缺失或断网时降级 SQLite `device_info_cache` / `saved_devices`；读数折线/最近记录读 SQLite `readings`，24h 汇总优先 `.../readings/summary`，失败回退本地计算并标注「离线：本地数据」 |
 | 同步（后台） | 后端 `/api/v1/sync/*` + Keychain token | Android 同步客户端 | `Core/Sync/SyncEngine` + `SyncAPIClient` + `KeychainTokenStore` |
 
 规则/日志/最近设备均为本地数据，**不依赖网络**；断网时首页、设备、我的仍可用，同步进入降级状态并保留待上传记录。
@@ -60,6 +60,8 @@ iOS 设备详情页独立于底部导航：`Modules/Devices/Scenes/DeviceDetailV
 | 用户设备详情（复合键） | `GET /api/v1/my/devices/ios/{externalId}` | 同左 | iOS 设备详情主数据源；需要 Bearer token；跨用户返回 404 |
 | 用户设备详情（按 MAC） | `GET /api/v1/my/devices/{mac}` | — | iOS 不再使用；仅 E2E 校验越权 |
 | 公共设备元数据（按 MAC） | `GET /api/v1/devices/{mac}` | 同左 | 仍可用，但**仅 Android 使用**；iOS 无 MAC 不走该端点 |
+| 读数查询 | — | `GET /api/v1/my/devices/{platform}/{externalId}/readings?metric=&from=&to=&limit=100&cursor=` | 返回 `{items[], nextCursor, hasMore}`，按 `recordedAt` 倒序 |
+| 读数汇总 | — | `GET /api/v1/my/devices/{platform}/{externalId}/readings/summary?metric=&hours=24` | 返回 `{metric, unit, count, min, max, avg, last, windowStart, windowEnd}` |
 
 Base URL 均由构建配置注入，**不写死在源码**：
 
@@ -205,11 +207,12 @@ iOS 端不再存在“历史端点”调用；唯一保留的旧路径 `/api/v1/
 - 推送省略 `group` 时服务端保留原分组；推送 `"group": ""` 显式清除；随后同内容重放与换幂等键均返回 200（不 409）；
 - 相同 `Idempotency-Key` 重放返回 `Idempotent-Replayed: true`，不新增变更；
 - 旧 `updatedAt` 推送触发 `server_newer` 冲突，服务端保留较新版本；
-- 无 token 返回 401 `UNAUTHORIZED`；第二用户访问他人设备（按 MAC 与复合键）均返回 404 `NOT_FOUND`。
+- 无 token 返回 401 `UNAUTHORIZED`；第二用户访问他人设备（按 MAC 与复合键）均返回 404 `NOT_FOUND`；
+- 读数：推送 3 条（`appliedReadings=3`）→ 查询按 `recordedAt` 倒序 → `summary` 的 count/min/max/avg/last/unit/window 正确 → 重复 id 推送 `appliedReadings=0`、`skippedReadings=3` → 非法 `NaN` 返回 400。
 
-当前共 **87 项断言全部通过**（v0.3.6 联调记录）。
+当前共 **106 项断言全部通过**（v0.4.0 联调记录，后端 `PJGoIoT` main `7acab36`，尚未打 v0.4.0 tag）。
 
-运行记录见 `README.md` 第 4.2 节；该脚本已接入 GitHub Actions `ios.yml` 的 `e2e-contract` job（macOS runner，与 build 并行）。v0.3.6 的实际 CI 运行 [41913477079](https://github.com/platojobs/codemagic/actions/runs/41913477079) 中，`e2e-contract` 43s、`build-test` 249s，二者均 success。
+运行记录见 `README.md` 第 4.2 节；该脚本已接入 GitHub Actions `ios.yml` 的 `e2e-contract` job（macOS runner，与 build 并行）。若 CI checkout 到的后端尚未包含 readings，第 7 节会输出 `[SKIP]`（能力门控，不计通过、不伪造 PASS），其余断言照常执行。
 
 ### 3.6 市场筛选维度（真实字段，不造假分类）
 
@@ -223,6 +226,39 @@ iOS 端不再存在“历史端点”调用；唯一保留的旧路径 `/api/v1/
 - 两个维度可叠加；筛选结果为空时展示「没有符合筛选条件的条目」并提供清除筛选。
 - 刷新后若某厂商或某兼容性标签已不存在，自动清除失效筛选，避免卡在空结果。
 - 不提供「按价格 / 按分类」等接口未提供的维度。
+
+### 3.7 设备读数 readings（v0.4.0）
+
+**推送**：`POST /api/v1/sync/push` 请求体新增可选 `readings`（≤500/批；iOS 客户端按 200/批合并进同一批次）：
+
+```
+{"id": uuid, "platform": "ios", "externalId": "...", "metric": "...", "value": number, "unit": "...", "recordedAt": RFC3339}
+```
+
+- 服务端按 `id` 幂等：重复 id 计入 `skippedReadings`，仍返回 200；
+- 响应新增 `appliedReadings` / `skippedReadings`；旧后端缺省时 iOS 按 0 解析；
+- 读数与设备同批推送；断网时本地 `sync_state` 保持 `pending`，恢复后按相同内容与幂等键重试；`readings` 为空数组时整个字段省略，兼容 0.3.3 后端。
+
+**查询**：`GET /api/v1/my/devices/{platform}/{externalId}/readings?metric=&from=&to=&limit=100&cursor=` → `{items[], nextCursor, hasMore}`，**倒序**（最新在前）。
+
+**汇总**：`GET .../readings/summary?metric=&hours=24` → `{metric, unit, count, min, max, avg, last, windowStart, windowEnd}`。iOS 优先展示云端汇总；请求失败（未登录 / 离线 / 后端未上线）时用本地 24h 窗口计算同结构汇总，并标注「离线：本地数据」。
+
+**指标白名单**：`temperature` / `humidity` / `battery` / `heart_rate` / `co2` / `pressure` / `other`；白名单外文本指标一律归一为 `other`，不丢弃数值。
+
+**保留期**：服务端 90 天；iOS 本地 7 天。iOS 在启动与每次同步成功后清理 `recorded_at` 超过 7 天且**已同步**的读数（未上传读数保留至补传完成，避免离线静默丢数据）。
+
+**订阅特征与解析**：
+
+| 特征 | UUID | 解析规则 |
+| --- | --- | --- |
+| 心率测量 | `0x2A37` | 首字节 flags：bit0=0 → 下一字节 uint8；bit0=1 → 后两字节 uint16（LE）；只接受 1…300 bpm |
+| 电池电量 | `0x2A19` | 单字节百分比 0…100 |
+| 温度测量 | `0x2A6E` | 2 字节优先按 sint16 × 0.01 ℃；不合理时尝试 IEEE-754 半精度；4 字节按 IEEE-754 float32；只接受 -50…150 ℃ |
+| Nordic UART TX | `6E400003-B5A3-F393-E0A9-E50E24DCCA9E` | UTF-8 文本行，`metric=value`（未知指标 → `other`）或纯数字（指标 `other`、单位留空）；支持多行，单行失败只丢该行；>256 字节或单行 >64 字符拒收 |
+
+解析失败（空帧、NaN/Inf、越界、非 UTF-8、超长）**静默丢弃并写本地日志（分类「读数」）**，不崩溃、不写脏数据。
+
+**展示**：设备详情「数据」区依次为指标选择（仅该设备真实已有指标）→ 最近 60 点自绘折线图（`draw(_:)` 手绘坐标轴/网格/折线/数据点，支持 0/1/60 点）→ 24h 汇总（min/max/avg/last）→ 最近记录。无读数展示「连接设备后开始采集」；蓝牙未授权提示前往系统设置；不展示任何伪造数据。
 
 ---
 
@@ -274,6 +310,8 @@ iOS 端不再存在“历史端点”调用；唯一保留的旧路径 `/api/v1/
 | 设备详情网络失败且无缓存 | 失败空状态 +「重试读取设备信息」 |
 | 设备详情网络失败但有缓存 | **降级显示缓存**，并标注缓存时间与错误码，不白屏 |
 | 设备详情云端型号为空（`deviceType = null`） | 型号显示「型号未知」；厂商 / 固件显示「—」；兼容性显示「暂无兼容性说明」；**alias、分组、最近出现时间照常展示** |
+| 设备详情无读数 | 「数据」区只展示一条真实空状态「连接设备后开始采集」；蓝牙未授权时改为提示前往系统设置；不渲染空图表、不造 0 值 |
+| 设备详情有本地读数但云端汇总失败 | 展示本地 24h 汇总与最近 60 点，并标注「数据来源：离线：本地数据」 |
 | 我的扫描日志为空 | 空状态说明扫描会话会自动记录 |
 | 我的同步未完成 / 失败 | 显示上次同步时间、待上传条数、错误码与降级说明；本地功能不受影响 |
 | 我的同步冲突 | 明确提示「另一台设备改过这条」，并说明已采用云端版本 |
@@ -318,6 +356,8 @@ iOS 迁移版本：
 - v1：五张业务表，含上述同步字段。
 - v2（v0.2.0）：`saved_devices` 增加 `platform`（默认 `ios`）与 `external_id`，由 `peripheral_id` 大写回填；唯一索引 `(platform, external_id) WHERE deleted_at IS NULL`。
 - v3（v0.3.3，对齐 openapi 0.3.2）：`saved_devices` 增加 `device_type TEXT`（可空）；旧库升级后为 `NULL`，由设备详情拿到云端 `deviceType` 后回填。
+- v4（v0.3.6）：`saved_devices` 增加 `advertised_name TEXT`（广播名），以及 `alias_patch` / `advertised_name_patch` / `group_patch` 三态标记列，用于区分「未修改」与「显式清除」。
+- v5（v0.4.0）：新增 `readings` 表（`id`, `device_id`, `metric`, `value`, `unit`, `recorded_at`, `sync_state`），索引 `(device_id, metric, recorded_at DESC)` 支撑最近 60 点与 7 天清理。
 
 iOS 表结构（`codemagic.sqlite`）：
 
@@ -328,6 +368,7 @@ iOS 表结构（`codemagic.sqlite`）：
 | `scan_logs` | `id, category, level, message, created_at, updated_at, deleted_at, sync_state` |
 | `recent_devices` | `peripheral_id, name, rssi, last_seen_at, updated_at, deleted_at, sync_state` |
 | `device_info_cache` | `peripheral_id, payload(JSON), fetched_at, updated_at, deleted_at, sync_state` |
+| `readings` | `id, device_id, metric, value, unit, recorded_at, sync_state` |
 
 规则触发语义（两端一致）：
 
@@ -354,8 +395,8 @@ iOS 表结构（`codemagic.sqlite`）：
 
 **批量推送**
 
-- 取 `syncState != synced` 的记录（含 `pendingDelete` 的 tombstone），每批最多 100 条，按 `id` 排序。
-- `Idempotency-Key` 由批次内容（id / platform / externalId / updatedAt / deleted）做 SHA-256 派生，**重试网络失败时复用同一键**；内容变化则键自动变化，避免 409。
+- 取 `syncState != synced` 的记录（含 `pendingDelete` 的 tombstone），每批最多 100 条，按 `id` 排序；读数并入同一批次，每批最多 200 条，同样按 `id` 排序。
+- `Idempotency-Key` 由批次内容（设备字段 + 读数 `id`/`metric`/`value`/`unit`/`recordedAt`）规范化后派生，**重试网络失败时复用同一键**；内容变化则键自动变化，避免 409。读数按 `id` 幂等，重复条目由服务端计入 `skippedReadings`。
 - 成功：本批全部标记 `synced`；`conflicts` 中的记录写回云端版本并提示，不静默丢弃本地修改。
 - 失败：保留 `pending`，下次同步用相同键重试。
 

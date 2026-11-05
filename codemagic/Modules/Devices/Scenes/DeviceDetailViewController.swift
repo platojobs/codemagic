@@ -1,10 +1,24 @@
 import UIKit
 
-/// 设备详情：展示本地设备信息、云端厂商/固件/GATT/兼容性，网络失败时展示缓存。
+/// 设备详情：展示本地设备信息、云端厂商/固件/GATT/兼容性、本地读数图表与汇总。
 final class DeviceDetailViewController: UIViewController {
+    private enum RowKind: Equatable {
+        case value
+        case chart(points: [DeviceReading], unit: String)
+        case metricPicker
+        case emptyState
+    }
+
     private struct Row {
         let title: String
         let value: String
+        var kind: RowKind = .value
+
+        init(title: String, value: String, kind: RowKind = .value) {
+            self.title = title
+            self.value = value
+            self.kind = kind
+        }
     }
 
     private struct SectionModel {
@@ -64,7 +78,9 @@ final class DeviceDetailViewController: UIViewController {
     private func configureTableView() {
         tableView.translatesAutoresizingMaskIntoConstraints = false
         tableView.register(UITableViewCell.self, forCellReuseIdentifier: "DetailCell")
+        tableView.register(ReadingsChartCell.self, forCellReuseIdentifier: ReadingsChartCell.reuseIdentifier)
         tableView.dataSource = self
+        tableView.delegate = self
         tableView.rowHeight = UITableView.automaticDimension
         tableView.estimatedRowHeight = 52
         view.addSubview(tableView)
@@ -149,6 +165,7 @@ final class DeviceDetailViewController: UIViewController {
             localRows.append(Row(title: "MAC", value: product.mac.isEmpty ? "—" : product.mac))
         }
         sections.append(SectionModel(title: "设备信息", rows: localRows))
+        sections.append(makeDataSection())
 
         if let product = viewModel.product {
             if !product.gattServices.isEmpty {
@@ -176,6 +193,71 @@ final class DeviceDetailViewController: UIViewController {
         }
 
         return sections
+    }
+
+    /// 「数据」区：指标选择 → 最近 60 点折线图 → 24h 汇总 → 最近记录。
+    /// 没有读数时只保留一条真实空状态，不渲染空图表、不造数据。
+    private func makeDataSection() -> SectionModel {
+        let state = viewModel.readings
+        guard !state.metrics.isEmpty else {
+            return SectionModel(
+                title: "数据",
+                rows: [Row(title: "暂无读数", value: viewModel.readingsEmptyMessage, kind: .emptyState)]
+            )
+        }
+
+        var rows: [Row] = [
+            Row(
+                title: "指标",
+                value: state.selectedMetric?.displayName ?? "未选择",
+                kind: .metricPicker
+            ),
+            Row(
+                title: "最近 60 点",
+                value: state.hasData ? "\(state.points.count) 点" : "暂无读数",
+                kind: .chart(points: state.points, unit: state.unit)
+            ),
+        ]
+
+        if let summary = state.summary, summary.count > 0 {
+            let unit = summary.unit
+            rows.append(Row(title: "24 小时 · 最小", value: formatted(summary.minValue, unit: unit)))
+            rows.append(Row(title: "24 小时 · 最大", value: formatted(summary.maxValue, unit: unit)))
+            rows.append(Row(title: "24 小时 · 平均", value: formatted(summary.avg, unit: unit)))
+            rows.append(Row(title: "24 小时 · 最新", value: formatted(summary.last, unit: unit)))
+            rows.append(Row(title: "24 小时 · 条数", value: "\(summary.count) 条"))
+        } else {
+            rows.append(Row(title: "24 小时汇总", value: "暂无 24 小时内的读数"))
+        }
+
+        if state.isLoading {
+            rows.append(Row(title: "数据来源", value: "读取中…"))
+        } else if state.isOfflineLocalData {
+            rows.append(Row(title: "数据来源", value: "离线：本地数据"))
+        } else if state.isSummaryFromCloud {
+            rows.append(Row(title: "数据来源", value: "云端汇总"))
+        }
+
+        if state.recent.isEmpty {
+            rows.append(Row(title: "最近记录", value: "暂无记录"))
+        } else {
+            for reading in state.recent {
+                rows.append(
+                    Row(
+                        title: AppDateFormat.absolute(reading.recordedAt),
+                        value: reading.displayText
+                    )
+                )
+            }
+        }
+        return SectionModel(title: "数据", rows: rows)
+    }
+
+    private func formatted(_ value: Double?, unit: String) -> String {
+        guard let value else { return "—" }
+        let rounded = (value * 10).rounded() / 10
+        let text = rounded == rounded.rounded() ? String(Int(rounded)) : String(format: "%.1f", rounded)
+        return unit.isEmpty ? text : "\(text) \(unit)"
     }
 
     private func updateHeaderHeight() {
@@ -247,16 +329,77 @@ extension DeviceDetailViewController: UITableViewDataSource {
     }
 
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
-        let cell = tableView.dequeueReusableCell(withIdentifier: "DetailCell", for: indexPath)
         let row = sections[indexPath.section].rows[indexPath.row]
 
+        switch row.kind {
+        case .chart(let points, let unit):
+            guard let cell = tableView.dequeueReusableCell(
+                withIdentifier: ReadingsChartCell.reuseIdentifier,
+                for: indexPath
+            ) as? ReadingsChartCell else {
+                return UITableViewCell()
+            }
+            cell.configure(points: points, unit: unit)
+            return cell
+
+        case .metricPicker:
+            let cell = makeDetailCell(row: row, secondaryText: row.value)
+            cell.accessoryType = .disclosureIndicator
+            cell.selectionStyle = .default
+            return cell
+
+        case .emptyState:
+            return makeDetailCell(row: row, secondaryText: nil)
+
+        case .value:
+            let cell = makeDetailCell(row: row, secondaryText: row.value)
+            cell.accessoryType = .none
+            cell.selectionStyle = .none
+            return cell
+        }
+    }
+
+    private func makeDetailCell(row: Row, secondaryText: String?) -> UITableViewCell {
+        let cell = tableView.dequeueReusableCell(withIdentifier: "DetailCell")
+            ?? UITableViewCell(style: .value1, reuseIdentifier: "DetailCell")
         var configuration = cell.defaultContentConfiguration()
         configuration.text = row.title
-        configuration.secondaryText = row.value
+        configuration.secondaryText = secondaryText
         configuration.secondaryTextProperties.color = AppTheme.Palette.secondaryText
         configuration.secondaryTextProperties.numberOfLines = 0
         cell.contentConfiguration = configuration
-        cell.selectionStyle = .none
         return cell
+    }
+}
+
+// MARK: - UITableViewDelegate
+
+extension DeviceDetailViewController: UITableViewDelegate {
+    func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+        tableView.deselectRow(at: indexPath, animated: true)
+        let row = sections[indexPath.section].rows[indexPath.row]
+        guard row.kind == .metricPicker else { return }
+        presentMetricPicker()
+    }
+
+    private func presentMetricPicker() {
+        let metrics = viewModel.readings.metrics
+        guard metrics.count > 1 else { return }
+        let sheet = UIAlertController(title: "选择指标", message: nil, preferredStyle: .actionSheet)
+        for metric in metrics {
+            let isSelected = metric == viewModel.readings.selectedMetric
+            sheet.addAction(
+                UIAlertAction(title: isSelected ? "✓ \(metric.displayName)" : metric.displayName, style: .default) {
+                    [weak self] _ in
+                    self?.viewModel.selectReadingsMetric(metric)
+                }
+            )
+        }
+        sheet.addAction(UIAlertAction(title: "取消", style: .cancel))
+        if let popover = sheet.popoverPresentationController {
+            popover.sourceView = tableView
+            popover.sourceRect = tableView.rectForRow(at: IndexPath(row: 0, section: 0))
+        }
+        present(sheet, animated: true)
     }
 }

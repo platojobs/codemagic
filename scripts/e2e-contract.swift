@@ -35,7 +35,8 @@ private final class E2EClient {
         _ path: String,
         token: String? = nil,
         idempotencyKey: String? = nil,
-        json: Any? = nil
+        json: Any? = nil,
+        rawJSON: String? = nil
     ) -> HTTPResult {
         var request = URLRequest(url: url(for: path))
         request.httpMethod = method
@@ -45,7 +46,10 @@ private final class E2EClient {
         if let idempotencyKey {
             request.setValue(idempotencyKey, forHTTPHeaderField: "Idempotency-Key")
         }
-        if let json {
+        if let rawJSON {
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = Data(rawJSON.utf8)
+        } else if let json {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = try? JSONSerialization.data(withJSONObject: json, options: [.sortedKeys])
         }
@@ -88,6 +92,7 @@ private enum E2EError: Error {
 private final class Report {
     private(set) var passed = 0
     private(set) var failed = 0
+    private(set) var skipped = 0
 
     func check(_ condition: Bool, _ name: String, _ detail: String = "") {
         if condition {
@@ -98,6 +103,12 @@ private final class Report {
             let suffix = detail.isEmpty ? "" : " — \(detail)"
             print("  [FAIL] \(name)\(suffix)")
         }
+    }
+
+    /// 能力未上线时明确跳过（不计为通过，也不假装成功）。
+    func skip(_ name: String, _ detail: String) {
+        skipped += 1
+        print("  [SKIP] \(name) — \(detail)")
     }
 
     func section(_ title: String) {
@@ -165,6 +176,40 @@ private func madeDevice(
         device["deviceType"] = deviceType
     }
     return device
+}
+
+private func madeReading(
+    id: String,
+    platform: String,
+    externalID: String,
+    metric: String,
+    value: Double,
+    unit: String,
+    recordedAt: Date
+) -> [String: Any] {
+    [
+        "id": id,
+        "platform": platform,
+        "externalId": externalID,
+        "metric": metric,
+        "value": value,
+        "unit": unit,
+        "recordedAt": rfc3339(recordedAt),
+    ]
+}
+
+private func number(_ object: [String: Any], _ key: String) -> Double? {
+    (object[key] as? NSNumber)?.doubleValue
+}
+
+private func parsedDate(_ object: [String: Any], _ key: String) -> Date? {
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    if let date = formatter.date(from: text(object, key)) {
+        return date
+    }
+    formatter.formatOptions = [.withInternetDateTime]
+    return formatter.date(from: text(object, key))
 }
 
 private func compatibilityPlatforms(_ object: [String: Any]) -> [String] {
@@ -729,10 +774,152 @@ private func run() -> Int32 {
         report.check(errorCode(crossUserComposite.body) == "NOT_FOUND", "复合键错误码为 NOT_FOUND")
     }
 
+    // MARK: 7. 设备读数（readings）
+
+    report.section("7. 设备读数 readings（推送 / 倒序 / summary / 重复 id / NaN）")
+    let readingsPath = "my/devices/ios/\(iosExternalID)/readings"
+    let readingsSummaryPath = "\(readingsPath)/summary?metric=heart_rate&hours=24"
+    let probe = client.request("GET", readingsSummaryPath, token: tokenA)
+    if probe.status == 404 {
+        // 后端 readings 尚未发布（当前 PJGoIoT main 仍为 v0.3.3）：
+        // 明确跳过，不用 || true 或伪造 PASS；后端上线后本节自动执行真实断言。
+        report.skip(
+            "readings 契约",
+            "GET \(readingsSummaryPath) 返回 404（后端尚未实现 readings，能力门控跳过）"
+        )
+    } else {
+        let now = Date()
+        let readingIDs = [
+            "33333333-3333-4333-8333-333333333331",
+            "33333333-3333-4333-8333-333333333332",
+            "33333333-3333-4333-8333-333333333333",
+        ]
+        let readingValues: [Double] = [61, 72, 65]
+        let readingTimes = [
+            now.addingTimeInterval(-180),
+            now.addingTimeInterval(-120),
+            now.addingTimeInterval(-60),
+        ]
+        let readings = zip(readingIDs.indices, readingIDs).map { index, id in
+            madeReading(
+                id: id,
+                platform: "ios",
+                externalID: iosExternalID,
+                metric: "heart_rate",
+                value: readingValues[index],
+                unit: "bpm",
+                recordedAt: readingTimes[index]
+            )
+        }
+
+        let readingsPush = client.request(
+            "POST",
+            "sync/push",
+            token: tokenA,
+            idempotencyKey: "\(idempotencyKey)-readings",
+            json: ["clientId": clientID, "devices": [], "readings": readings]
+        )
+        let readingsPushObject = jsonObject(readingsPush.body) ?? [:]
+        report.check(
+            readingsPush.status == 200,
+            "推送读数返回 200",
+            "status=\(readingsPush.status) body=\(bodyText(readingsPush.body))"
+        )
+        report.check(
+            (readingsPushObject["appliedReadings"] as? NSNumber)?.intValue == 3,
+            "appliedReadings 为 3",
+            "appliedReadings=\(readingsPushObject["appliedReadings"] ?? "nil")"
+        )
+        report.check(
+            (readingsPushObject["skippedReadings"] as? NSNumber)?.intValue == 0,
+            "首次推送 skippedReadings 为 0",
+            "skippedReadings=\(readingsPushObject["skippedReadings"] ?? "nil")"
+        )
+
+        let listResponse = client.request(
+            "GET",
+            "\(readingsPath)?metric=heart_rate&limit=100",
+            token: tokenA
+        )
+        let listObject = jsonObject(listResponse.body) ?? [:]
+        let items = list(listObject["items"])
+        report.check(listResponse.status == 200, "查询读数返回 200", "status=\(listResponse.status)")
+        report.check(items.count == 3, "返回 3 条读数", "items=\(items.count)")
+        let dates = items.compactMap { parsedDate($0, "recordedAt") }
+        report.check(
+            dates.count == 3 && zip(dates, dates.dropFirst()).allSatisfy { $0 > $1 },
+            "读数按 recordedAt 倒序",
+            "dates=\(dates)"
+        )
+        report.check(
+            items.first.map { number($0, "value") == readingValues[2] } ?? false,
+            "首条为最新读数 65 bpm",
+            "first=\(items.first.map { "\(number($0, "value") ?? -1)" } ?? "nil")"
+        )
+
+        let summaryResponse = client.request("GET", readingsSummaryPath, token: tokenA)
+        let summaryObject = jsonObject(summaryResponse.body) ?? [:]
+        report.check(summaryResponse.status == 200, "summary 返回 200", "status=\(summaryResponse.status)")
+        report.check(
+            (summaryObject["count"] as? NSNumber)?.intValue == 3,
+            "summary count 为 3",
+            "body=\(bodyText(summaryResponse.body))"
+        )
+        report.check(number(summaryObject, "min") == 61, "summary min 为 61")
+        report.check(number(summaryObject, "max") == 72, "summary max 为 72")
+        report.check(number(summaryObject, "last") == 65, "summary last 为 65")
+        report.check(number(summaryObject, "avg") == 66, "summary avg 为 66")
+        report.check(text(summaryObject, "unit") == "bpm", "summary unit 为 bpm")
+        report.check(
+            !text(summaryObject, "windowStart").isEmpty && !text(summaryObject, "windowEnd").isEmpty,
+            "summary 包含 windowStart / windowEnd"
+        )
+
+        let duplicatePush = client.request(
+            "POST",
+            "sync/push",
+            token: tokenA,
+            idempotencyKey: "\(idempotencyKey)-readings-dup",
+            json: ["clientId": clientID, "devices": [], "readings": readings]
+        )
+        let duplicateObject = jsonObject(duplicatePush.body) ?? [:]
+        report.check(
+            duplicatePush.status == 200,
+            "重复 id 推送返回 200（幂等，不报错）",
+            "status=\(duplicatePush.status)"
+        )
+        report.check(
+            (duplicateObject["appliedReadings"] as? NSNumber)?.intValue == 0,
+            "重复 id appliedReadings 为 0",
+            "body=\(bodyText(duplicatePush.body))"
+        )
+        report.check(
+            (duplicateObject["skippedReadings"] as? NSNumber)?.intValue == 3,
+            "重复 id skippedReadings 为 3",
+            "body=\(bodyText(duplicatePush.body))"
+        )
+
+        let nanBody = """
+        {"clientId":"\(clientID)","devices":[],"readings":[{"id":"33333333-3333-4333-8333-333333333334","platform":"ios","externalId":"\(iosExternalID)","metric":"heart_rate","value":"NaN","unit":"bpm","recordedAt":"\(rfc3339(now))"}]}
+        """
+        let nanResponse = client.request(
+            "POST",
+            "sync/push",
+            token: tokenA,
+            idempotencyKey: "\(idempotencyKey)-readings-nan",
+            rawJSON: nanBody
+        )
+        report.check(
+            nanResponse.status == 400,
+            "非法 NaN 值返回 400",
+            "status=\(nanResponse.status) body=\(bodyText(nanResponse.body))"
+        )
+    }
+
     // MARK: 汇总
 
     print("\n=== E2E 合同联调结果 ===")
-    print("通过：\(report.passed) 项，失败：\(report.failed) 项")
+    print("通过：\(report.passed) 项，跳过：\(report.skipped) 项，失败：\(report.failed) 项")
     if report.failed > 0 {
         print("结论：FAIL")
         return 1

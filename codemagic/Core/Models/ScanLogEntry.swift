@@ -6,6 +6,7 @@ enum ScanLogCategory: String, Codable, CaseIterable {
     case device
     case rule
     case sync
+    case reading
 
     var title: String {
         switch self {
@@ -13,6 +14,7 @@ enum ScanLogCategory: String, Codable, CaseIterable {
         case .device: return "设备"
         case .rule: return "规则"
         case .sync: return "同步"
+        case .reading: return "读数"
         }
     }
 }

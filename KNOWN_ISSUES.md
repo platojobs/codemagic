@@ -1,24 +1,25 @@
 # KNOWN_ISSUES
 
-记录当前版本（v0.3.6）已知、且本机无法闭环验证的问题。已修复项不在此列。
+记录当前版本（v0.4.0）已知、且本机无法闭环验证的问题。已修复项不在此列。
 
 ## 需用户在真实环境验证
 
-1. **真机 BLE 未验证**
+1. **真机 BLE 与读数采集未验证**
    - 模拟器无蓝牙硬件，`CBCentralManager.state` 为 `unsupported`；扫描、连接、RSSI 变化、断开事件均未在真机运行。
    - 需在真实 iPhone 上验证：首次授权弹窗、拒绝后跳系统设置、真实设备扫描与连接、12s 超时、规则触发。
+   - 读数采集虽已实现 GATT 发现 + notify 订阅，但真实可穿戴设备的 notify 频率与帧格式（心率 flags、温度编码、NUS 文本）未在真机核对；解析器只按规范与常见实现编写。
 2. **签名与分发未验证**
    - 本机无 Apple 开发者账号与证书，未执行 `archive` / `exportArchive`，未上架 App Store / TestFlight。
    - CI 与本地构建统一使用 `CODE_SIGNING_ALLOWED=NO`，只验证编译与测试。
 3. **CI**
-   - GitHub Actions `ios.yml` 已实际运行成功（tag 运行 [41913477079](https://github.com/platojobs/codemagic/actions/runs/41913477079)，macos-15 + Xcode 16.4；并行 `build-test` 81 单测与 `e2e-contract` 87 项断言均 PASS）；仅 push 到 `main` / tag 触发，PR 不跑（macOS runner 计费高），按 `github.sha` 去重。
+   - GitHub Actions `ios.yml` 已实际运行成功（v0.3.6 tag 运行 [41913477079](https://github.com/platojobs/codemagic/actions/runs/41913477079)，macos-15 + Xcode 16.4；v0.4.0 的 run 链接在发布后补充）；并行 `build-test` 122 单测与 `e2e-contract`（后端支持 readings 时 106 项，否则第 7 节 SKIP）均 PASS；仅 push 到 `main` / tag 触发，PR 不跑（macOS runner 计费高），按 `github.sha` 去重。
    - CI 的 `e2e-contract` 使用 `platojobs/PJGoIoT` 默认分支与 `go.mod` 中的 Go 版本；后端后续若改变 fixture 数据或契约，CI 会先红，需要同步更新断言。
    - 根目录 `codemagic.yaml`（Codemagic）保留为可选替代方案，**仍未在 Codemagic 上运行**，不能作为当前 CI 证据。
    - 仓库 OAuth token 缺少 `workflow` scope，推送 `.github/workflows/*` 使用 SSH over 443（`ssh://git@ssh.github.com:443/platojobs/codemagic.git`），未改全局 git config。
 4. **后台同步调度未在真机验证**
    - `BGAppRefreshTask`（`com.platojobs.codemagic.sync`）已注册并在前后台切换时提交，但模拟器不执行后台刷新，实际触发频率与时长需真机 / Xcode Devices 观察。
 5. **App 内同步仍未在真机 + 真实后端闭环**
-   - 服务端契约已通过 `scripts/e2e-contract.sh` 对本地 `PJGoIoT` 0.3.3（`STORE=fixture`）完成 87 项断言（匿名登录、双平台推送、changes 形状、device-types/catalog 的 vendor/compatibility、复合键详情、UserDevice 新字段与 null 降级、别名/广播名分离、group 三态、幂等重放、LWW 冲突、401/404），结果 PASS（2026-11-05）。
+   - 服务端契约已通过 `scripts/e2e-contract.sh` 对本地 `PJGoIoT` main `7acab36`（`STORE=fixture`）完成 106 项断言（匿名登录、双平台推送、changes 形状、device-types/catalog 的 vendor/compatibility、复合键详情、UserDevice 新字段与 null 降级、别名/广播名分离、group 三态、幂等重放、LWW 冲突、401/404、读数推送/倒序/summary/重复 id/NaN 400），结果 PASS（2026-11-05）。
    - 该联调使用独立 Swift 可执行程序直连 localhost，**不覆盖** App 内的 Keychain token 读写、`BGAppRefreshTask` 调度、前后台触发与「我的」同步状态 UI；这些仍需真机 + 真实后端验证。
    - fixture 为内存存储，重启后数据清空；不等价于生产 PostgreSQL / 对象存储环境。
 
@@ -50,7 +51,7 @@
 
 ## 功能未实现（与 Android 对齐范围内）
 
-13. **GATT 服务发现 / 读写 / OTA 未实现**：GATT 表仅展示网络返回的元数据。
-14. **后台蓝牙未实现**：未申请 `bluetooth-central` 后台模式，退到后台后扫描会停止（同步不受影响）。
+13. **GATT 特征写入 / OTA 未实现**：已做服务发现与四个读数特征（心率 / 电量 / 温度 / NUS TX）的 notify 订阅；GATT 元数据仍来自 catalog，不支持写入与固件升级。
+14. **后台蓝牙未实现**：未申请 `bluetooth-central` 后台模式，退到后台后扫描与读数采集会停止（同步不受影响）。
 15. **规则提示仅落本地日志**：不发送系统通知 / 本地推送。
-16. **同步范围仅设备表**：`rules` / `scan_logs` / `recent_devices` / `device_info_cache` 保留同步字段但未参与推送，与后端当前 `devices` 实体范围一致。
+16. **同步范围仅设备与读数**：`rules` / `scan_logs` / `recent_devices` / `device_info_cache` 保留同步字段但未参与推送，与后端当前实体范围一致。

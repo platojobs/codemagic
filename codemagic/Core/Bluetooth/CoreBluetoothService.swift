@@ -7,12 +7,17 @@ protocol BluetoothServicing: AnyObject {
     var stateChangeHandler: ((BluetoothState) -> Void)? { get set }
     var discoveryHandler: ((ScannedDevice) -> Void)? { get set }
     var connectionHandler: ((BluetoothConnectionEvent) -> Void)? { get set }
+    /// notify 特征原始数据回调；解析与存储由上层完成。
+    var readingHandler: ((BluetoothReadingSample) -> Void)? { get set }
 
     func currentAuthorization() -> BluetoothAuthorization
     func startScanning()
     func stopScanning()
     func connect(peripheralID: UUID)
     func disconnect(peripheralID: UUID)
+    /// 连接后订阅心率 / 电池 / 温度 / Nordic UART TX（0x2A37 / 0x2A19 / 0x2A6E / 6E400003…）。
+    func startReading(peripheralID: UUID)
+    func stopReading(peripheralID: UUID)
 }
 
 /// CoreBluetooth 实现：真实扫描、连接与 RSSI 回调，回调统一在主线程投递。
@@ -22,6 +27,7 @@ final class CoreBluetoothService: NSObject, BluetoothServicing {
     var stateChangeHandler: ((BluetoothState) -> Void)?
     var discoveryHandler: ((ScannedDevice) -> Void)?
     var connectionHandler: ((BluetoothConnectionEvent) -> Void)?
+    var readingHandler: ((BluetoothReadingSample) -> Void)?
 
     // MARK: - State
 
@@ -37,6 +43,9 @@ final class CoreBluetoothService: NSObject, BluetoothServicing {
     private var lastEmit: [UUID: (rssi: Int, date: Date)] = [:]
     private var wantsScanning = false
     private var connectTimeoutWorkItem: DispatchWorkItem?
+    /// 需要订阅读数的外设；连接成功或已连接时开始服务发现。
+    private var readingPeripheralID: UUID?
+    private var notifiedCharacteristics: [CBUUID: CBCharacteristic] = [:]
 
     // MARK: - Init
 
@@ -112,6 +121,29 @@ final class CoreBluetoothService: NSObject, BluetoothServicing {
     func disconnect(peripheralID: UUID) {
         guard let peripheral = peripheral(for: peripheralID) else { return }
         centralManager.cancelPeripheralConnection(peripheral)
+    }
+
+    func startReading(peripheralID: UUID) {
+        readingPeripheralID = peripheralID
+        guard let peripheral = peripheral(for: peripheralID), peripheral.state == .connected else {
+            // 尚未连接：didConnect 后统一开始服务发现。
+            return
+        }
+        peripheral.delegate = self
+        peripheral.discoverServices(nil)
+    }
+
+    func stopReading(peripheralID: UUID) {
+        if readingPeripheralID == peripheralID {
+            readingPeripheralID = nil
+        }
+        let target = peripheral(for: peripheralID)
+        for (_, characteristic) in notifiedCharacteristics {
+            if characteristic.service?.peripheral === target {
+                target?.setNotifyValue(false, for: characteristic)
+            }
+        }
+        notifiedCharacteristics.removeAll()
     }
 
     // MARK: - Private
@@ -197,6 +229,11 @@ extension CoreBluetoothService: CBCentralManagerDelegate {
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
         connectTimeoutWorkItem?.cancel()
         connectTimeoutWorkItem = nil
+        peripheral.delegate = self
+        if readingPeripheralID == peripheral.identifier {
+            // 只订阅已知读数特征；服务发现失败由 CoreBluetooth 回调，不影响连接事件。
+            peripheral.discoverServices(nil)
+        }
         connectionHandler?(.connected(peripheralID: peripheral.identifier))
     }
 
@@ -233,4 +270,49 @@ extension CoreBluetoothService: CBCentralManagerDelegate {
 
 // MARK: - CBPeripheralDelegate
 
-extension CoreBluetoothService: CBPeripheralDelegate {}
+extension CoreBluetoothService: CBPeripheralDelegate {
+    func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
+        guard readingPeripheralID == peripheral.identifier else { return }
+        guard error == nil else { return }
+        for service in peripheral.services ?? [] {
+            // 不限定服务 UUID：部分设备把 Nordic UART 放在自定义服务下，
+            // 只有特征 UUID 是可靠的。
+            peripheral.discoverCharacteristics(nil, for: service)
+        }
+    }
+
+    func peripheral(
+        _ peripheral: CBPeripheral,
+        didDiscoverCharacteristicsFor service: CBService,
+        error: Error?
+    ) {
+        guard readingPeripheralID == peripheral.identifier else { return }
+        guard error == nil else { return }
+        for characteristic in service.characteristics ?? [] {
+            guard ReadingCharacteristic.from(uuid: characteristic.uuid) != nil else { continue }
+            guard characteristic.properties.contains(.notify) || characteristic.properties.contains(.indicate) else {
+                continue
+            }
+            notifiedCharacteristics[characteristic.uuid] = characteristic
+            peripheral.setNotifyValue(true, for: characteristic)
+        }
+    }
+
+    func peripheral(
+        _ peripheral: CBPeripheral,
+        didUpdateValueFor characteristic: CBCharacteristic,
+        error: Error?
+    ) {
+        guard error == nil,
+              let data = characteristic.value,
+              let kind = ReadingCharacteristic.from(uuid: characteristic.uuid)
+        else { return }
+        let sample = BluetoothReadingSample(
+            peripheralID: peripheral.identifier,
+            characteristic: kind,
+            data: data,
+            receivedAt: Date()
+        )
+        readingHandler?(sample)
+    }
+}

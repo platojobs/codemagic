@@ -12,6 +12,8 @@ final class SyncEngine {
         var pushed: Int = 0
         var conflicts: Int = 0
         var idempotentReplays: Int = 0
+        var pushedReadings: Int = 0
+        var skippedReadings: Int = 0
     }
 
     /// 「我的」页展示的同步状态。
@@ -34,6 +36,7 @@ final class SyncEngine {
     private let tokenStore: TokenStoring
     private let metadataStore: SyncMetadataStore
     private let deviceStore: SavedDeviceStore
+    private let readingsStore: ReadingsStore
     private let logStore: ScanLogStore
     private let now: () -> Date
     private let pageLimit: Int
@@ -47,6 +50,7 @@ final class SyncEngine {
         tokenStore: TokenStoring,
         metadataStore: SyncMetadataStore,
         deviceStore: SavedDeviceStore,
+        readingsStore: ReadingsStore,
         logStore: ScanLogStore,
         pageLimit: Int = 200,
         maxPages: Int = 10,
@@ -56,6 +60,7 @@ final class SyncEngine {
         self.tokenStore = tokenStore
         self.metadataStore = metadataStore
         self.deviceStore = deviceStore
+        self.readingsStore = readingsStore
         self.logStore = logStore
         self.pageLimit = pageLimit
         self.maxPages = maxPages
@@ -336,52 +341,78 @@ final class SyncEngine {
 
     // MARK: - Push
 
+    /// 一个批次内包含设备与读数：设备 ≤100、读数 ≤200；两者共用同一个幂等键与请求体。
+    /// 读数与设备无关时，后续批次 devices 为空数组，仍是同一 `/sync/push` 契约。
+    private struct PushBatch {
+        let devices: [SavedDevice]
+        let readings: [DeviceReading]
+    }
+
     private func pushPending(
         token: String,
         summary: Summary,
         completion: @escaping (Result<Summary, AppError>) -> Void
     ) {
-        let pending: [SavedDevice]
+        let pendingDevices: [SavedDevice]
+        let pendingReadings: [DeviceReading]
         do {
-            pending = try deviceStore.fetchPending()
+            pendingDevices = try deviceStore.fetchPending()
+            pendingReadings = try readingsStore.fetchPending()
         } catch {
-            completion(.failure(.database("读取待上传设备失败：\(error)")))
+            completion(.failure(.database("读取待上传数据失败：\(error)")))
             return
         }
 
-        guard !pending.isEmpty else {
+        guard !pendingDevices.isEmpty || !pendingReadings.isEmpty else {
+            pruneReadings()
             completion(.success(summary))
             return
         }
 
-        let chunks = stride(from: 0, to: pending.count, by: 100).map {
-            Array(pending[$0..<min($0 + 100, pending.count)])
+        var batches: [PushBatch] = []
+        var deviceIndex = 0
+        var readingIndex = 0
+        while deviceIndex < pendingDevices.count || readingIndex < pendingReadings.count {
+            let deviceEnd = min(deviceIndex + 100, pendingDevices.count)
+            let readingEnd = min(readingIndex + 200, pendingReadings.count)
+            batches.append(
+                PushBatch(
+                    devices: Array(pendingDevices[deviceIndex..<deviceEnd]),
+                    readings: Array(pendingReadings[readingIndex..<readingEnd])
+                )
+            )
+            deviceIndex = deviceEnd
+            readingIndex = readingEnd
         }
-        push(chunks: chunks, index: 0, token: token, summary: summary, completion: completion)
+        push(batches: batches, index: 0, token: token, summary: summary, completion: completion)
     }
 
     private func push(
-        chunks: [[SavedDevice]],
+        batches: [PushBatch],
         index: Int,
         token: String,
         summary: Summary,
         completion: @escaping (Result<Summary, AppError>) -> Void
     ) {
-        guard index < chunks.count else {
+        guard index < batches.count else {
+            pruneReadings()
             completion(.success(summary))
             return
         }
 
-        let chunk = chunks[index]
+        let batch = batches[index]
+        let devices = batch.devices.map(PushDevice.init(device:)).sorted { $0.id < $1.id }
+        let readings = makeReadingPayloads(batch.readings)
+
         // 排序保证同一批内容得到相同的幂等键；网络失败重试时服务端可命中缓存。
-        let devices = chunk.map(PushDevice.init(device:)).sorted { $0.id < $1.id }
-        let idempotencyKey = SyncHashing.idempotencyKey(for: devices)
+        let idempotencyKey = SyncHashing.idempotencyKey(for: devices, readings: readings)
 
         api.push(
             clientID: metadataStore.clientID,
             token: token,
             idempotencyKey: idempotencyKey,
-            devices: devices
+            devices: devices,
+            readings: readings
         ) { [weak self] result in
             guard let self else { return }
             switch result {
@@ -392,11 +423,17 @@ final class SyncEngine {
             case .success(let pushResult):
                 var summary = summary
                 summary.pushed += pushResult.applied.count
+                summary.pushedReadings += pushResult.appliedReadings
+                summary.skippedReadings += pushResult.skippedReadings
                 if pushResult.isIdempotentReplay { summary.idempotentReplays += 1 }
 
-                let ids = chunk.map(\.id)
                 do {
-                    try self.deviceStore.markSynced(ids: ids, at: self.now())
+                    try self.deviceStore.markSynced(ids: batch.devices.map(\.id), at: self.now())
+                    // 只有真正进入请求体的读数才标记已同步；无法归属的读数保持待上传。
+                    try self.readingsStore.markSynced(
+                        ids: readings.compactMap { UUID(uuidString: $0.id) },
+                        at: self.now()
+                    )
                     for conflict in pushResult.conflicts {
                         let message = self.applyPushConflict(conflict)
                         summary.conflicts += 1
@@ -408,7 +445,7 @@ final class SyncEngine {
                 }
 
                 self.push(
-                    chunks: chunks,
+                    batches: batches,
                     index: index + 1,
                     token: token,
                     summary: summary,
@@ -416,6 +453,38 @@ final class SyncEngine {
                 )
             }
         }
+    }
+
+    /// 读数需要设备的 `platform` / `externalId` 才能构造推送条目。
+    /// 设备被删除后其读数没有上报意义，直接清理，避免无限累积。
+    private func makeReadingPayloads(_ readings: [DeviceReading]) -> [PushReading] {
+        var devices: [UUID: SavedDevice] = [:]
+        var orphanDeviceIDs: Set<UUID> = []
+        for reading in readings {
+            if let cached = devices[reading.deviceID] {
+                if cached.deletedAt != nil { orphanDeviceIDs.insert(reading.deviceID) }
+                continue
+            }
+            guard let device = try? deviceStore.fetch(id: reading.deviceID) else { continue }
+            devices[reading.deviceID] = device
+            if device.deletedAt != nil { orphanDeviceIDs.insert(reading.deviceID) }
+        }
+        for deviceID in orphanDeviceIDs {
+            try? readingsStore.deleteAll(deviceID: deviceID)
+        }
+        return readings
+            .compactMap { reading in
+                guard let device = devices[reading.deviceID], device.deletedAt == nil else { return nil }
+                return PushReading(reading: reading, device: device)
+            }
+            .sorted { $0.id < $1.id }
+    }
+
+    /// 同步成功后执行 7 天清理；启动时的清理在 `AppEnvironment` 完成。
+    private func pruneReadings() {
+        let cutoff = now().addingTimeInterval(-7 * 24 * 60 * 60)
+        guard let removed = try? readingsStore.prune(olderThan: cutoff), removed > 0 else { return }
+        recordLog("本地读数清理：删除 \(removed) 条超过 7 天的记录")
     }
 
     /// 服务端拒绝本地版本时：写回云端版本并返回提示文案，绝不静默丢弃本地修改。
@@ -485,9 +554,13 @@ final class SyncEngine {
             metadataStore.reloginRequired = false
             status.needsRelogin = false
             let base = "同步完成：拉取 \(summary.pulled) 条，上传 \(summary.pushed) 条"
-            status.lastOutcomeMessage = summary.conflicts > 0
+            var message = summary.conflicts > 0
                 ? "\(base)，冲突 \(summary.conflicts) 条（已采用云端版本）"
                 : base
+            if summary.pushedReadings > 0 || summary.skippedReadings > 0 {
+                message += "，读数 \(summary.pushedReadings) 条（跳过重复 \(summary.skippedReadings) 条）"
+            }
+            status.lastOutcomeMessage = message
             status.lastConflictMessages = sessionConflictMessages
 
         case .failure(let error):

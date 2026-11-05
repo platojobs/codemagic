@@ -7,6 +7,7 @@ final class DeviceDetailViewModelTests: XCTestCase {
     private var productService: StubProductService!
     private var cacheStore: DeviceInfoCacheStore!
     private var savedDeviceStore: SavedDeviceStore!
+    private var readingsStore: ReadingsStore!
 
     override func setUpWithError() throws {
         testDatabase = try TestDatabase()
@@ -14,6 +15,7 @@ final class DeviceDetailViewModelTests: XCTestCase {
         productService = StubProductService()
         cacheStore = DeviceInfoCacheStore(database: testDatabase.database)
         savedDeviceStore = SavedDeviceStore(database: testDatabase.database)
+        readingsStore = ReadingsStore(database: testDatabase.database)
     }
 
     override func tearDownWithError() throws {
@@ -28,7 +30,8 @@ final class DeviceDetailViewModelTests: XCTestCase {
             bluetooth: bluetooth,
             productService: productService,
             cacheStore: cacheStore,
-            savedDeviceStore: savedDeviceStore
+            savedDeviceStore: savedDeviceStore,
+            readingsStore: readingsStore
         )
     }
 

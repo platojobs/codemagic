@@ -13,7 +13,7 @@ final class FakeSyncAPI: SyncAPIServicing {
 
     private(set) var authCount = 0
     private(set) var changesRequests: [(cursor: Int64, limit: Int, token: String)] = []
-    private(set) var pushRequests: [(clientID: String, token: String, key: String, devices: [PushDevice])] = []
+    private(set) var pushRequests: [(clientID: String, token: String, key: String, devices: [PushDevice], readings: [PushReading])] = []
 
     func createAnonymousSession(completion: @escaping (Result<AnonymousSession, AppError>) -> Void) {
         authCount += 1
@@ -39,9 +39,10 @@ final class FakeSyncAPI: SyncAPIServicing {
         token: String,
         idempotencyKey: String,
         devices: [PushDevice],
+        readings: [PushReading],
         completion: @escaping (Result<PushResult, AppError>) -> Void
     ) {
-        pushRequests.append((clientID, token, idempotencyKey, devices))
+        pushRequests.append((clientID, token, idempotencyKey, devices, readings))
         if pushResults.isEmpty {
             completion(.success(PushResult()))
         } else {
@@ -71,6 +72,7 @@ final class SyncEngineTests: XCTestCase {
     private var testDatabase: TestDatabase!
     private var suiteName: String!
     private var savedDeviceStore: SavedDeviceStore!
+    private var readingsStore: ReadingsStore!
     private var logStore: ScanLogStore!
     private var metadata: SyncMetadataStore!
     private var tokenStore: InMemoryTokenStore!
@@ -84,6 +86,7 @@ final class SyncEngineTests: XCTestCase {
         defaults.removePersistentDomain(forName: suiteName)
         metadata = SyncMetadataStore(defaults: defaults)
         savedDeviceStore = SavedDeviceStore(database: testDatabase.database)
+        readingsStore = ReadingsStore(database: testDatabase.database)
         logStore = ScanLogStore(database: testDatabase.database)
         tokenStore = InMemoryTokenStore()
         api = FakeSyncAPI()
@@ -119,6 +122,7 @@ final class SyncEngineTests: XCTestCase {
             tokenStore: tokenStore,
             metadataStore: metadata,
             deviceStore: savedDeviceStore,
+            readingsStore: readingsStore,
             logStore: logStore,
             now: now
         )
@@ -757,7 +761,7 @@ final class SyncAPIClientTests: XCTestCase {
             deleted: false
         )
         let result = waitForResult {
-            api.push(clientID: "ios-client", token: "tk", idempotencyKey: "KEY-1", devices: [device], completion: $0)
+            api.push(clientID: "ios-client", token: "tk", idempotencyKey: "KEY-1", devices: [device], readings: [], completion: $0)
         }
         let response = try XCTUnwrap(try? result.get())
 

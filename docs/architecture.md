@@ -25,16 +25,17 @@ codemagic/
 │   └── MainTabBarController.swift # 五个 Tab：首页/设备/产品/市场/我的
 ├── Core/
 │   ├── Models/                 # 领域模型（Codable，宽松解析）
-│   ├── Networking/             # APIConfiguration / HTTPClient / ProductAPIClient / AppError
-│   ├── Persistence/            # SQLiteDatabase 与各 Store
+│   ├── Networking/             # APIConfiguration / HTTPClient / ProductAPIClient / ReadingsAPIClient / AppError
+│   ├── Persistence/            # SQLiteDatabase 与各 Store（含 ReadingsStore）
+│   ├── Readings/               # ReadingParser（四特征独立解析）+ ReadingsIngestor
 │   ├── Sync/                   # SyncEngine / SyncAPIClient / SyncModels / KeychainTokenStore / SyncMetadataStore
-│   ├── Bluetooth/              # CoreBluetoothService（扫描 / 连接 / 授权）
+│   ├── Bluetooth/              # CoreBluetoothService（扫描 / 连接 / 授权 / notify 订阅）
 │   ├── Rules/                  # RuleEvaluator（断开 / RSSI 阈值）
 │   └── Formatting/             # 时间与 RSSI 格式化
 ├── DesignSystem/               # 主题、自绘 RSSI、代码组装空状态、Loading、图标名
 ├── Modules/
 │   ├── Home/                   # Scenes / ViewModels / Views
-│   ├── Devices/                # 设备列表、规则编辑、设备详情
+│   ├── Devices/                # 设备列表、规则编辑、设备详情（含读数图表）
 │   ├── Products/               # 型号库与详情
 │   ├── Market/                 # 配件与固件信息
 │   └── Profile/                # 权限自检、扫描日志、设置、关于
@@ -42,7 +43,7 @@ codemagic/
 Config/
 ├── Debug.xcconfig              # BASE_URL → 本地 Go 服务
 └── Release.xcconfig            # BASE_URL → 线上（当前为与 Android 共用的 mock）
-codemagicTests/                 # XCTest 单元测试（81 个用例）
+codemagicTests/                 # XCTest 单元测试（122 个用例）
 scripts/                        # e2e-contract.sh + 独立 Swift 联调 runner（CI 的 e2e-contract job 复用）
 docs/
 ├── architecture.md             # 本文件
@@ -96,6 +97,20 @@ CoreBluetoothService.discoveryHandler
 - `connect(peripheralID:)` 超时 12s；连接 / 断开 / 失败通过 `connectionHandler` 上报。
 - 授权状态映射为 `BluetoothAuthorization`（allowed / notDetermined / denied / restricted / unknown）。
 - 状态映射为 `BluetoothState`（unknown / unsupported / unauthorized / poweredOff / poweredOn / resetting）。
+- 读数订阅（v0.4.0）：`startReading(peripheralID:)` → `discoverServices(nil)` → 逐个服务发现特征，命中 `0x2A37` / `0x2A19` / `0x2A6E` / NUS TX `6E400003-…` 且支持 notify 时 `setNotifyValue(true)`；`didUpdateValueFor` 把原始 `Data` 封装为 `BluetoothReadingSample` 交给 `readingHandler`。不限定服务 UUID，兼容把 NUS 放在自定义服务下的设备。
+
+读数链路：
+
+```
+CoreBluetoothService.readingHandler
+  → ReadingsIngestor.ingest(sample)
+      ├─ ReadingParser.parse：四特征独立解析；失败写 ScanLog（category=reading）并丢弃
+      ├─ SavedDeviceStore.fetch(peripheralID:)：未保存设备丢弃并记日志
+      └─ ReadingsStore.insert：id 为客户端 UUID，sync_state=pending；onSaved(deviceID)
+          → DeviceDetailViewModel.reloadReadings（主线程刷新图表）
+```
+
+保留策略：启动时 `ReadingsStore.prune(olderThan: now-7d)`；`SyncEngine` 每次 push 全部成功后再次 prune。只删除已同步的过期读数，未上传读数保留到补传完成。
 
 模拟器没有真实蓝牙，状态为 `unsupported`，页面显示对应空状态；真实扫描、连接与授权弹窗需真机验证。
 
@@ -105,6 +120,7 @@ CoreBluetoothService.discoveryHandler
 - `URLSessionHTTPClient`：15s 超时、`ephemeral` 配置、`reloadIgnoringLocalCacheData`；非 2xx → `AppError.server`。
 - `ProductAPIClient`：`GET /api/v1/device-types` + `GET /api/v1/device-types/{type}/catalog`（产品 / 市场）、`GET /api/v1/my/devices/ios/{externalId}`（设备详情，Bearer token）；Codable 宽松解码，兼容 `{items}` 包裹与裸数组。0.3.2 起解析 `UserDevice` 的 `deviceType` / `vendor` / `firmwareVersion` / `compatibility` 与 catalog 固件 / 配件的 `vendor` / `compatibility`，`null` / 缺失 / 空串统一归一为 `nil`；0.3.3 起解析 `advertisedName`，可选字段缺省时按 absent 处理。
 - `CompatibilityInfo`（`Core/Models/DeviceCatalog.swift`）：动态 key 解码，`displayItems` 供展示、`filterTags` 供市场筛选（`deviceTypes` 显示为「型号」）。
+- `ReadingsAPIClient`（v0.4.0）：`GET .../readings`（`ReadingsPage`）与 `GET .../readings/summary`（`ReadingSummary`）；设备详情优先展示云端 24h 汇总，失败回退本地计算并标注「离线：本地数据」。折线与记录列表始终读本地 SQLite（7 天内）。
 - `AppError` 统一错误码：`NET-001` / `NET-002` / `NET-003` / `NET-004` / `DB-001` / `BT-004` / `SYNC-001`。
 
 ### 6.1 同步（v0.2.0 起）
@@ -121,9 +137,11 @@ SyncEngine
   ├─ pull：GET /sync/changes(cursor, limit=200) 循环 hasMore（≤10 页）
   │    └─ apply：本地无 → 插入 synced；本地已同步 → 云端覆盖；
   │              本地 pending 且云端更新 → 云端获胜 + 提示「另一台设备改过这条」
-  └─ push：fetchPending（≤100/批，按 id 排序）
-       ├─ Idempotency-Key = SHA-256(批次内容) → 失败重试复用
-       ├─ 成功 → markSynced；conflicts → 写回云端版本 + 提示
+  └─ push：fetchPending（设备 ≤100/批 + 读数 ≤200/批，按 id 排序）
+       ├─ Idempotency-Key = SHA-256(设备字段 + 读数内容) → 失败重试复用
+       ├─ 成功 → markSynced（设备 + 读数）；conflicts → 写回云端版本 + 提示
+       ├─ appliedReadings / skippedReadings 汇总进「我的」同步结果
+       ├─ 全部成功 → prune 7 天前的已同步读数
        └─ tombstone（deleted: true）同样走推送
 ```
 

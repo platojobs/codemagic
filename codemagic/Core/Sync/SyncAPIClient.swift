@@ -14,6 +14,7 @@ protocol SyncAPIServicing {
         token: String,
         idempotencyKey: String,
         devices: [PushDevice],
+        readings: [PushReading],
         completion: @escaping (Result<PushResult, AppError>) -> Void
     )
     func fetchDeviceType(
@@ -104,6 +105,7 @@ final class SyncAPIClient: SyncAPIServicing {
         token: String,
         idempotencyKey: String,
         devices: [PushDevice],
+        readings: [PushReading],
         completion: @escaping (Result<PushResult, AppError>) -> Void
     ) {
         let url = endpoint("api/v1/sync/push")
@@ -113,7 +115,9 @@ final class SyncAPIClient: SyncAPIServicing {
 
         let body: Data
         do {
-            body = try encoder.encode(PushRequest(clientID: clientID, devices: devices))
+            body = try encoder.encode(
+                PushRequest(clientID: clientID, devices: devices, readings: readings)
+            )
         } catch {
             completion(.failure(.decoding("推送请求编码失败：\(error.localizedDescription)")))
             return
@@ -261,6 +265,7 @@ final class UnavailableSyncAPI: SyncAPIServicing {
         token: String,
         idempotencyKey: String,
         devices: [PushDevice],
+        readings: [PushReading],
         completion: @escaping (Result<PushResult, AppError>) -> Void
     ) {
         completion(.failure(error))

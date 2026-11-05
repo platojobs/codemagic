@@ -46,21 +46,27 @@ enum SyncHashing {
         ))
     }
 
-    /// 幂等键：同一批（排序后）设备内容总是得到同一个 UUID；内容变化则键随之变化。
+    /// 幂等键：同一批（排序后）设备与读数内容总是得到同一个 UUID；内容变化则键随之变化。
     /// 这样重试网络失败时服务端可命中幂等缓存，而不会因请求体不同触发 409。
     ///
-    /// 签名直接取各设备规范化编码后的 JSON（键排序）：
+    /// 签名直接取各条目规范化编码后的 JSON（键排序）：
     /// - 未上报（`Patch.absent`）的字段根本不会出现在 JSON 里，因此不参与哈希；
-    /// - 显式清除编码为 `""`，与「从未设置」区分开。
-    static func idempotencyKey(for devices: [PushDevice]) -> String {
+    /// - 显式清除编码为 `""`，与「从未设置」区分开；
+    /// - 读数按 `id` 幂等，同样需要参与签名，否则读数的重试会与设备内容撞键。
+    static func idempotencyKey(for devices: [PushDevice], readings: [PushReading] = []) -> String {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
-        let signature = devices
+        let deviceSignature = devices
             .compactMap { try? encoder.encode($0) }
             .map { String(data: $0, encoding: .utf8) ?? "" }
             .sorted()
             .joined(separator: ";")
-        return stableUUID(seed: "push:\(signature)").uuidString
+        let readingSignature = readings
+            .compactMap { try? encoder.encode($0) }
+            .map { String(data: $0, encoding: .utf8) ?? "" }
+            .sorted()
+            .joined(separator: ";")
+        return stableUUID(seed: "push:devices:\(deviceSignature);readings:\(readingSignature)").uuidString
     }
 }
 
@@ -343,19 +349,93 @@ struct PushDevice: Encodable, Equatable {
     }
 }
 
+/// 推送读数条目，`id` 为客户端 UUID，服务端按 id 幂等。
+struct PushReading: Encodable, Equatable {
+    let id: String
+    let platform: String
+    let externalID: String
+    let metric: String
+    let value: Double
+    let unit: String
+    let recordedAt: Date
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case platform
+        case externalId
+        case metric
+        case value
+        case unit
+        case recordedAt
+    }
+
+    init(
+        id: String,
+        platform: String,
+        externalID: String,
+        metric: String,
+        value: Double,
+        unit: String,
+        recordedAt: Date
+    ) {
+        self.id = id
+        self.platform = platform
+        self.externalID = externalID
+        self.metric = metric
+        self.value = value
+        self.unit = unit
+        self.recordedAt = recordedAt
+    }
+
+    init(reading: DeviceReading, device: SavedDevice) {
+        self.init(
+            id: reading.id.uuidString,
+            platform: device.platform,
+            externalID: device.externalID,
+            metric: reading.metric.rawValue,
+            value: reading.value,
+            unit: reading.unit,
+            recordedAt: reading.recordedAt
+        )
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(platform, forKey: .platform)
+        try container.encode(externalID, forKey: .externalId)
+        try container.encode(metric, forKey: .metric)
+        try container.encode(value, forKey: .value)
+        try container.encode(unit, forKey: .unit)
+        try container.encode(SyncDateCodec.string(from: recordedAt), forKey: .recordedAt)
+    }
+}
+
 struct PushRequest: Encodable {
     let clientID: String
     let devices: [PushDevice]
+    /// 后端旧版本不认识该字段，空数组时完全省略。
+    let readings: [PushReading]
 
     private enum CodingKeys: String, CodingKey {
         case clientId
         case devices
+        case readings
+    }
+
+    init(clientID: String, devices: [PushDevice], readings: [PushReading] = []) {
+        self.clientID = clientID
+        self.devices = devices
+        self.readings = readings
     }
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(clientID, forKey: .clientId)
         try container.encode(devices, forKey: .devices)
+        if !readings.isEmpty {
+            try container.encode(readings, forKey: .readings)
+        }
     }
 }
 
@@ -443,6 +523,9 @@ struct PushResult: Decodable, Equatable {
     let applied: [AppliedChange]
     let conflicts: [SyncConflict]
     let nextCursor: Int64
+    /// 本次服务端实际写入 / 因 id 重复跳过的读数条数；旧后端缺省为 0。
+    let appliedReadings: Int
+    let skippedReadings: Int
     /// 命中服务端幂等缓存时 `Idempotent-Replayed: true`。
     let isIdempotentReplay: Bool
 
@@ -450,12 +533,23 @@ struct PushResult: Decodable, Equatable {
         case applied
         case conflicts
         case nextCursor
+        case appliedReadings
+        case skippedReadings
     }
 
-    init(applied: [AppliedChange] = [], conflicts: [SyncConflict] = [], nextCursor: Int64 = 0, isIdempotentReplay: Bool = false) {
+    init(
+        applied: [AppliedChange] = [],
+        conflicts: [SyncConflict] = [],
+        nextCursor: Int64 = 0,
+        appliedReadings: Int = 0,
+        skippedReadings: Int = 0,
+        isIdempotentReplay: Bool = false
+    ) {
         self.applied = applied
         self.conflicts = conflicts
         self.nextCursor = nextCursor
+        self.appliedReadings = appliedReadings
+        self.skippedReadings = skippedReadings
         self.isIdempotentReplay = isIdempotentReplay
     }
 
@@ -464,11 +558,20 @@ struct PushResult: Decodable, Equatable {
         applied = (try? container.decodeIfPresent([AppliedChange].self, forKey: .applied)) ?? []
         conflicts = (try? container.decodeIfPresent([SyncConflict].self, forKey: .conflicts)) ?? []
         nextCursor = (try? container.decodeIfPresent(Int64.self, forKey: .nextCursor)) ?? 0
+        appliedReadings = (try? container.decodeIfPresent(Int.self, forKey: .appliedReadings)) ?? 0
+        skippedReadings = (try? container.decodeIfPresent(Int.self, forKey: .skippedReadings)) ?? 0
         isIdempotentReplay = false
     }
 
     func withIdempotentReplay(_ flag: Bool) -> PushResult {
-        PushResult(applied: applied, conflicts: conflicts, nextCursor: nextCursor, isIdempotentReplay: flag)
+        PushResult(
+            applied: applied,
+            conflicts: conflicts,
+            nextCursor: nextCursor,
+            appliedReadings: appliedReadings,
+            skippedReadings: skippedReadings,
+            isIdempotentReplay: flag
+        )
     }
 }
 

@@ -30,12 +30,15 @@ final class FakeBluetoothService: BluetoothServicing {
     var stateChangeHandler: ((BluetoothState) -> Void)?
     var discoveryHandler: ((ScannedDevice) -> Void)?
     var connectionHandler: ((BluetoothConnectionEvent) -> Void)?
+    var readingHandler: ((BluetoothReadingSample) -> Void)?
 
     private(set) var authorization: BluetoothAuthorization
     private(set) var startScanningCount = 0
     private(set) var stopScanningCount = 0
     private(set) var connectedPeripheralIDs: [UUID] = []
     private(set) var disconnectedPeripheralIDs: [UUID] = []
+    private(set) var readingPeripheralIDs: [UUID] = []
+    private(set) var stoppedReadingPeripheralIDs: [UUID] = []
 
     init(state: BluetoothState = .poweredOn, authorization: BluetoothAuthorization = .allowed) {
         self.state = state
@@ -65,6 +68,14 @@ final class FakeBluetoothService: BluetoothServicing {
         disconnectedPeripheralIDs.append(peripheralID)
     }
 
+    func startReading(peripheralID: UUID) {
+        readingPeripheralIDs.append(peripheralID)
+    }
+
+    func stopReading(peripheralID: UUID) {
+        stoppedReadingPeripheralIDs.append(peripheralID)
+    }
+
     // MARK: - Test Helpers
 
     func emitState(_ newState: BluetoothState) {
@@ -78,6 +89,10 @@ final class FakeBluetoothService: BluetoothServicing {
 
     func emitConnection(_ event: BluetoothConnectionEvent) {
         connectionHandler?(event)
+    }
+
+    func emitReading(_ sample: BluetoothReadingSample) {
+        readingHandler?(sample)
     }
 }
 

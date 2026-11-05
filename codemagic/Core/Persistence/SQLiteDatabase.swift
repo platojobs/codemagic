@@ -113,6 +113,9 @@ final class SQLiteDatabase {
         if version < 4 {
             try migrateToVersion4()
         }
+        if version < 5 {
+            try migrateToVersion5()
+        }
     }
 
     /// v1：五张业务表，均含 `id / updated_at / deleted_at / sync_state`。
@@ -219,6 +222,28 @@ final class SQLiteDatabase {
         ALTER TABLE saved_devices ADD COLUMN advertised_name_patch TEXT NOT NULL DEFAULT 'absent';
         ALTER TABLE saved_devices ADD COLUMN group_patch TEXT NOT NULL DEFAULT 'absent';
         PRAGMA user_version = 4;
+        """)
+    }
+
+    /// v5：读数表。`id` 为客户端 UUID，推送时作为幂等主键；
+    /// `sync_state` 复用全局同步状态，`recorded_at` 以 Unix 秒存储，索引支持
+    /// 「按设备 + 指标取最近 60 点」与 7 天清理。
+    private func migrateToVersion5() throws {
+        try executeScript("""
+        CREATE TABLE IF NOT EXISTS readings (
+            id TEXT PRIMARY KEY NOT NULL,
+            device_id TEXT NOT NULL,
+            metric TEXT NOT NULL,
+            value REAL NOT NULL,
+            unit TEXT NOT NULL,
+            recorded_at REAL NOT NULL,
+            sync_state TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_readings_device_metric_time
+            ON readings(device_id, metric, recorded_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_readings_sync_state
+            ON readings(sync_state, recorded_at);
+        PRAGMA user_version = 5;
         """)
     }
 

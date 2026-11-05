@@ -127,7 +127,10 @@ final class DevicesViewController: UIViewController {
             bluetooth: environment.bluetooth,
             productService: environment.productService,
             cacheStore: environment.deviceInfoCacheStore,
-            savedDeviceStore: environment.savedDeviceStore
+            savedDeviceStore: environment.savedDeviceStore,
+            readingsStore: environment.readingsStore,
+            readingsService: environment.readingsService,
+            readingsIngestor: environment.readingsIngestor
         )
         let detail = DeviceDetailViewController(viewModel: detailViewModel)
         navigationController?.pushViewController(detail, animated: true)

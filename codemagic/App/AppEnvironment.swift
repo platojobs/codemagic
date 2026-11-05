@@ -16,6 +16,9 @@ final class AppEnvironment {
     let productService: ProductServicing
     let apiConfiguration: APIConfiguration?
     let bluetooth: BluetoothServicing
+    let readingsStore: ReadingsStore
+    let readingsService: ReadingsAPIServicing
+    let readingsIngestor: ReadingsIngestor
     let syncMetadataStore: SyncMetadataStore
     let tokenStore: TokenStoring
     let syncEngine: SyncEngine
@@ -50,17 +53,22 @@ final class AppEnvironment {
             apiConfiguration = configuration
             tokenStore = KeychainTokenStore()
             productService = ProductAPIClient(configuration: configuration, tokenStore: tokenStore)
+            readingsStore = ReadingsStore(database: resolved.database)
+            readingsService = ReadingsAPIClient(configuration: configuration, tokenStore: tokenStore)
             syncMetadataStore = SyncMetadataStore()
             syncEngine = SyncEngine(
                 api: SyncAPIClient(configuration: configuration),
                 tokenStore: tokenStore,
                 metadataStore: syncMetadataStore,
                 deviceStore: savedDeviceStore,
+                readingsStore: readingsStore,
                 logStore: scanLogStore
             )
         } else {
             apiConfiguration = nil
             productService = UnavailableProductService()
+            readingsStore = ReadingsStore(database: resolved.database)
+            readingsService = UnavailableReadingsAPI()
             syncMetadataStore = SyncMetadataStore()
             tokenStore = KeychainTokenStore()
             syncEngine = SyncEngine(
@@ -68,6 +76,7 @@ final class AppEnvironment {
                 tokenStore: tokenStore,
                 metadataStore: syncMetadataStore,
                 deviceStore: savedDeviceStore,
+                readingsStore: readingsStore,
                 logStore: scanLogStore
             )
             if startupWarning == nil {
@@ -75,7 +84,20 @@ final class AppEnvironment {
             }
         }
 
+        readingsIngestor = ReadingsIngestor(
+            readingsStore: readingsStore,
+            deviceStore: savedDeviceStore,
+            logStore: scanLogStore
+        )
         self.bluetooth = bluetooth ?? CoreBluetoothService()
+        let ingestor = readingsIngestor
+        self.bluetooth.readingHandler = { sample in
+            ingestor.ingest(sample)
+        }
+
+        // 启动即执行 7 天保留清理；同步成功后引擎会再次清理。
+        let cutoff = Date().addingTimeInterval(-7 * 24 * 60 * 60)
+        try? readingsStore.prune(olderThan: cutoff)
     }
 
     // MARK: - Database
