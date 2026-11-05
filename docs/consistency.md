@@ -349,6 +349,36 @@ iOS 用例固化在 `codemagicTests/ReadingsGoldenTests.swift`；新增特征或
 **外观**
 - 三态：跟随系统 / 浅色 / 深色；图表与卡片只使用动态语义色，禁止硬编码黑白或十六进制色值。
 
+### 3.11 跨设备接管、账号导出注销与后台采集（v0.7.0）
+
+后端契约 `PJGoIoT` v0.7.0（openapi **0.6.0**）。以下均为客户端行为口径，排序 / 格式化断言必须显式 Locale（`en_US_POSIX`）。
+
+**配对码（跨设备接管）**
+- `POST /api/v1/auth/pairing-code`（Bearer）→ `{code, expiresAt}`；码为 **8 位大写字母/数字**，字符集去掉易混的 `0/O/1/I`，10 分钟有效、一次性使用。
+- 真机接入另一台设备：`POST /api/v1/auth/pairing-code/claim`（无需旧 token）→ `{userId, token}`。
+- 输入规范化：自动大写、过滤空白与 `0/O/1/I`、截断 8 位；不足 8 位不发起请求。
+- 重新生成：新码生成后旧码立即失效（服务端保证）；界面在生成前二次确认并明确提示旧码失效。
+- 错误口径：**404 一律「码无效或已过期」，不区分原因**；**429 读取 `Retry-After` 秒数并显示冷却倒计时**，冷却期间禁用提交；网络错误可重试。401 提示登录失效。
+- 接管成功后：用返回 token **替换 Keychain**；保留本机已有设备与全部读数，并把设备（含本地别名/分组/广播名状态）与读数**全部重新标记 pending**；同步游标清零、`userID` 更新、`reloginRequired` 清除，随后自动触发一次前台同步把本机数据推给新账号。
+- 旧账号云端数据不会自动合并；tombstone 设备不上传。
+
+**账号数据导出**
+- `GET /api/v1/me/export?limit=5000[&cursor=…]`，按 `hasMore` / `nextCursor` 循环拉全；`cursor` **不透明**，原样回传、不解析不构造，重复游标或超过 1000 页视为异常失败。
+- 合并各页 `readings`；`user` / `devices` / `exportedAt` 取第一页。
+- 写临时 JSON 文件后 `UIActivityViewController` 分享，分享面板关闭即删除；退出遗留文件 1 天后自动清理。
+- 进度为真实已读取读数条数；失败按 401 / 网络 / 解析分别提示，网络与游标/写入错误可重试。
+
+**注销账号**
+- `DELETE /api/v1/me`（Bearer）→ 204。二次确认文案必须写明「设备与读数将永久删除且不可恢复」。
+- 顺序：**服务端删除成功后** → 清 Keychain token → 清 SQLite 全部业务表（`readings` / `saved_devices` / `rules` / `scan_logs` / `recent_devices` / `device_info_cache`，单事务）→ 清同步元数据（`cursor` / `lastSyncAt` / `userID` / `reloginRequired` / `lastBackgroundPushAt`），保留 `clientID` 与界面设置，回到全新匿名状态。
+- 401 与网络错误**不清理本地数据**，分别提示且网络错误可重试；本地清理失败必须明确上报（不得静默假装成功）。
+
+**后台采集**
+- `Info.plist` 声明 `UIBackgroundModes = fetch + bluetooth-central`；连接状态下后台继续接收 notify 并走同一 `ReadingsIngestor` 入库。
+- 「我的 → 后台采集」开关持久化（`settings.backgroundCollection`，默认开启）；关闭时进入后台立即 `disconnectAll()`，不保持 BLE 链路，并在「我的」显示当前状态与耗电说明。
+- 后台唤醒只做**受限推送**：不拉取增量、不创建匿名账号；单次最多 **100 台设备 / 200 条读数**；与上次后台推送间隔 **≥15 分钟**，失败同样记录时间以避免唤醒风暴。前台去抖 800ms 与指数退避 ≤300s 策略不变。
+- 7 天保留清理只删除 `synced` 且超期的读数，`pending` / `failed` 在后台路径同样受保护。
+
 
 ---
 

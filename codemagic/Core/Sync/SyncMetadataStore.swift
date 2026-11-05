@@ -9,6 +9,7 @@ final class SyncMetadataStore {
         static let userID = "sync.userId"
         static let clientID = "sync.clientId"
         static let reloginRequired = "sync.reloginRequired"
+        static let lastBackgroundPushAt = "sync.lastBackgroundPushAt"
     }
 
     private let defaults: UserDefaults
@@ -63,5 +64,30 @@ final class SyncMetadataStore {
     func resetCursor() {
         cursor = 0
         lastSyncAt = nil
+    }
+
+    /// 后台唤醒推送的最小间隔记录：避免系统在省电窗口内频繁唤醒造成网络风暴。
+    var lastBackgroundPushAt: Date? {
+        get {
+            guard defaults.object(forKey: Key.lastBackgroundPushAt) != nil else { return nil }
+            let value = defaults.double(forKey: Key.lastBackgroundPushAt)
+            return value > 0 ? Date(timeIntervalSince1970: value) : nil
+        }
+        set {
+            if let newValue {
+                defaults.set(newValue.timeIntervalSince1970, forKey: Key.lastBackgroundPushAt)
+            } else {
+                defaults.removeObject(forKey: Key.lastBackgroundPushAt)
+            }
+        }
+    }
+
+    /// 注销账号：清空同步归属与游标，保留 `clientID`（本安装标识用于诊断）与界面设置。
+    func resetForAccountDeletion() {
+        defaults.removeObject(forKey: Key.cursor)
+        defaults.removeObject(forKey: Key.lastSyncAt)
+        defaults.removeObject(forKey: Key.userID)
+        defaults.removeObject(forKey: Key.reloginRequired)
+        defaults.removeObject(forKey: Key.lastBackgroundPushAt)
     }
 }

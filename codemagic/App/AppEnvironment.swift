@@ -24,6 +24,10 @@ final class AppEnvironment {
     let syncMetadataStore: SyncMetadataStore
     let tokenStore: TokenStoring
     let syncEngine: SyncEngine
+    let accountAPI: AccountAPIServicing
+    let pairingService: PairingServicing
+    let accountExportService: AccountExportService
+    let accountDeletionService: AccountDeletionService
 
     /// 启动期降级说明，非空时在「我的」页展示。
     private(set) var startupWarning: String?
@@ -63,6 +67,7 @@ final class AppEnvironment {
             productService = ProductAPIClient(configuration: configuration, tokenStore: tokenStore)
             readingsStore = ReadingsStore(database: resolved.database)
             readingsService = ReadingsAPIClient(configuration: configuration, tokenStore: tokenStore)
+            accountAPI = AccountAPIClient(configuration: configuration)
             syncMetadataStore = SyncMetadataStore()
             syncEngine = SyncEngine(
                 api: SyncAPIClient(configuration: configuration),
@@ -77,6 +82,7 @@ final class AppEnvironment {
             productService = UnavailableProductService()
             readingsStore = ReadingsStore(database: resolved.database)
             readingsService = UnavailableReadingsAPI()
+            accountAPI = UnavailableAccountAPI()
             syncMetadataStore = SyncMetadataStore()
             tokenStore = KeychainTokenStore()
             syncEngine = SyncEngine(
@@ -96,6 +102,21 @@ final class AppEnvironment {
             readingsStore: readingsStore,
             deviceStore: savedDeviceStore,
             logStore: scanLogStore
+        )
+        pairingService = PairingService(
+            api: accountAPI,
+            tokenStore: tokenStore,
+            deviceStore: savedDeviceStore,
+            readingsStore: readingsStore,
+            metadataStore: syncMetadataStore,
+            logStore: scanLogStore
+        )
+        accountExportService = AccountExportService(api: accountAPI, tokenStore: tokenStore)
+        accountDeletionService = AccountDeletionService(
+            api: accountAPI,
+            tokenStore: tokenStore,
+            database: resolved.database,
+            metadataStore: syncMetadataStore
         )
         self.bluetooth = bluetooth ?? CoreBluetoothService()
         let ingestor = readingsIngestor

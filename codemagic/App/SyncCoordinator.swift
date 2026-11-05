@@ -69,7 +69,9 @@ final class SyncCoordinator {
         refreshTask.expirationHandler = { complete(false) }
 
         DispatchQueue.main.async {
-            engine.sync { result in
+            // 后台只做受限的「推送」：不拉增量、不建匿名账号，单次最多 100 设备 / 200 读数，
+            // 并以 15 分钟最小间隔与失败节流避免唤醒风暴。
+            engine.pushPendingInBackground { result in
                 switch result {
                 case .success:
                     complete(true)

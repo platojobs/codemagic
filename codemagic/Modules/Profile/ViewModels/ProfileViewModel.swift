@@ -19,12 +19,18 @@ final class ProfileViewModel {
     private let settingsStore: SettingsStore
     private let syncEngine: SyncEngine
     private let notifications: LocalNotificationServing
+    private let pairingService: PairingServicing
+    private let accountExportService: AccountExportService
+    private let accountDeletionService: AccountDeletionService
 
     init(
         bluetooth: BluetoothServicing,
         scanLogStore: ScanLogStore,
         settingsStore: SettingsStore,
         syncEngine: SyncEngine,
+        pairingService: PairingServicing,
+        accountExportService: AccountExportService,
+        accountDeletionService: AccountDeletionService,
         baseURLText: String,
         startupWarning: String?,
         notifications: LocalNotificationServing = UserNotificationService.shared
@@ -33,6 +39,9 @@ final class ProfileViewModel {
         self.scanLogStore = scanLogStore
         self.settingsStore = settingsStore
         self.syncEngine = syncEngine
+        self.pairingService = pairingService
+        self.accountExportService = accountExportService
+        self.accountDeletionService = accountDeletionService
         self.notifications = notifications
         self.baseURLText = baseURLText
         self.startupWarning = startupWarning
@@ -151,6 +160,72 @@ final class ProfileViewModel {
             settingsStore.autoScanOnLaunch = newValue
             onChange?()
         }
+    }
+
+    // MARK: - Background Collection
+
+    var backgroundCollectionEnabled: Bool {
+        get { settingsStore.backgroundCollectionEnabled }
+        set {
+            settingsStore.backgroundCollectionEnabled = newValue
+            if !newValue {
+                // 关闭后立即断开当前连接，不再后台保持链路。
+                bluetooth.disconnectAll()
+            }
+            onChange?()
+        }
+    }
+
+    var backgroundCollectionStatusText: String {
+        settingsStore.backgroundCollectionStatusText(connectedCount: bluetooth.connectedPeripheralCount)
+    }
+
+    var backgroundCollectionGuidance: String {
+        if backgroundCollectionEnabled {
+            return "开启后连接状态下锁屏/切后台仍会接收 notify 并入库；持续 BLE 连接与后台唤醒会增加耗电，系统低电量模式可能延后唤醒。"
+        }
+        return "关闭后进入后台会主动断开蓝牙连接，后台不再接收读数；回到前台后需重新连接设备。"
+    }
+
+    // MARK: - Account
+
+    /// 导出账号数据：进度为已读取的真实读数条数；完成后返回临时文件，由界面分享后删除。
+    func exportAccountData(
+        progress: @escaping (Int) -> Void,
+        completion: @escaping (Result<URL, AccountExportError>) -> Void
+    ) {
+        accountExportService.export(progress: progress, completion: completion)
+    }
+
+    func removeExportedFile(at url: URL) {
+        accountExportService.removeExportedFile(at: url)
+    }
+
+    /// 注销账号。服务端失败时本地数据完全保留；成功则由服务按 token → 业务表 → 元数据顺序清理。
+    func deleteAccount(completion: @escaping (Result<Void, AccountDeletionError>) -> Void) {
+        accountDeletionService.deleteAccount { [weak self] result in
+            self?.refresh()
+            completion(result)
+        }
+    }
+
+    var accountDeletionConfirmationText: String {
+        "设备与读数将永久删除且不可恢复，云端与本机数据都会被清空。注销后将回到全新的匿名状态。"
+    }
+
+    /// 接管后触发一次前台同步，让新账号尽快拿到本机重新标记的数据。
+    func syncAfterTakeover() {
+        syncEngine.sync { [weak self] _ in
+            self?.refresh()
+        }
+    }
+
+    func makePairingCodeViewModel() -> PairingCodeViewModel {
+        PairingCodeViewModel(service: pairingService)
+    }
+
+    func makePairingClaimViewModel() -> PairingClaimViewModel {
+        PairingClaimViewModel(service: pairingService)
     }
 
     // MARK: - Alerts

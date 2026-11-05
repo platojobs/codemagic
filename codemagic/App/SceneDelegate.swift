@@ -33,6 +33,10 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     }
 
     func sceneDidEnterBackground(_ scene: UIScene) {
+        // 后台采集关闭时立即断开所有 BLE 链路，避免系统继续为无用的连接唤醒进程。
+        if !environment.settingsStore.backgroundCollectionEnabled {
+            environment.bluetooth.disconnectAll()
+        }
         SyncCoordinator.shared.scheduleBackgroundSync()
     }
 }

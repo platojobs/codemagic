@@ -113,6 +113,55 @@ final class SyncEngine {
         }
     }
 
+    /// 后台唤醒的轻量同步：只推送、不拉取，限制单次批量，且受最小间隔节流。
+    ///
+    /// 后台不得发起大量网络请求：无 token 时直接跳过（不静默建号），
+    /// 单次最多 100 台设备 / 200 条读数，并以 `lastBackgroundPushAt` 保证失败也不会被连续唤醒放大。
+    func pushPendingInBackground(
+        minimumInterval: TimeInterval = 15 * 60,
+        readingLimit: Int = 200,
+        deviceLimit: Int = 100,
+        completion: ((Result<Summary, AppError>) -> Void)? = nil
+    ) {
+        guard !isSyncing else {
+            completion?(.failure(.sync("上一次同步尚未结束")))
+            return
+        }
+        guard let session = tokenStore.load(), !session.token.isEmpty else {
+            // 后台不创建匿名账号；留给用户回到前台后的显式同步。
+            completion?(.success(Summary()))
+            return
+        }
+        if let last = metadataStore.lastBackgroundPushAt,
+           now().timeIntervalSince(last) < minimumInterval {
+            completion?(.success(Summary()))
+            return
+        }
+        metadataStore.lastBackgroundPushAt = now()
+
+        isSyncing = true
+        sessionConflictMessages = []
+        status.isSyncing = true
+        status.lastError = nil
+        notify()
+
+        pushPending(
+            token: session.token,
+            summary: Summary(),
+            readingsLimit: readingLimit,
+            deviceLimit: deviceLimit
+        ) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success(let summary):
+                self.metadataStore.lastSyncAt = self.now()
+                self.finish(.success(summary), completion: completion)
+            case .failure(let error):
+                self.finish(.failure(error), completion: completion)
+            }
+        }
+    }
+
     /// 用户确认重新登录：换新的匿名账号，重置游标，并把本机设备全部重新上传。
     ///
     /// 旧账号数据不会自动合并；本机数据保留，只更换云端归属。重复点击由 `isSyncing` 拦截。
@@ -351,13 +400,15 @@ final class SyncEngine {
     private func pushPending(
         token: String,
         summary: Summary,
+        readingsLimit: Int? = nil,
+        deviceLimit: Int? = nil,
         completion: @escaping (Result<Summary, AppError>) -> Void
     ) {
         let pendingDevices: [SavedDevice]
         let pendingReadings: [DeviceReading]
         do {
-            pendingDevices = try deviceStore.fetchPending()
-            pendingReadings = try readingsStore.fetchPending()
+            pendingDevices = try deviceStore.fetchPending(limit: deviceLimit)
+            pendingReadings = try readingsStore.fetchPending(limit: readingsLimit)
         } catch {
             completion(.failure(.database("读取待上传数据失败：\(error)")))
             return

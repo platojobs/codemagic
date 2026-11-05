@@ -13,6 +13,9 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
     }
 
     func applicationDidEnterBackground(_ application: UIApplication) {
+        if !AppEnvironment.shared.settingsStore.backgroundCollectionEnabled {
+            AppEnvironment.shared.bluetooth.disconnectAll()
+        }
         SyncCoordinator.shared.scheduleBackgroundSync()
     }
 }

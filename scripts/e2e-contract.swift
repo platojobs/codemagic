@@ -1029,6 +1029,100 @@ private func run() -> Int32 {
         )
     }
 
+    // MARK: 8. 账号（配对码 / 导出 / 注销）
+
+    report.section("8. 账号：配对码接管 / 数据导出 / 注销")
+    let codeResponse = client.request("POST", "auth/pairing-code", token: tokenA, json: [String: Any]())
+    let codeObject = jsonObject(codeResponse.body) ?? [:]
+    let firstCode = text(codeObject, "code")
+    let firstExpiry = parsedDate(codeObject, "expiresAt")
+    report.check(
+        codeResponse.status == 200 || codeResponse.status == 201,
+        "生成配对码返回 2xx",
+        "status=\(codeResponse.status) body=\(bodyText(codeResponse.body))"
+    )
+    report.check(
+        firstCode.count == 8 && firstCode.allSatisfy { $0.isUppercase || $0.isNumber },
+        "配对码为 8 位大写字母/数字",
+        "code=\(firstCode)"
+    )
+    report.check(
+        firstExpiry.map { $0 > Date() } ?? false,
+        "expiresAt 为真实未来时间",
+        "expiresAt=\(text(codeObject, "expiresAt"))"
+    )
+
+    let regenerated = client.request("POST", "auth/pairing-code", token: tokenA, json: [String: Any]())
+    let regeneratedObject = jsonObject(regenerated.body) ?? [:]
+    let secondCode = text(regeneratedObject, "code")
+    report.check(
+        regenerated.status == 200 || regenerated.status == 201,
+        "重新生成配对码返回 2xx",
+        "status=\(regenerated.status)"
+    )
+    report.check(!secondCode.isEmpty && secondCode != firstCode, "重新生成后配对码不同")
+
+    let staleClaim = client.request("POST", "auth/pairing-code/claim", json: ["code": firstCode])
+    report.check(staleClaim.status == 404, "旧配对码重新生成后失效（404）", "status=\(staleClaim.status)")
+    report.check(errorCode(staleClaim.body) == "NOT_FOUND", "旧码错误码为 NOT_FOUND", "code=\(errorCode(staleClaim.body))")
+
+    let invalidClaim = client.request("POST", "auth/pairing-code/claim", json: ["code": "ZZZZZZZZ"])
+    report.check(invalidClaim.status == 404, "不存在的配对码返回 404", "status=\(invalidClaim.status)")
+
+    let claimResponse = client.request("POST", "auth/pairing-code/claim", json: ["code": secondCode])
+    let claimObject = jsonObject(claimResponse.body) ?? [:]
+    let claimedToken = text(claimObject, "token")
+    report.check(
+        claimResponse.status == 200 || claimResponse.status == 201,
+        "接管配对码返回 2xx",
+        "status=\(claimResponse.status) body=\(bodyText(claimResponse.body))"
+    )
+    report.check(text(claimObject, "userId") == userA, "接管后 userId 与旧设备一致", "userId=\(text(claimObject, "userId"))")
+    report.check(!claimedToken.isEmpty && claimedToken != tokenA, "接管返回新 token")
+
+    let reusedClaim = client.request("POST", "auth/pairing-code/claim", json: ["code": secondCode])
+    report.check(reusedClaim.status == 404, "配对码只能使用一次（404）", "status=\(reusedClaim.status)")
+
+    let exportNoToken = client.request("GET", "me/export")
+    report.check(exportNoToken.status == 401, "导出无 token 返回 401", "status=\(exportNoToken.status)")
+
+    let exportFirst = client.request("GET", "me/export?limit=1", token: claimedToken)
+    let exportFirstObject = jsonObject(exportFirst.body) ?? [:]
+    report.check(exportFirst.status == 200, "导出首页返回 200", "status=\(exportFirst.status) body=\(bodyText(exportFirst.body))")
+    let exportUser = exportFirstObject["user"] as? [String: Any] ?? [:]
+    report.check(text(exportUser, "id") == userA, "导出 user.id 与当前账号一致", "user=\(text(exportUser, "id"))")
+    report.check(!list(exportFirstObject["devices"]).isEmpty, "导出包含本机设备")
+    report.check(list(exportFirstObject["readings"]).count <= 1, "导出遵守 limit=1")
+    report.check((exportFirstObject["hasMore"] as? Bool) == true, "首页 hasMore 为 true")
+    report.check(!text(exportFirstObject, "nextCursor").isEmpty, "首页返回 nextCursor")
+
+    var exportPage = exportFirstObject
+    var cursorCount = 0
+    var exportedReadings = list(exportPage["readings"]).count
+    var exportHasMore = (exportPage["hasMore"] as? Bool) ?? false
+    while exportHasMore && cursorCount < 10 {
+        let cursor = text(exportPage, "nextCursor")
+        cursorCount += 1
+        var allowed = CharacterSet.alphanumerics
+        allowed.insert(charactersIn: "-._~")
+        let encodedCursor = cursor.addingPercentEncoding(withAllowedCharacters: allowed) ?? cursor
+        let next = client.request("GET", "me/export?limit=1&cursor=\(encodedCursor)", token: claimedToken)
+        let nextObject = jsonObject(next.body) ?? [:]
+        report.check(next.status == 200, "导出第 \(cursorCount + 1) 页返回 200", "status=\(next.status) body=\(bodyText(next.body))")
+        exportedReadings += list(nextObject["readings"]).count
+        exportHasMore = (nextObject["hasMore"] as? Bool) ?? false
+        exportPage = nextObject
+    }
+    report.check(!exportHasMore, "按 hasMore/nextCursor 可循环拉全", "pages=\(cursorCount + 1)")
+    report.check(exportedReadings >= 3, "导出合并了全部读数", "readings=\(exportedReadings)")
+
+    let deleteResponse = client.request("DELETE", "me", token: claimedToken)
+    report.check(deleteResponse.status == 204, "注销账号返回 204", "status=\(deleteResponse.status) body=\(bodyText(deleteResponse.body))")
+    let exportAfterDelete = client.request("GET", "me/export", token: claimedToken)
+    report.check(exportAfterDelete.status == 401, "注销后新 token 失效（401）", "status=\(exportAfterDelete.status)")
+    let exportOldToken = client.request("GET", "me/export", token: tokenA)
+    report.check(exportOldToken.status == 401, "注销后旧 token 也失效（401）", "status=\(exportOldToken.status)")
+
     // MARK: 汇总
 
     print("\n=== E2E 合同联调结果 ===")

@@ -27,6 +27,7 @@
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>fetch</string>
+		<string>bluetooth-central</string>
 	</array>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>用于扫描附近的蓝牙设备、显示信号强度，并在设备详情页建立连接读取厂商与固件信息。</string>

@@ -39,6 +39,7 @@ final class FakeBluetoothService: BluetoothServicing {
     private(set) var disconnectedPeripheralIDs: [UUID] = []
     private(set) var readingPeripheralIDs: [UUID] = []
     private(set) var stoppedReadingPeripheralIDs: [UUID] = []
+    private(set) var disconnectAllCount = 0
 
     init(state: BluetoothState = .poweredOn, authorization: BluetoothAuthorization = .allowed) {
         self.state = state
@@ -74,6 +75,17 @@ final class FakeBluetoothService: BluetoothServicing {
 
     func stopReading(peripheralID: UUID) {
         stoppedReadingPeripheralIDs.append(peripheralID)
+    }
+
+    var connectedPeripheralCount: Int {
+        connectedPeripheralIDs.count
+    }
+
+    func disconnectAll() {
+        disconnectAllCount += 1
+        for id in connectedPeripheralIDs {
+            disconnectedPeripheralIDs.append(id)
+        }
     }
 
     // MARK: - Test Helpers

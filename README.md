@@ -12,20 +12,20 @@
 
 | 项 | 结果 |
 | --- | --- |
-| 版本 | **v0.6.0**（`MARKETING_VERSION 0.6.0`，`CURRENT_PROJECT_VERSION 14`，tag `v0.6.0`：请求节流 + 本地降级 + 告警通知 + CSV 导出 + 设备列表可用性 + 深色模式，契约对齐 `PJGoIoT` v0.5.1） |
+| 版本 | **v0.7.0**（`MARKETING_VERSION 0.7.0`，`CURRENT_PROJECT_VERSION 15`，tag `v0.7.0`：配对码跨设备接管 + 账号导出/注销 + 后台采集，契约对齐 `PJGoIoT` v0.7.0 / openapi 0.6.0） |
 | 五模块（首页 / 设备 / 产品 / 市场 / 我的） | 已实现，纯代码 UIKit，真实数据路径 |
 | CoreBluetooth 扫描 + 连接 | 已实现（`CBCentralManager`，真实 RSSI） |
 | BLE 读数采集 | 已实现：连接后订阅心率 `0x2A37`、电量 `0x2A19`、温度 `0x2A6E`、Nordic UART TX `6E400003-…`；各特征独立解析器，失败静默丢弃并写本地日志 |
 | 长周期读数图表 | 已实现：1 小时 / 24 小时 / 7 天 / 30 天区间切换（映射 `1m` / `1h` / `1h` / `1d`），X 轴按桶 `start` 真实时间比例定位，缺口断线，`avg` 折线 + `min`–`max` 区间带，Y 轴自适应并带单位 |
 | 本地持久化 | 已实现（SQLite3，含同步字段；迁移 **v5** 新增 `readings` 表，本地保留 7 天；v4 区分 `advertised_name` 与用户别名并记录三态 patch） |
-| 网络层 | 已实现（URLSession + Codable；设备/型号对齐 openapi 0.3.3；读数查询 / summary / series / metrics 对齐 `PJGoIoT` v0.5.1；详情页远端刷新 800ms 去抖动 + 失败指数退避 ≤5 分钟，不可见/后台不请求） |
-| 同步 | **已实现**：匿名登录、增量拉取、批量推送（设备 ≤100/批 + 读数 ≤200/批、幂等键含读数）、冲突提示、tombstone、Keychain token、前后台 / BGTask 触发、断网累积补传 |
+| 网络层 | 已实现（URLSession + Codable；设备/型号/同步/账号对齐 `PJGoIoT` v0.7.0 openapi 0.6.0；读数查询 / summary / series / metrics 对齐 v0.5.1 起；详情页远端刷新 800ms 去抖动 + 失败指数退避 ≤5 分钟，不可见/后台不请求） |
+| 同步 | **已实现**：匿名登录、增量拉取、批量推送（设备 ≤100/批 + 读数 ≤200/批、幂等键含读数）、冲突提示、tombstone、Keychain token、前后台 / BGTask 触发、断网累积补传；后台唤醒仅做受限推送（不拉增量、不建号、≥15 分钟间隔） |
 | 自绘 RSSI + 自绘折线图 + 代码组装空状态 | 已实现（读数图表纯 `draw(_:)`，无第三方图表库） |
-| 单元测试 | **188 个用例，0 失败**（`** TEST SUCCEEDED **`，2026-11-05，Xcode 27.2 / iPhone 17 模拟器；含刷新去抖/退避、待同步降级、通知节流与恢复、CSV 分页/转义、设备搜索排序筛选、深色语义色扫描） |
+| 单元测试 | **207 个用例，0 失败**（`** TEST SUCCEEDED **`，2026-11-05，Xcode 27.2 / iPhone 17 模拟器；含刷新去抖/退避、待同步降级、通知节流与恢复、CSV 分页/转义、设备搜索排序筛选、深色语义色扫描、配对码校验与 429、导出分页、注销清理顺序、后台限流推送与保留） |
 | 模拟器构建 | **通过**（`xcodebuild ... build`，`** BUILD SUCCEEDED **`） |
 | CI | **GitHub Actions 已实际运行 success**：v0.6.0 run [41956298244](https://github.com/platojobs/codemagic/actions/runs/41956298244)（macos-15 + Xcode 16.4，提交 `434ee0c`），并行 `build-test`（188 单测）与 `e2e-contract`（123 项，0 SKIP）；`codemagic.yaml` 作为可选替代保留但未验证 |
 | 真机 BLE / 签名 | **未验证**：本机无真机与 Apple 开发者账号；读数采集与图表需真机 / 可穿戴设备验证（见第 9 节） |
-| 真实后端同步 | **契约已联调**：`scripts/e2e-contract.sh` 对本地 `PJGoIoT` **v0.5.1**（`STORE=fixture`）跑 **123 项断言，全部 PASS**（含读数推送/倒序/summary/重复 id/NaN 400/series/metrics/bucket 400）；App 内同步 UI 仍需真机手动验证 |
+| 真实后端同步 | **契约已联调**：`scripts/e2e-contract.sh` 对本地 `PJGoIoT` **v0.7.0**（`STORE=fixture`）跑 **151 项断言，全部 PASS**（含配对码生成/失效/一次性、导出分页、注销后 token 失效，以及既有读数/设备/series/metrics 契约）；App 内同步 UI 仍需真机手动验证 |
 
 ---
 
@@ -62,7 +62,8 @@
 - 本地扫描日志列表、计数与清空。
 - **同步状态**：上次同步时间、待上传条数、「立即同步」按钮、匿名账号；失败时展示错误码与降级说明，冲突时提示「另一台设备改过这条」。
 - **登录失效（401）**：token 过期时显示「登录已失效」，出现「重新登录」入口；确认弹窗说明旧账号云端数据不自动合并、本机设备会重新上传，确认后才换新匿名账号（游标重置为 0）。未确认前前后台自动同步不会静默建号，见 `docs/troubleshooting.md` 第 3.1 节。
-- 基础设置：自动记录最近设备、启动自动扫描。
+- 基础设置：自动记录最近设备、启动自动扫描、**后台采集**（v0.7.0，默认开启并说明耗电；关闭后进入后台立即断开连接，状态实时显示）。
+- **账号与数据（v0.7.0）**：迁移到新设备（8 位一次性配对码、真实倒计时、复制/重新生成）、从旧设备接管（自动大写/过滤易混字符、404 统一提示、429 按 `Retry-After` 冷却）、导出我的数据（分页拉全 + 临时文件分享后删除 + 真实进度）、注销账号（二次确认永久删除；成功后清 Keychain / 全部业务表 / 同步元数据，401 与网络错误分别处理）。
 - **阈值告警设置（v0.6.0）**：真实开关、节流窗口（1 / 5 / 30 分钟）与通知权限状态；拒绝时提示前往系统设置。
 - **外观（v0.6.0）**：跟随系统 / 浅色 / 深色三态，窗口级生效并持久化。
 - 版本与关于：读取 `CFBundleShortVersionString / CFBundleVersion` 与当前 `BASE_URL`。
@@ -73,6 +74,7 @@
 - 批量推送 `POST /api/v1/sync/push`（每批 ≤100，`Idempotency-Key` 由批次内容哈希派生）；`deviceType` 为可选字段，已知型号才随推送上传，未知时省略不填假值。
 - 冲突按服务端 LWW：云端获胜时写回并提示，**不静默覆盖本地修改**；tombstone 删除同样上传 / 写回。
 - 触发：回到前台（节流 120s）、进入后台（`BGAppRefreshTask`）、手动按钮。
+- 后台唤醒（v0.7.0）：仅推送、不拉增量、不创建匿名账号；单次 ≤100 设备 / ≤200 读数，最小间隔 15 分钟（失败同样节流）。`bluetooth-central` 后台模式下连接设备继续接收 notify 并入库，7 天保留清理只删 `synced`，pending 受保护。
 - 契约联调：`scripts/e2e-contract.sh` 直连本地 Go 服务，覆盖双平台推送、device-types/catalog（含 vendor/compatibility）、复合键详情、UserDevice 新字段与 null 降级、别名/广播名分离、group 三态、幂等重放、LWW 冲突、401/404；已纳入 GitHub Actions `e2e-contract` job（见 4.2）。
 
 ---
@@ -106,11 +108,11 @@ Config/
 scripts/
 ├── e2e-contract.sh         # 启动本地 fixture 服务 + 运行联调 runner（CI 的 e2e-contract job 复用）
 └── e2e-contract.swift      # 独立 Swift 可执行 runner，真实 URLSession 直连 localhost
-codemagicTests/             # 188 个 XCTest 用例（黄金读数 / 图表几何 / 节流退避 / 通知 / 导出 / 设备筛选 / 深色扫描）
+codemagicTests/             # 207 个 XCTest 用例（黄金读数 / 图表几何 / 节流退避 / 通知 / 导出 / 设备筛选 / 深色扫描 / 配对码 / 注销 / 后台推送）
 docs/
 ├── architecture.md
 ├── consistency.md
-├── acceptance.md           # 真机验收清单（五模块 / 蓝牙 / 规则 / 降级 / BGTask / 通知 / 导出 / 深色 / Release）
+├── acceptance.md           # 真机验收清单（五模块 / 蓝牙 / 规则 / 降级 / BGTask / 通知 / 导出 / 深色 / 配对码 / 注销 / 后台采集 / Release）
 ├── troubleshooting.md      # Xcode / 签名 / Keychain / BGTask / BASE_URL / Go 服务 / 端口
 └── releasenotes.md         # 按 tag 的真实发布说明
 ```
@@ -189,7 +191,7 @@ cd /path/to/codemagic
 - CI 中 `build-test` 与 `e2e-contract` 并行，按 `github.sha` 去重（同一次提交的 main push 与 tag 只跑一轮）。
 - 读数断言（第 7 节）采用**能力门控**：探针 `GET .../readings/summary` 返回 404（后端尚未发布 readings）时输出 `[SKIP]` 且不计通过；后端上线后自动执行真实断言。本地 agent 以 `RATE_LIMIT_PER_MINUTE=0` 启动 fixture 服务，避免 ~100 次请求触发 429。
 
-本机 2026-11-05 实际运行（后端 `PJGoIoT` v0.5.1，端口 8080）：
+本机 2026-11-05 实际运行（后端 `PJGoIoT` v0.7.0，端口 8080）：
 
 ```
 [e2e] health 200
@@ -203,9 +205,10 @@ cd /path/to/codemagic
 [5. LWW 冲突：旧版本不静默覆盖新版本] 9/9 PASS
 [6. 无 token 401 / 跨用户 404] 9/9 PASS（含复合键越权）
 [7. 设备读数 readings（推送 / 倒序 / summary / 重复 id / NaN / series / metrics）] 36/36 PASS
+[8. 账号：配对码接管 / 数据导出 / 注销] 28/28 PASS
 
 === E2E 合同联调结果 ===
-通过：123 项，跳过：0 项，失败：0 项
+通过：151 项，跳过：0 项，失败：0 项
 结论：PASS
 ```
 
@@ -280,12 +283,24 @@ cd /path/to/codemagic
 - 分桶序列（v0.5.0）：`GET .../readings/series?metric=&from=&to=&bucket=`，`from` / `to` 为 UTC RFC3339，`bucket` ∈ `1m` / `1h` / `1d`；仅返回有数据的桶，按 `start` 升序。
 - 指标清单（v0.5.0）：`GET .../readings/metrics` → `{items:[{metric, unit, count, firstAt, lastAt}]}`，按 `lastAt` 倒序；详情页展示「指标名 · N 条」，单位取该指标最近一条读数。
 - 客户端刷新口径（v0.6.0）：读数入库只本地重绘；可见时远端合并刷新去抖 **800ms**，`series` 与 `summary` 共用同一时间锚点；不可见 / 后台不请求；失败指数退避至 **5 分钟**。服务端清单为空但本地有 pending 读数时，指标与序列均用本地 UTC 网格并标注「待同步：本地数据」。通知、CSV 导出与深色模式均为客户端行为，详见 `docs/consistency.md` 3.10。
+- 后台采集（v0.7.0）：`bluetooth-central` + `BGAppRefreshTask`；连接状态下后台继续 notify 入库（同一 ingestor），后台唤醒只做受限推送（≤100 设备 / ≤200 读数、≥15 分钟间隔、不拉增量不建号）；详见 `docs/consistency.md` 3.11。
 - 区间映射：1 小时 → `1m`（60 桶）、24 小时 → `1h`（24 桶）、7 天 → `1h`（168 桶）、30 天 → `1d`（30 桶），均在 500 桶上限内；默认 24 小时。
 - 图表定位：X 轴按桶 `start` 的真实时间比例定位（不等距）；相邻桶间隔 >1s 视为缺口，折线**断开且不跨缺口连线**（区间带同样断开）；`avg` 连线 + `min`–`max` 区间带；Y 轴按区间 min/max 自适应并带单位；几何计算在 `ReadingsChartGeometry`，有缺口/30 天 24 桶/异常值过滤单测。
 - 离线降级：series 失败时按同一 UTC 网格聚合本地 7 天数据；30 天区间标注「离线：仅本地 7 天数据」，时间轴仍按 30 天绘制、缺数据处留白。
 - 保留：服务端 90 天；客户端本地 7 天（启动与同步成功后清理已同步数据，未上传读数保留至补传）。
 - 采集：CoreBluetooth notify 订阅心率 `0x2A37`、电量 `0x2A19`、温度 `0x2A6E`、Nordic UART TX `6E400003-…`；解析规则见 `docs/consistency.md` 3.7。解析失败静默丢弃并写本地日志（分类「读数」），不崩溃、不写脏数据。
 - 黄金用例：两端共用 `docs/consistency.md` 3.8 的「读数解析黄金用例」表（输入 hex → 唯一期望）；iOS 固化在 `codemagicTests/ReadingsGoldenTests.swift`（18 个用例，含空字节与多行部分失败）。
+
+### 7.4 账号（v0.7.0，契约对齐 PJGoIoT v0.7.0 / openapi 0.6.0）
+
+| 接口 | 方法 | 说明 |
+| --- | --- | --- |
+| `/api/v1/auth/pairing-code` | `POST` | Bearer；返回 `{code, expiresAt}`；8 位、10 分钟、一次性；重新生成使旧码失效 |
+| `/api/v1/auth/pairing-code/claim` | `POST` | Body `{code}`，无需旧 token；返回 `{userId, token}`；404 统一「码无效或已过期」；429 带 `Retry-After` |
+| `/api/v1/me/export?limit=&cursor=` | `GET` | Bearer；返回 `{user, devices, readings, exportedAt, hasMore, nextCursor}`；`cursor` 不透明 |
+| `/api/v1/me` | `DELETE` | Bearer；204；删除账号、设备、读数并使全部 token 失效 |
+
+接管成功后客户端替换 Keychain token，保留本机设备 / 读数并全部重新标记 pending，游标清零；注销成功后按 Keychain → SQLite 业务表 → 同步元数据顺序清理。细节与错误口径见 `docs/consistency.md` 3.11。
 
 ---
 
@@ -344,14 +359,15 @@ cd /path/to/codemagic
 
 - 模拟器无真实蓝牙，状态为 `unsupported`；产品 / 市场 / 详情依赖网络，需运行包含 readings 链路的本地 Go 服务或已更新的 mock。
 - 已实现 GATT 服务发现与四个读数特征的 notify 订阅；**未实现特征写入 / OTA**，GATT 元数据仍来自 catalog。
-- 契约已用本地 fixture 服务端到端验证（123 项断言 PASS，后端 `PJGoIoT` v0.5.1）；App 内的 Keychain token、BGTask 调度与真实网络环境仍需真机验证。
-- 后端 `PJGoIoT` 已打 tag **v0.5.1**（含 `readings/series` 与 `readings/metrics`）；iOS 按该契约实现，CI 若 checkout 到无 series/metrics 的后端，e2e 第 7 节会明确 SKIP。
+- 契约已用本地 fixture 服务端到端验证（151 项断言 PASS，后端 `PJGoIoT` v0.7.0 / 契约 0.6.0）；App 内的 Keychain token、BGTask 调度、后台 BLE 采集与真实网络环境仍需真机验证。
+- 后端 `PJGoIoT` 已打 tag **v0.7.0**（含配对码、账号导出与注销）；iOS 按该契约实现，CI 若 checkout 到旧后端，e2e 第 8 节会明确 SKIP。
 - Release 签名与 App Store 上架未验证（无 Apple 开发者账号 / 证书）。
 
 ---
 
 ## 10. 版本记录
 
+- `v0.7.0`：配对码跨设备接管、账号数据导出与注销、后台采集（`MARKETING_VERSION 0.7.0` / build 15，tag `v0.7.0`）。「我的」新增 8 位一次性配对码（真实 `expiresAt` 倒计时、复制、重新生成使旧码失效）、从旧设备接管（token 替换 + 本机设备/读数全部重新标记 pending + 游标清零）、账号导出（`hasMore`/`nextCursor` 循环拉全、临时文件分享后删除、真实进度）、注销（二次确认永久删除，成功清 Keychain/SQLite 业务表/同步元数据，401 与网络错误分别处理）。声明 `bluetooth-central`，新增持久化后台采集开关（默认开启、说明耗电、关闭即断开）；后台唤醒仅受限推送（≤100 设备/≤200 读数、≥15 分钟间隔、不拉增量不建号）。单测 207 个（新增 19 个），E2E 151 项（新增 28 项）。后端 `PJGoIoT` v0.7.0（契约 0.6.0）。
 - `v0.6.0`：请求节流、本地降级与四项产品功能（`MARKETING_VERSION 0.6.0` / build 14，tag `v0.6.0`）。详情页读数 notify 只本地重绘，远端刷新 800ms 去抖合并，不可见/后台不请求，失败指数退避 ≤5 分钟；服务端指标为空且本地有待同步读数时用本地指标与 UTC 网格并标注「待同步：本地数据」。新增阈值告警本地通知（首次使用授权、1/5/30 分钟节流、恢复通知、点击进详情、「我的」真实开关与权限引导）、CSV 导出（7 天内本地 / 更长服务端分页 ≤5 万条、UTF-8 BOM、ISO8601 UTC、RFC 4180 转义、临时文件分享后删除、真实进度与重试）、设备列表搜索/持久化排序/分组筛选/双空状态、外观三态与动态语义色（AccentColor 增 dark 变体）。单测 188 个（新增 31 个），E2E 123 项（无契约变更）。后端 `PJGoIoT` v0.5.1。
 - `v0.5.0`：设备详情「数据」区升级为长周期可切换图表（`MARKETING_VERSION 0.5.0` / build 13，tag `v0.5.0`）。新增 `ReadingsRange`（1 小时 / 24 小时 / 7 天 / 30 天，默认 24 小时）映射 `1m` / `1h` / `1h` / `1d`，切换即时重绘并重新查询 `readings/series`（`from` / `to` 为 UTC RFC3339）；X 轴按桶 `start` 真实时间比例定位，缺口处折线断开（不跨缺口连线），`avg` 折线叠加 `min`–`max` 区间带，Y 轴按区间 min/max 自适应并带单位；几何独立在 `ReadingsChartGeometry`。指标清单改用 `readings/metrics`（`count` / `lastAt` / `unit`），展示「指标名 · N 条」，单位随指标同步；离线按同一 UTC 网格聚合本地数据，30 天区间标注「离线：仅本地 7 天数据」。单测 157 个（新增 16 个），E2E 123 项（新增 17 项：series/metrics/空区间/非法 bucket）。后端 `PJGoIoT` v0.5.1。
 - `v0.4.1`：读数解析黄金用例两端对齐（`MARKETING_VERSION 0.4.1` / build 12，tag `v0.4.1`）。新增 `codemagicTests/ReadingsGoldenTests.swift` 18 个用例（心率 / 电池 / 温度 / NUS / 空字节）；`docs/consistency.md` 新增 3.8「读数解析黄金用例」章节，声明两端共用同一张表；复核 7 天清理只删已同步记录，补「30 天前 pending 清理后仍在」用例；单测 141 个。核对发现表中 `00 4A → 20.0` 与 IEEE-754 binary16 不符（`0x4A00` = 12.0，20.0 对应 `0x4D00`），实现按真实半精度解码、未硬编码，两条位型均有用例并在文档脚注标注。实现行为无变更。

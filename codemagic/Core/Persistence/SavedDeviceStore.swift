@@ -46,15 +46,24 @@ final class SavedDeviceStore {
     }
 
     /// 待上传记录：本地新增/修改/删除但尚未同步的行，包含 tombstone。
-    func fetchPending() throws -> [SavedDevice] {
-        let rows = try database.query(
-            """
-            SELECT * FROM saved_devices
-            WHERE sync_state != ?
-            ORDER BY updated_at ASC;
-            """,
-            [.text(SyncState.synced.rawValue)]
-        )
+    /// `limit` 用于后台唤醒场景限制单次网络请求量，剩余记录留待下次同步。
+    func fetchPending(limit: Int? = nil) throws -> [SavedDevice] {
+        let sql = limit == nil
+            ? """
+              SELECT * FROM saved_devices
+              WHERE sync_state != ?
+              ORDER BY updated_at ASC;
+              """
+            : """
+              SELECT * FROM saved_devices
+              WHERE sync_state != ?
+              ORDER BY updated_at ASC LIMIT ?;
+              """
+        var parameters: [SQLValue] = [.text(SyncState.synced.rawValue)]
+        if let limit {
+            parameters.append(.integer(Int64(limit)))
+        }
+        let rows = try database.query(sql, parameters)
         return rows.compactMap(Self.makeDevice)
     }
 

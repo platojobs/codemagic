@@ -179,6 +179,18 @@ final class ReadingsStore {
         }
     }
 
+    /// 换账号后把本机全部读数重新标记为待上传（含原已同步记录），让新账号拿到本机历史。
+    /// 返回受影响行数；7 天保留清理只删除已同步记录，因此 pending 数据不会被误删。
+    @discardableResult
+    func markAllPending() throws -> Int {
+        let rows = try database.query("SELECT COUNT(*) AS total FROM readings;")
+        try database.execute(
+            "UPDATE readings SET sync_state = ?;",
+            [.text(SyncState.pending.rawValue)]
+        )
+        return Int(rows.first?.integer("total") ?? 0)
+    }
+
     /// 7 天保留清理。
     ///
     /// 只删除「已同步」且超过保留期的读数：未上传读数必须先补传，避免离线期间静默丢数据；

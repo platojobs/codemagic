@@ -97,6 +97,30 @@ final class SQLiteDatabase {
         }
     }
 
+    /// 注销账号：清空全部业务表，保留表结构与 schema 版本。非业务设置仍由 UserDefaults 持有。
+    func resetBusinessData() throws {
+        try queue.sync {
+            let tables = [
+                "readings",
+                "saved_devices",
+                "rules",
+                "scan_logs",
+                "recent_devices",
+                "device_info_cache"
+            ]
+            try performExecute("BEGIN IMMEDIATE;", [])
+            do {
+                for table in tables {
+                    try performExecute("DELETE FROM \(table);", [])
+                }
+                try performExecute("COMMIT;", [])
+            } catch {
+                try? performExecute("ROLLBACK;", [])
+                throw error
+            }
+        }
+    }
+
     // MARK: - Migration
 
     private func migrate() throws {

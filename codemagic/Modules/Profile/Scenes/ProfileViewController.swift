@@ -6,6 +6,7 @@ final class ProfileViewController: UIViewController {
         case bluetooth
         case localData
         case sync
+        case account
         case alerts
         case appearance
         case settings
@@ -173,6 +174,132 @@ final class ProfileViewController: UIViewController {
         )
         navigationController?.pushViewController(about, animated: true)
     }
+
+    // MARK: - Account
+
+    private func openPairingCode() {
+        let controller = PairingCodeViewController(viewModel: viewModel.makePairingCodeViewModel())
+        navigationController?.pushViewController(controller, animated: true)
+    }
+
+    private func openPairingClaim() {
+        let controller = PairingClaimViewController(
+            viewModel: viewModel.makePairingClaimViewModel()
+        ) { [weak self] in
+            self?.viewModel.syncAfterTakeover()
+        }
+        navigationController?.pushViewController(controller, animated: true)
+    }
+
+    /// 导出进度使用真实已读取读数条数；文件落临时目录，分享面板关闭后删除。
+    private func exportAccountData() {
+        let progress = UIAlertController(
+            title: "导出我的数据",
+            message: "正在读取账号数据…",
+            preferredStyle: .alert
+        )
+        present(progress, animated: true)
+
+        viewModel.exportAccountData(progress: { [weak progress] count in
+            progress?.message = count > 0 ? "已读取 \(count) 条读数…" : "正在读取账号数据…"
+        }, completion: { [weak self, weak progress] result in
+            progress?.dismiss(animated: true) {
+                guard let self else { return }
+                switch result {
+                case .success(let url):
+                    self.presentShareSheet(for: url)
+                case .failure(let error):
+                    self.presentExportError(error)
+                }
+            }
+        })
+    }
+
+    private func presentShareSheet(for url: URL) {
+        let activity = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+        activity.completionWithItemsHandler = { [weak self] _, _, _, _ in
+            // 分享或取消后都删除临时文件，不在沙盒长期留存账号数据。
+            self?.viewModel.removeExportedFile(at: url)
+        }
+        if let popover = activity.popoverPresentationController {
+            popover.sourceView = tableView
+            popover.sourceRect = tableView.bounds
+        }
+        present(activity, animated: true)
+    }
+
+    private func presentExportError(_ error: AccountExportError) {
+        let alert = UIAlertController(
+            title: "导出失败",
+            message: error.errorDescription ?? "请稍后重试。",
+            preferredStyle: .alert
+        )
+        if error.isRetryable {
+            alert.addAction(UIAlertAction(title: "重试", style: .default) { [weak self] _ in
+                self?.exportAccountData()
+            })
+        }
+        alert.addAction(UIAlertAction(title: "好", style: .cancel))
+        present(alert, animated: true)
+    }
+
+    private func confirmDeleteAccount() {
+        let alert = UIAlertController(
+            title: "注销账号？",
+            message: viewModel.accountDeletionConfirmationText,
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "取消", style: .cancel))
+        alert.addAction(UIAlertAction(title: "永久删除并注销", style: .destructive) { [weak self] _ in
+            self?.performDeleteAccount()
+        })
+        present(alert, animated: true)
+    }
+
+    private func performDeleteAccount() {
+        guard !viewModel.isSyncing else {
+            presentMessage(title: "无法注销", message: "正在同步，请等待同步结束后再注销账号。")
+            return
+        }
+        let progress = UIAlertController(
+            title: "注销账号",
+            message: "正在删除云端账号…",
+            preferredStyle: .alert
+        )
+        present(progress, animated: true)
+
+        viewModel.deleteAccount { [weak self, weak progress] result in
+            progress?.dismiss(animated: true) {
+                guard let self else { return }
+                switch result {
+                case .success:
+                    self.presentMessage(
+                        title: "账号已注销",
+                        message: "云端与本机数据已清空，回到全新的匿名状态；下一次同步会创建新的匿名账号。"
+                    )
+                case .failure(let error):
+                    let alert = UIAlertController(
+                        title: "注销失败",
+                        message: error.errorDescription ?? "请稍后重试。",
+                        preferredStyle: .alert
+                    )
+                    if error.isRetryable {
+                        alert.addAction(UIAlertAction(title: "重试", style: .default) { [weak self] _ in
+                            self?.performDeleteAccount()
+                        })
+                    }
+                    alert.addAction(UIAlertAction(title: "好", style: .cancel))
+                    self.present(alert, animated: true)
+                }
+            }
+        }
+    }
+
+    private func presentMessage(title: String, message: String) {
+        let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "好", style: .cancel))
+        present(alert, animated: true)
+    }
 }
 
 // MARK: - UITableViewDataSource
@@ -188,9 +315,10 @@ extension ProfileViewController: UITableViewDataSource {
         case .bluetooth: return 3
         case .localData: return 2
         case .sync: return 4 + (viewModel.needsRelogin ? 1 : 0)
+        case .account: return 4
         case .alerts: return 3
         case .appearance: return 1
-        case .settings: return 2
+        case .settings: return 3
         case .about: return 3
         }
     }
@@ -201,6 +329,7 @@ extension ProfileViewController: UITableViewDataSource {
         case .bluetooth: return "蓝牙权限"
         case .localData: return "本地数据"
         case .sync: return "同步"
+        case .account: return "账号与数据"
         case .alerts: return "阈值告警"
         case .appearance: return "外观"
         case .settings: return "设置"
@@ -215,13 +344,17 @@ extension ProfileViewController: UITableViewDataSource {
             return viewModel.permissionGuidance
         case .sync:
             return "\(viewModel.syncStatusText)\n\(viewModel.syncDegradationText)"
+        case .account:
+            return "配对码一次性有效，10 分钟内失效；导出文件在分享完成后自动删除；注销不可恢复。"
         case .alerts:
             return viewModel.notificationGuidance
         case .appearance:
             return "深色模式使用动态语义色，图表、区间带与卡片会自动适配。"
+        case .settings:
+            return "\(viewModel.backgroundCollectionStatusText)\n\(viewModel.backgroundCollectionGuidance)"
         case .about:
             return viewModel.startupWarning ?? "行为口径与 Android 端共用 docs/consistency.md。"
-        case .localData, .settings:
+        case .localData:
             return nil
         }
     }
@@ -271,6 +404,18 @@ extension ProfileViewController: UITableViewDataSource {
                     title: viewModel.isSyncing ? "登录中…" : "重新登录",
                     color: AppTheme.Palette.accent
                 )
+            }
+
+        case .account:
+            switch indexPath.row {
+            case 0:
+                return makeValueCell(title: "迁移到新设备", value: "生成配对码", showsDisclosure: true)
+            case 1:
+                return makeValueCell(title: "从旧设备接管", value: "输入 8 位配对码", showsDisclosure: true)
+            case 2:
+                return makeActionCell(title: "导出我的数据", color: AppTheme.Palette.accent)
+            default:
+                return makeActionCell(title: "注销账号", color: AppTheme.Palette.promotion)
             }
 
         case .alerts:
@@ -323,12 +468,19 @@ extension ProfileViewController: UITableViewDataSource {
                 ) { [weak self] isOn in
                     self?.viewModel.autoSaveRecentDevices = isOn
                 }
-            } else {
+            } else if indexPath.row == 1 {
                 cell.configure(
                     title: "进入首页自动开始扫描",
                     isOn: viewModel.autoScanOnLaunch
                 ) { [weak self] isOn in
                     self?.viewModel.autoScanOnLaunch = isOn
+                }
+            } else {
+                cell.configure(
+                    title: "后台采集",
+                    isOn: viewModel.backgroundCollectionEnabled
+                ) { [weak self] isOn in
+                    self?.viewModel.backgroundCollectionEnabled = isOn
                 }
             }
             return cell
@@ -364,6 +516,14 @@ extension ProfileViewController: UITableViewDelegate {
             viewModel.manualSync()
         case .sync where indexPath.row == 4:
             confirmRelogin()
+        case .account where indexPath.row == 0:
+            openPairingCode()
+        case .account where indexPath.row == 1:
+            openPairingClaim()
+        case .account where indexPath.row == 2:
+            exportAccountData()
+        case .account where indexPath.row == 3:
+            confirmDeleteAccount()
         case .alerts where indexPath.row == 1:
             presentThrottlePicker()
         case .alerts where indexPath.row == 2 && viewModel.needsNotificationSettings:

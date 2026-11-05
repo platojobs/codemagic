@@ -79,6 +79,9 @@ final class MainTabBarController: UITabBarController {
                     scanLogStore: environment.scanLogStore,
                     settingsStore: environment.settingsStore,
                     syncEngine: environment.syncEngine,
+                    pairingService: environment.pairingService,
+                    accountExportService: environment.accountExportService,
+                    accountDeletionService: environment.accountDeletionService,
                     baseURLText: environment.apiConfiguration?.displayString ?? "未配置",
                     startupWarning: environment.startupWarning,
                     notifications: environment.notificationService

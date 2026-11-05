@@ -9,6 +9,7 @@ final class SettingsStore {
         static let ruleAlertThrottleMinutes = "settings.ruleAlertThrottleMinutes"
         static let appearance = "settings.appearance"
         static let deviceSort = "settings.deviceSort"
+        static let backgroundCollection = "settings.backgroundCollection"
     }
 
     /// 告警节流窗口可选项，与「我的」页一致。
@@ -65,5 +66,21 @@ final class SettingsStore {
     var deviceSort: DeviceSort {
         get { DeviceSort(rawValue: defaults.string(forKey: Key.deviceSort) ?? "") ?? .recent }
         set { defaults.set(newValue.rawValue, forKey: Key.deviceSort) }
+    }
+
+    /// 后台采集：开启时利用 `bluetooth-central` 在后台保持连接并接收 notify；
+    /// 关闭时进入后台立即断开连接。默认开启，需在界面明确告知耗电影响。
+    var backgroundCollectionEnabled: Bool {
+        get { defaults.object(forKey: Key.backgroundCollection) as? Bool ?? true }
+        set { defaults.set(newValue, forKey: Key.backgroundCollection) }
+    }
+
+    /// 「我的」页展示的后台采集状态说明。
+    func backgroundCollectionStatusText(connectedCount: Int = 0) -> String {
+        if backgroundCollectionEnabled {
+            let connection = connectedCount > 0 ? "当前 \(connectedCount) 台设备已连接" : "当前无连接设备"
+            return "已开启 · \(connection)；后台继续接收读数，系统省电策略可能延后唤醒"
+        }
+        return "已关闭 · 进入后台会断开蓝牙连接，不再接收读数"
     }
 }

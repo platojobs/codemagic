@@ -18,6 +18,10 @@ protocol BluetoothServicing: AnyObject {
     /// 连接后订阅心率 / 电池 / 温度 / Nordic UART TX（0x2A37 / 0x2A19 / 0x2A6E / 6E400003…）。
     func startReading(peripheralID: UUID)
     func stopReading(peripheralID: UUID)
+    /// 当前已连接外设数量，用于「我的」页展示后台采集状态。
+    var connectedPeripheralCount: Int { get }
+    /// 关闭后台采集或进入后台时断开全部连接，不再保持 BLE 链路。
+    func disconnectAll()
 }
 
 /// CoreBluetooth 实现：真实扫描、连接与 RSSI 回调，回调统一在主线程投递。
@@ -121,6 +125,29 @@ final class CoreBluetoothService: NSObject, BluetoothServicing {
     func disconnect(peripheralID: UUID) {
         guard let peripheral = peripheral(for: peripheralID) else { return }
         centralManager.cancelPeripheralConnection(peripheral)
+    }
+
+    var connectedPeripheralCount: Int {
+        var count = 0
+        for peripheral in discoveredPeripherals.values where peripheral.state == .connected {
+            count += 1
+        }
+        return count
+    }
+
+    /// 后台采集关闭/进入后台：断开所有已知连接并停止读取。
+    /// 使用 `retrieveConnectedPeripherals` 兜底覆盖本次进程未在扫描表中、但系统仍保持链路的外设。
+    func disconnectAll() {
+        readingPeripheralID = nil
+        var targets: [UUID: CBPeripheral] = discoveredPeripherals
+        if state == .poweredOn {
+            for peripheral in centralManager.retrieveConnectedPeripherals(withServices: []) {
+                targets[peripheral.identifier] = peripheral
+            }
+        }
+        for (_, peripheral) in targets where peripheral.state == .connected || peripheral.state == .connecting {
+            centralManager.cancelPeripheralConnection(peripheral)
+        }
     }
 
     func startReading(peripheralID: UUID) {
