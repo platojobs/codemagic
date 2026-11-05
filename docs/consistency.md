@@ -211,9 +211,9 @@ iOS 端不再存在“历史端点”调用；唯一保留的旧路径 `/api/v1/
 - 读数：推送 3 条（`appliedReadings=3`）→ 查询按 `recordedAt` 倒序 → `summary` 的 count/min/max/avg/last/unit/window 正确 → 重复 id 推送 `appliedReadings=0`、`skippedReadings=3` → 非法 `NaN` 返回 400；
 - 长周期（v0.5.0）：`series` 按 `1m` 返回、桶按 `start` 升序且 `count` 合计等于推送条数、每桶 `min ≤ avg ≤ max`；空区间返回 `buckets: []`；非法 `bucket=5m` 返回 400 `BAD_REQUEST`；`metrics` 按 `lastAt` 倒序、最新温度指标在首位、心率指标 `count=3` 且 `unit=bpm`。
 
-当前共 **123 项断言全部通过**（v0.5.0 联调记录，后端 `PJGoIoT` **v0.5.1**，`STORE=fixture`）。
+当前共 **123 项断言全部通过**（v0.5.0 联调记录，后端 `PJGoIoT` **v0.5.1**，`STORE=fixture`）；CI 运行 [41949724232](https://github.com/platojobs/codemagic/actions/runs/41949724232) 同样为 `通过：123 项，跳过：0 项，失败：0 项`。
 
-运行记录见 `README.md` 第 4.2 节；该脚本已接入 GitHub Actions `ios.yml` 的 `e2e-contract` job（macOS runner，与 build 并行）。v0.4.0 实际 CI 运行 [41941929495](https://github.com/platojobs/codemagic/actions/runs/41941929495) 中 `e2e-contract` 56s、106 项全 PASS（0 SKIP），`build-test` 3m47s、122 单测全绿。若 CI checkout 到的后端尚未包含 readings，第 7 节会输出 `[SKIP]`（能力门控，不计通过、不伪造 PASS），其余断言照常执行。
+运行记录见 `README.md` 第 4.2 节；该脚本已接入 GitHub Actions `ios.yml` 的 `e2e-contract` job（macOS runner，与 build 并行）。若 CI checkout 到的后端尚未包含读数链路，第 7 节会输出 `[SKIP]`（能力门控，不计通过、不伪造 PASS）；`series` / `metrics` 自 v0.5.0 起属于必需契约，缺失即真实失败，不会跳过。
 
 ### 3.6 市场筛选维度（真实字段，不造假分类）
 
