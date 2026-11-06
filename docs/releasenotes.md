@@ -52,7 +52,7 @@
 - **APNs 申报对齐**：清单 `DeviceID` 当前唯一实际内容是 BLE 外设 UUID；当前二进制无 `aps-environment`、不产生也不上报 APNs 令牌，`push_devices` 只存「未配置推送」状态。`store-listing.md` / `app-privacy.md` / `privacy-policy.md` 明确「当前不采集」，并列出启用推送后需同步修改的 6 处（entitlement / 证书、`APNSTokenProvider`、清单、两份隐私文档、商店文案与问卷、单测）。
 - **8 类逐项一致**：新增 `PrivacyManifestTests`（2 例）解析 `PrivacyInfo.xcprivacy` 并断言键集合恰为 8 个、全部 Linked / Tracking=false / AppFunctionality；同时解析 `store-listing.md` 的 `NSPrivacyCollectedDataType*`，断言与清单完全相同，防止两边不一致。
 - **测试 / 构建**：单测 **449 个 0 失败**（447 + 2），构建 `BUILD SUCCEEDED`；e2e 仍为 **460 项**。
-- **CI**：待推送后回填。
+- **CI**：tag run [42289952480](https://github.com/platojobs/codemagic/actions/runs/42289952480) success（449 单测 / 460 项 E2E）；main run [42288864145](https://github.com/platojobs/codemagic/actions/runs/42288864145) success（同为 449 / 460）；tag `v0.28.0` 未移动。
 - **未验证**：真实 APNs 推送、真机 BLE、公网隐私政策 URL、生产环境 / 隐藏本机信息的商店截图、App Store 隐私问卷实际提交。
 
 ---
