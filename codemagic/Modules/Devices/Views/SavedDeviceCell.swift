@@ -25,6 +25,9 @@ final class SavedDeviceCell: UITableViewCell {
         nameLabel.text = device.displayName
 
         var metaParts = [device.groupName]
+        if let mark = device.markStatusText {
+            metaParts.append(mark)
+        }
         metaParts.append(
             device.lastSeenAt.map { L10n.f("device.cell.lastSeen", String(describing: AppDateFormat.relative($0))) } ?? L10n.t("device.detail.noScanRecord")
         )

@@ -102,6 +102,8 @@ struct RemoteDevice: Decodable, Equatable {
     let roomID: String?
     /// 响应里是否真的出现了 `roomId` 键：缺省（旧后端）与显式 `null` 语义不同。
     let hasRoomField: Bool
+    /// 设备标记（契约 0.20.0）：字段缺省=保持原值；`null`/`""`=取消标记；时间=标记。
+    let markedAt: Patch<Date>
     let updatedAt: Date
     let deletedAt: Date?
     let serverSeq: Int64?
@@ -117,6 +119,7 @@ struct RemoteDevice: Decodable, Equatable {
         case group
         case householdId
         case roomId
+        case markedAt
         case updatedAt
         case deletedAt
         case serverSeq
@@ -135,6 +138,21 @@ struct RemoteDevice: Decodable, Equatable {
         householdID = try? container.decodeIfPresent(String.self, forKey: .householdId)
         roomID = try? container.decodeIfPresent(String.self, forKey: .roomId)
         hasRoomField = container.contains(.roomId)
+        // 三态：键缺省=保持本地原值；null 或 ""=取消标记；合法 RFC3339=标记。
+        if container.contains(.markedAt) {
+            let raw = (try? container.decodeIfPresent(String.self, forKey: .markedAt)) ?? nil
+            let text = (raw ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if text.isEmpty {
+                markedAt = .clear
+            } else if let date = SyncDateCodec.parse(text) {
+                markedAt = .set(date)
+            } else {
+                // 非法值不臆造日期，也不当作取消标记，按未上报处理。
+                markedAt = .absent
+            }
+        } else {
+            markedAt = .absent
+        }
         updatedAt = SyncDateCodec.parse(
             (try? container.decodeIfPresent(String.self, forKey: .updatedAt)) ?? ""
         ) ?? Date(timeIntervalSince1970: 0)
@@ -157,6 +175,7 @@ struct RemoteDevice: Decodable, Equatable {
         householdID: String? = nil,
         roomID: String? = nil,
         hasRoomField: Bool = true,
+        markedAt: Patch<Date> = .absent,
         updatedAt: Date,
         deletedAt: Date? = nil,
         serverSeq: Int64? = nil
@@ -172,6 +191,7 @@ struct RemoteDevice: Decodable, Equatable {
         self.householdID = householdID
         self.roomID = roomID
         self.hasRoomField = hasRoomField
+        self.markedAt = markedAt
         self.updatedAt = updatedAt
         self.deletedAt = deletedAt
         self.serverSeq = serverSeq
@@ -196,6 +216,12 @@ struct RemoteDevice: Decodable, Equatable {
         let aliasText = alias ?? ""
         let advertisedText = advertisedName ?? ""
         let groupText = group ?? ""
+        let markedDate: Date?
+        if case .set(let date) = markedAt {
+            markedDate = date
+        } else {
+            markedDate = nil
+        }
         return SavedDevice(
             id: remoteID,
             peripheralID: peripheralID,
@@ -210,6 +236,7 @@ struct RemoteDevice: Decodable, Equatable {
             vendor: nil,
             firmwareVersion: nil,
             lastSeenAt: nil,
+            markedAt: markedDate,
             createdAt: updatedAt,
             updatedAt: updatedAt,
             deletedAt: deletedAt,
@@ -333,6 +360,8 @@ struct SyncChangesPage: Decodable, Equatable {
 /// `alias` / `advertisedName` / `group` 使用 `Patch<String>` 表达三态：
 /// `absent` 时完全省略字段（服务端保持原值），`clear` 编码为 `""`（显式清除），
 /// `set` 编码具体值。`nil` 与空串因此不会混淆。
+/// `markedAt`（契约 0.20.0）用 `Patch<Date>`：缺省省略，取消标记编码 JSON `null`，
+/// 标记编码 RFC3339 时间；与 `alias` 等字段共用设备级 `updatedAt` 的 LWW 通道。
 struct PushDevice: Encodable, Equatable {
     let id: String
     let platform: String
@@ -341,6 +370,7 @@ struct PushDevice: Encodable, Equatable {
     let alias: Patch<String>
     let advertisedName: Patch<String>
     let group: Patch<String>
+    let markedAt: Patch<Date>
     let updatedAt: Date
     let deleted: Bool
     /// openapi 0.3.2 可选字段；未知型号时为 nil，不填假值。
@@ -354,6 +384,7 @@ struct PushDevice: Encodable, Equatable {
         case alias
         case advertisedName
         case group
+        case markedAt
         case updatedAt
         case deleted
         case deviceType
@@ -367,6 +398,7 @@ struct PushDevice: Encodable, Equatable {
         alias: Patch<String> = .absent,
         advertisedName: Patch<String> = .absent,
         group: Patch<String> = .absent,
+        markedAt: Patch<Date> = .absent,
         updatedAt: Date,
         deleted: Bool,
         deviceType: String? = nil
@@ -378,6 +410,7 @@ struct PushDevice: Encodable, Equatable {
         self.alias = alias
         self.advertisedName = advertisedName
         self.group = group
+        self.markedAt = markedAt
         self.updatedAt = updatedAt
         self.deleted = deleted
         let trimmed = deviceType?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -393,6 +426,7 @@ struct PushDevice: Encodable, Equatable {
             alias: device.resolvedAliasPatch,
             advertisedName: device.resolvedAdvertisedNamePatch,
             group: device.resolvedGroupPatch,
+            markedAt: device.resolvedMarkedAtPatch,
             updatedAt: device.updatedAt,
             deleted: device.deletedAt != nil,
             deviceType: device.deviceType
@@ -408,6 +442,15 @@ struct PushDevice: Encodable, Equatable {
         try encode(alias, forKey: .alias, into: &container)
         try encode(advertisedName, forKey: .advertisedName, into: &container)
         try encode(group, forKey: .group, into: &container)
+        switch markedAt {
+        case .absent:
+            break
+        case .clear:
+            // 契约：`null`（或 `""`）表示取消标记；显式 null 语义最清晰。
+            try container.encodeNil(forKey: .markedAt)
+        case .set(let date):
+            try container.encode(SyncDateCodec.string(from: date), forKey: .markedAt)
+        }
         try container.encode(SyncDateCodec.string(from: updatedAt), forKey: .updatedAt)
         try container.encode(deleted, forKey: .deleted)
         try container.encodeIfPresent(deviceType, forKey: .deviceType)

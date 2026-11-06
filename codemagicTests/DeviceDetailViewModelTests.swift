@@ -187,6 +187,42 @@ final class DeviceDetailViewModelTests: XCTestCase {
         }
         XCTAssertEqual(product.vendor, "云端厂商")
     }
+
+    // MARK: - v0.25.0 设备标记
+
+    /// 标记先写本机：详情立即显示「待同步」，不显示为已同步；再次点击取消标记。
+    func testToggleMarkWritesLocalPendingStateAndUnmarks() throws {
+        let device = SavedDevice(
+            peripheralID: UUID(),
+            advertisedName: "面板",
+            groupName: SavedDevice.defaultGroupName,
+            syncState: .synced
+        )
+        let viewModel = try makeViewModel(device: device)
+
+        XCTAssertEqual(viewModel.markValueText, L10n.t("device.detail.notMarked"))
+
+        viewModel.toggleMark()
+
+        let marked = try XCTUnwrap(savedDeviceStore.fetch(id: device.id))
+        let markedAt = try XCTUnwrap(marked.markedAt)
+        XCTAssertEqual(marked.markedAtPatch, .set(markedAt))
+        XCTAssertEqual(marked.syncState, .pending, "写入本机后必须待同步")
+        XCTAssertTrue(
+            viewModel.markValueText.hasSuffix(L10n.t("sync.state.pending")),
+            "未同步时详情明确标注待同步：\(viewModel.markValueText)"
+        )
+        XCTAssertEqual(marked.markStatusText, L10n.t("device.markedPending"))
+
+        viewModel.toggleMark()
+
+        let cleared = try XCTUnwrap(savedDeviceStore.fetch(id: device.id))
+        XCTAssertNil(cleared.markedAt)
+        XCTAssertEqual(cleared.markedAtPatch, .clear, "取消标记走 null 三态")
+        XCTAssertEqual(cleared.syncState, .pending)
+        XCTAssertNil(cleared.markStatusText)
+        XCTAssertEqual(viewModel.markValueText, L10n.t("device.detail.notMarked"))
+    }
 }
 
 final class ProductsAndMarketViewModelTests: XCTestCase {

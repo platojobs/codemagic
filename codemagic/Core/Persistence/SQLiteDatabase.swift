@@ -180,6 +180,9 @@ final class SQLiteDatabase {
         if version < 16 {
             try migrateToVersion16()
         }
+        if version < 17 {
+            try migrateToVersion17()
+        }
     }
 
     /// v1：五张业务表，均含 `id / updated_at / deleted_at / sync_state`。
@@ -736,6 +739,29 @@ final class SQLiteDatabase {
         add("created_at", "REAL NOT NULL DEFAULT 0")
         add("updated_at", "REAL NOT NULL DEFAULT 0")
         script += "PRAGMA user_version = 16;"
+        try executeScript(script)
+    }
+
+    /// v17：设备标记的本地列（契约 0.20.0）。
+    ///
+    /// `marked_at` 保存标记时间（`nil` = 未标记，推送编码为 JSON `null`）；
+    /// `marked_at_patch` 保存待上报三态（`absent` / `clear` / `set`），与
+    /// `alias_patch` 等字段级 LWW 列一致。可重复执行：`PRAGMA table_info` 判列，
+    /// 缺列才 `ALTER`，旧行保留。
+    private func migrateToVersion17() throws {
+        let columns = Set(try performQuery("PRAGMA table_info(saved_devices);", [])
+            .compactMap { $0.text("name") })
+        var script = ""
+        // 极端旧库（仅手写过部分表）可能还没有 saved_devices；此时无列可加，跳过即可。
+        if !columns.isEmpty {
+            if !columns.contains("marked_at") {
+                script += "ALTER TABLE saved_devices ADD COLUMN marked_at REAL;\n"
+            }
+            if !columns.contains("marked_at_patch") {
+                script += "ALTER TABLE saved_devices ADD COLUMN marked_at_patch TEXT NOT NULL DEFAULT 'absent';\n"
+            }
+        }
+        script += "PRAGMA user_version = 17;"
         try executeScript(script)
     }
 

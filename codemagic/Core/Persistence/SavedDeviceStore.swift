@@ -82,8 +82,8 @@ final class SavedDeviceStore {
             (id, peripheral_id, platform, external_id, name, advertised_name, remark, group_name, room_id, mac,
              vendor, device_type, firmware_version, last_seen_at, created_at, updated_at, deleted_at,
              sync_state, alias_patch, advertised_name_patch, group_patch,
-             household_id, remote_room_id, remote_household_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+             household_id, remote_room_id, remote_household_id, marked_at, marked_at_patch)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """,
             [
                 .text(device.id.uuidString),
@@ -111,6 +111,8 @@ final class SavedDeviceStore {
                 device.householdID.map { .text($0.uuidString) } ?? .null,
                 device.remoteRoomID.map(SQLValue.text) ?? .null,
                 device.remoteHouseholdID.map(SQLValue.text) ?? .null,
+                device.markedAt.map { .double($0.timeIntervalSince1970) } ?? .null,
+                .text(device.markedAtPatch.persistedState),
             ]
         )
     }
@@ -212,6 +214,25 @@ final class SavedDeviceStore {
         )
     }
 
+    /// 用户标记 / 取消标记：先写本机并置待同步，由后续 push 走字段级 LWW。
+    /// `markedAt = nil` 表示取消标记（推送编码为 JSON `null`）。
+    func updateMark(id: UUID, markedAt: Date?, at date: Date) throws {
+        try database.execute(
+            """
+            UPDATE saved_devices
+            SET marked_at = ?, marked_at_patch = ?, updated_at = ?, sync_state = ?
+            WHERE id = ?;
+            """,
+            [
+                markedAt.map { .double($0.timeIntervalSince1970) } ?? .null,
+                .text(markedAt == nil ? "clear" : "set"),
+                .double(date.timeIntervalSince1970),
+                .text(SyncState.pending.rawValue),
+                .text(id.uuidString),
+            ]
+        )
+    }
+
     /// 标记一批记录已同步（新增/修改/删除均适用）。
     /// 已上报成功的字段三态归零，下一次同步不会重复上报未修改的字段。
     func markSynced(ids: [UUID], at date: Date) throws {
@@ -220,7 +241,7 @@ final class SavedDeviceStore {
             try database.execute(
                 """
                 UPDATE saved_devices
-                SET sync_state = ?, alias_patch = ?, advertised_name_patch = ?, group_patch = ?
+                SET sync_state = ?, alias_patch = ?, advertised_name_patch = ?, group_patch = ?, marked_at_patch = ?
                 WHERE id = ?;
                 """,
                 [
@@ -228,6 +249,7 @@ final class SavedDeviceStore {
                     .text(Patch<String>.absent.persistedState),
                     .text(Patch<String>.absent.persistedState),
                     .text(Patch<String>.absent.persistedState),
+                    .text(Patch<Date>.absent.persistedState),
                     .text(id.uuidString),
                 ]
             )
@@ -246,7 +268,8 @@ final class SavedDeviceStore {
         try database.execute(
             """
             UPDATE saved_devices
-            SET sync_state = ?, alias_patch = ?, advertised_name_patch = ?, group_patch = ?
+            SET sync_state = ?, alias_patch = ?, advertised_name_patch = ?, group_patch = ?,
+                marked_at_patch = CASE WHEN marked_at IS NULL THEN 'absent' ELSE 'set' END
             WHERE deleted_at IS NULL;
             """,
             [
@@ -272,10 +295,21 @@ final class SavedDeviceStore {
         let updatedAt = Date(timeIntervalSince1970: row.double("updated_at") ?? 0)
         let lastSeenAt = row.double("last_seen_at").map(Date.init(timeIntervalSince1970:))
         let deletedAt = row.double("deleted_at").map(Date.init(timeIntervalSince1970:))
+        let markedAt = row.double("marked_at").map(Date.init(timeIntervalSince1970:))
         let syncState = SyncState(rawValue: row.text("sync_state") ?? "") ?? .pending
         let advertisedName = row.text("advertised_name") ?? row.text("name") ?? ""
         let remark = row.text("remark") ?? ""
         let groupName = row.text("group_name") ?? SavedDevice.defaultGroupName
+        // `.set` 必须有时间值；列缺失 / 空值时按 absent 处理，不造 epoch 假值。
+        let markedAtPatch: Patch<Date>
+        switch row.text("marked_at_patch") ?? "absent" {
+        case "clear":
+            markedAtPatch = .clear
+        case "set":
+            markedAtPatch = markedAt.map(Patch<Date>.set) ?? .absent
+        default:
+            markedAtPatch = .absent
+        }
 
         return SavedDevice(
             id: id,
@@ -294,13 +328,15 @@ final class SavedDeviceStore {
             deviceType: row.text("device_type"),
             firmwareVersion: row.text("firmware_version"),
             lastSeenAt: lastSeenAt,
+            markedAt: markedAt,
             createdAt: createdAt,
             updatedAt: updatedAt,
             deletedAt: deletedAt,
             syncState: syncState,
             aliasPatch: Patch.restored(row.text("alias_patch"), value: remark),
             advertisedNamePatch: Patch.restored(row.text("advertised_name_patch"), value: advertisedName),
-            groupPatch: Patch.restored(row.text("group_patch"), value: groupName)
+            groupPatch: Patch.restored(row.text("group_patch"), value: groupName),
+            markedAtPatch: markedAtPatch
         )
     }
 }

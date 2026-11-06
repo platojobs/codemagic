@@ -136,6 +136,12 @@
 "device.detail.firmwareVersion" = "Firmware version";
 "device.detail.gatt" = "GATT services and characteristics";
 "device.detail.group" = "Group";
+"device.detail.mark" = "Mark";
+"device.detail.notMarked" = "Not marked";
+"device.detail.markedAt" = "Marked at %@";
+"device.detail.markFailed" = "Failed to save mark: %@";
+"device.marked" = "Marked";
+"device.markedPending" = "Marked · Pending sync";
 "device.detail.identifier" = "Identifier";
 "device.detail.info" = "Device info";
 "device.detail.infoLoadFailed" = "Failed to read device info";

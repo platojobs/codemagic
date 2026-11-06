@@ -107,7 +107,14 @@ final class DeviceCardCell: UICollectionViewCell {
             timeText = L10n.t("home.status.notConnectedYet")
         }
         // 离线 / 未接入家庭的设备保留展示，但明确标注「未同步」，不假装已同步。
-        timeLabel.text = isUnsynced ? "\(timeText) · \(L10n.t("device.sync.unsynced"))" : timeText
+        // 已标记时用标记状态表达（含「待同步」），避免重复追加「未同步」。
+        var timeParts = [timeText]
+        if let mark = device.markStatusText {
+            timeParts.append(mark)
+        } else if isUnsynced {
+            timeParts.append(L10n.t("device.sync.unsynced"))
+        }
+        timeLabel.text = timeParts.joined(separator: " · ")
         card.onTap(onTap)
         accessibilityLabel = L10n.f("home.a11y.card", device.displayName, statusLabel.text ?? "", readingText)
     }

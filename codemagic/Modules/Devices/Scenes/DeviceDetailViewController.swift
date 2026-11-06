@@ -14,6 +14,7 @@ final class DeviceDetailViewController: UIViewController {
         )
         case metricPicker
         case roomPicker
+        case mark
         case export
         case emptyState
     }
@@ -217,6 +218,12 @@ final class DeviceDetailViewController: UIViewController {
             } else {
                 localRows.append(roomRow)
             }
+        }
+        let markRow = Row(title: L10n.t("device.detail.mark"), value: viewModel.markValueText, kind: .mark)
+        if let groupIndex = localRows.firstIndex(where: { $0.title == L10n.t("device.detail.group") }) {
+            localRows.insert(markRow, at: localRows.index(after: groupIndex))
+        } else {
+            localRows.append(markRow)
         }
         sections.append(SectionModel(title: L10n.t("device.detail.info"), rows: localRows))
         sections.append(makeDataSection())
@@ -446,6 +453,12 @@ extension DeviceDetailViewController: UITableViewDataSource {
             cell.selectionStyle = .default
             return cell
 
+        case .mark:
+            let cell = makeDetailCell(row: row, secondaryText: row.value)
+            cell.accessoryType = .disclosureIndicator
+            cell.selectionStyle = .default
+            return cell
+
         case .emptyState:
             return makeDetailCell(row: row, secondaryText: nil)
 
@@ -481,6 +494,8 @@ extension DeviceDetailViewController: UITableViewDelegate {
             presentMetricPicker()
         case .roomPicker:
             presentRoomPicker()
+        case .mark:
+            viewModel.toggleMark()
         case .export:
             guard let metric = viewModel.readings.selectedMetric else { return }
             startExport(range: viewModel.readings.selectedRange, metric: metric)

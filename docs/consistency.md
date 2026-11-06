@@ -573,6 +573,16 @@ Android 自 v0.22.0 起把服务端 `SCENE_*` 4xx 视为终态；iOS v0.24.0 对
 - **通知点击**：`PushMessageHandler` 从 `userInfo`（含 `data` 嵌套）解析 `alertId` / `kind` / `deviceId` / `externalId`。`kind` 含 `scene` → 智能场景页；含 `device` 或带设备标识 → 设备详情（本地 UUID 直接打开，`externalId` 用本地设备表解析）；无法定位回首页，不猜测。
 - **测试**：`codemagicTests/PushRegistrationTests.swift` 覆盖注册、token 变化重注册并注销旧 device、拿不到 token 不注册占位值、权限拒绝仍注册、网络 / 5xx 退避与到期重试、400 终态、401 终态、注销顺序（含 404）、本地字段跨重启保留、迁移列集合与幂等、推送解析与路由。
 
+### 3.22 设备标记 `markedAt`（v0.29.0，后端 v0.25.0 / openapi 0.20.0）
+
+- **JSON 语义**：`markedAt` 可空，未标记为 `null`。三态：字段缺失 = 保持原值；`null` 或 `""` = 取消标记；RFC3339 时间 = 标记。客户端取消标记推送 `null`，不推空串。
+- **写入通道**：只走 `POST /api/v1/sync/push` 的 `devices[]`，与 `alias` / `group` / `deviceType` 同一条**字段级 LWW**；`PATCH /api/v1/my/devices/{platform}/{externalId}` **不接受**该字段。
+- **LWW 门控**：以设备整体 `updatedAt` 为准，服务端比较前按**微秒截断**。客户端 `updatedAt` 落后时返回 `conflict(reason=server_newer)` 携带 `server` 版本，走既有冲突路径（以服务端为准并提示「另一台设备改过这条」），本地旧标记不覆盖云端新值。
+- **增量同步**：`entity=user_device` 的 `payload` 含 `markedAt`，未标记为 `null`；本地落地为 `nil`，并清除待上报标记。
+- **本地持久化（迁移 v17）**：`saved_devices` 增加 `marked_at REAL`（`nil` = 未标记）与 `marked_at_patch TEXT`（`absent` / `clear` / `set`）。`PRAGMA table_info` 判列、`PRAGMA user_version = 17`，可重复执行；`markSynced` 归零 patch；换号重传时逐设备携带本机标记（未标记按 `absent` 省略，不写 `null` 覆盖新账号）。
+- **界面口径**：设备管理列表 / 首页卡片对已标记设备显示「已标记」；仅写本机、尚未推送成功时显示「已标记 · 待同步」，**不得显示成已同步**。设备详情「标记」行可标记 / 取消标记，未同步时后缀「待同步」。
+- **测试**：三态解码（缺省 / `null` / `""` / 时间）、push 三态编码（省略 / `null` / RFC3339）、标记与取消实际进入 `devices[]`、旧 `updatedAt` 冲突以服务端为准、增量落地与 `null` 清除、换号后逐设备重传且不串、详情待同步展示。
+
 ## 4. 错误码
 
 客户端错误码用于日志、空状态副标题与问题反馈，**两端含义一致**：

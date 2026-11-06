@@ -136,6 +136,12 @@
 "device.detail.firmwareVersion" = "固件版本";
 "device.detail.gatt" = "GATT 服务与特征";
 "device.detail.group" = "分组";
+"device.detail.mark" = "标记";
+"device.detail.notMarked" = "未标记";
+"device.detail.markedAt" = "已标记于 %@";
+"device.detail.markFailed" = "标记保存失败：%@";
+"device.marked" = "已标记";
+"device.markedPending" = "已标记 · 待同步";
 "device.detail.identifier" = "标识符";
 "device.detail.info" = "设备信息";
 "device.detail.infoLoadFailed" = "设备信息读取失败";

@@ -69,6 +69,9 @@ struct SavedDevice: Identifiable, Equatable {
     var deviceType: String?
     var firmwareVersion: String?
     var lastSeenAt: Date?
+    /// 用户「标记设备」的时间（契约 0.20.0）；`nil` 表示未标记。
+    /// 同时作为该字段的字段级 LWW 版本，未标记时服务端返回 JSON `null`。
+    var markedAt: Date?
     let createdAt: Date
     var updatedAt: Date
     var deletedAt: Date?
@@ -76,6 +79,8 @@ struct SavedDevice: Identifiable, Equatable {
     var aliasPatch: Patch<String>
     var advertisedNamePatch: Patch<String>
     var groupPatch: Patch<String>
+    /// 待上报的标记三态：`absent` 保持原值，`clear` 取消标记，`set` 标记。
+    var markedAtPatch: Patch<Date>
 
     static let defaultGroupName = L10n.t("device.group.none")
     /// iOS 端固定平台标识，与后端 `platform` 枚举一致。
@@ -98,13 +103,15 @@ struct SavedDevice: Identifiable, Equatable {
         deviceType: String? = nil,
         firmwareVersion: String? = nil,
         lastSeenAt: Date? = nil,
+        markedAt: Date? = nil,
         createdAt: Date = Date(),
         updatedAt: Date = Date(),
         deletedAt: Date? = nil,
         syncState: SyncState = .pending,
         aliasPatch: Patch<String> = .absent,
         advertisedNamePatch: Patch<String> = .absent,
-        groupPatch: Patch<String> = .absent
+        groupPatch: Patch<String> = .absent,
+        markedAtPatch: Patch<Date> = .absent
     ) {
         self.id = id
         self.peripheralID = peripheralID
@@ -125,6 +132,7 @@ struct SavedDevice: Identifiable, Equatable {
         self.deviceType = deviceType
         self.firmwareVersion = firmwareVersion
         self.lastSeenAt = lastSeenAt
+        self.markedAt = markedAt
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.deletedAt = deletedAt
@@ -132,6 +140,7 @@ struct SavedDevice: Identifiable, Equatable {
         self.aliasPatch = aliasPatch
         self.advertisedNamePatch = advertisedNamePatch
         self.groupPatch = groupPatch
+        self.markedAtPatch = markedAtPatch
     }
 
     /// 服务端唯一键的本地拼写，仅用于日志与断言。
@@ -195,5 +204,23 @@ struct SavedDevice: Identifiable, Equatable {
         case .set:
             return groupName == SavedDevice.defaultGroupName ? .clear : .set(groupName)
         }
+    }
+
+    /// 推送时的标记三态：`.clear` 编码为 JSON `null`（取消标记），`.set` 编码 RFC3339 时间。
+    var resolvedMarkedAtPatch: Patch<Date> {
+        switch markedAtPatch {
+        case .absent: return .absent
+        case .clear: return .clear
+        case .set:
+            guard let markedAt else { return .clear }
+            return .set(markedAt)
+        }
+    }
+
+    /// 列表 / 详情展示用：已标记时返回标记状态；未标记返回 nil。
+    /// 本地尚未同步（未登录或离线先写本机）时明确标注「待同步」，不显示为已同步。
+    var markStatusText: String? {
+        guard markedAt != nil else { return nil }
+        return syncState == .synced ? L10n.t("device.marked") : L10n.t("device.markedPending")
     }
 }

@@ -553,12 +553,19 @@ final class SyncEngine {
                 let advertisedChanged = remote.advertisedName.map {
                     !$0.isEmpty && $0 != existing.advertisedName
                 } ?? false
+                // 标记同样是字段级 LWW：键缺省保持本地，null 表示取消，时间表示标记。
+                let markedChanged: Bool
+                switch remote.markedAt {
+                case .absent: markedChanged = false
+                case .clear: markedChanged = existing.markedAt != nil
+                case .set(let date): markedChanged = existing.markedAt != date
+                }
                 let assignmentChanged = !hasPendingAssignment(existing.id) && (
                     (remote.hasRoomField && remote.roomID != existing.remoteRoomID)
                         || (remote.householdID != nil && remote.householdID != existing.remoteHouseholdID)
                 )
                 if remote.updatedAt > existing.updatedAt || aliasChanged || groupChanged
-                    || advertisedChanged || assignmentChanged {
+                    || advertisedChanged || markedChanged || assignmentChanged {
                     try deviceStore.upsert(merge(remote, into: existing))
                     pulled += 1
                 }
@@ -773,12 +780,21 @@ final class SyncEngine {
             merged.advertisedName = advertised
         }
         merged.mac = remote.mac?.isEmpty == false ? remote.mac : local.mac
+        switch remote.markedAt {
+        case .absent:
+            break
+        case .clear:
+            merged.markedAt = nil
+        case .set(let date):
+            merged.markedAt = date
+        }
         merged.updatedAt = max(local.updatedAt, remote.updatedAt)
         merged.deletedAt = remote.deletedAt
         // 服务端版本已落库，本地待上报的三态全部归零。
         merged.aliasPatch = .absent
         merged.advertisedNamePatch = .absent
         merged.groupPatch = .absent
+        merged.markedAtPatch = .absent
         merged.syncState = .synced
         applyAssignment(remote, to: &merged)
         return merged

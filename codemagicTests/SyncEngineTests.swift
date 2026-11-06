@@ -159,6 +159,7 @@ final class SyncEngineTests: XCTestCase {
         alias: String?,
         advertisedName: String? = "PJ-Sensor",
         group: String? = "默认分组",
+        markedAt: Patch<Date> = .absent,
         updatedAt: Date,
         platform: String = SavedDevice.iosPlatform,
         deletedAt: Date? = nil
@@ -170,6 +171,7 @@ final class SyncEngineTests: XCTestCase {
             alias: alias,
             advertisedName: advertisedName,
             group: group,
+            markedAt: markedAt,
             updatedAt: updatedAt,
             deletedAt: deletedAt
         )
@@ -858,6 +860,232 @@ final class SyncEngineTests: XCTestCase {
         ]
         let data = try! JSONSerialization.data(withJSONObject: json)
         return try! JSONDecoder().decode(SyncChange.self, from: data)
+    }
+
+    // MARK: - v0.25.0（契约 0.20.0）：设备标记 markedAt
+
+    /// 三态解码：字段缺省保持原值；`null` / `""` 取消；RFC3339 时间标记。
+    func testRemoteDeviceMarkedAtDecodesContractThreeStates() throws {
+        let base = """
+        {"id":"d-1","platform":"ios","externalId":"ext-1","updatedAt":"2026-11-05T08:00:00Z"%@}
+        """
+        let decoder = JSONDecoder()
+
+        let absent = try decoder.decode(
+            RemoteDevice.self,
+            from: Data(String(format: base, "").utf8)
+        )
+        XCTAssertEqual(absent.markedAt, .absent, "键缺省=保持原值")
+
+        let cleared = try decoder.decode(
+            RemoteDevice.self,
+            from: Data(String(format: base, #", "markedAt": null"#).utf8)
+        )
+        XCTAssertEqual(cleared.markedAt, .clear, "显式 null=取消标记")
+
+        let clearedEmpty = try decoder.decode(
+            RemoteDevice.self,
+            from: Data(String(format: base, ", \"markedAt\": \"\"").utf8)
+        )
+        XCTAssertEqual(clearedEmpty.markedAt, .clear, "空串=取消标记")
+
+        let markedDate = try XCTUnwrap(SyncDateCodec.parse("2026-11-05T08:09:10.123Z"))
+        let marked = try decoder.decode(
+            RemoteDevice.self,
+            from: Data(String(format: base, #", "markedAt": "2026-11-05T08:09:10.123Z""#).utf8)
+        )
+        XCTAssertEqual(marked.markedAt, .set(markedDate), "RFC3339 时间=标记")
+    }
+
+    /// 推送编码三态：缺省省略；取消编码 JSON `null`（不是 `""`）；标记编码 RFC3339。
+    func testPushDeviceMarkedAtEncodesThreeStates() throws {
+        let date = try XCTUnwrap(SyncDateCodec.parse("2026-11-05T08:09:10Z"))
+        let makeJSON: (Patch<Date>) throws -> [String: Any] = { patch in
+            let device = PushDevice(
+                id: "d-1",
+                platform: SavedDevice.iosPlatform,
+                externalID: "EXT-1",
+                mac: nil,
+                markedAt: patch,
+                updatedAt: date,
+                deleted: false
+            )
+            let data = try JSONEncoder().encode(device)
+            return try XCTUnwrap(
+                JSONSerialization.jsonObject(with: data) as? [String: Any]
+            )
+        }
+
+        let absent = try makeJSON(.absent)
+        XCTAssertNil(absent["markedAt"], "未上报时字段整体省略")
+
+        let cleared = try makeJSON(.clear)
+        XCTAssertTrue(cleared["markedAt"] is NSNull, "取消标记编码为 JSON null")
+
+        let marked = try makeJSON(.set(date))
+        XCTAssertEqual(marked["markedAt"] as? String, SyncDateCodec.string(from: date))
+    }
+
+    /// 标记先写本机，下一次 push 带上；取消标记同样走 push 并编码 null。
+    func testMarkAndUnmarkArePushedOnNextSync() throws {
+        let peripheralID = UUID()
+        let markDate = Date(timeIntervalSince1970: 1_700_000_050)
+        let device = SavedDevice(
+            peripheralID: peripheralID,
+            advertisedName: "本机设备",
+            markedAt: markDate,
+            updatedAt: Date(timeIntervalSince1970: 1_700_000_050),
+            syncState: .pending,
+            markedAtPatch: .set(markDate)
+        )
+        try savedDeviceStore.upsert(device)
+
+        let engine = makeEngine()
+        _ = runSync(engine)
+        let markedPush = try XCTUnwrap(api.pushRequests.last?.devices.first)
+        XCTAssertEqual(markedPush.markedAt, .set(markDate), "标记走 devices[] 字段级 LWW 通道")
+
+        try savedDeviceStore.updateMark(
+            id: device.id,
+            markedAt: nil,
+            at: Date(timeIntervalSince1970: 1_700_000_100)
+        )
+        _ = runSync(engine)
+        let clearedPush = try XCTUnwrap(api.pushRequests.last?.devices.first)
+        XCTAssertEqual(clearedPush.markedAt, .clear, "取消标记推送 null")
+
+        let stored = try XCTUnwrap(savedDeviceStore.fetch(id: device.id))
+        XCTAssertNil(stored.markedAt)
+        XCTAssertEqual(stored.syncState, .synced, "服务端确认后才标记为已同步")
+    }
+
+    /// 旧 `updatedAt` 推送返回 server_newer：走已有冲突路径，服务端的取消标记获胜，
+    /// 本地旧标记不得覆盖云端新值。
+    func testServerNewerConflictClearsLocalMarkAndKeepsServerValue() throws {
+        let peripheralID = UUID()
+        let localMark = Date(timeIntervalSince1970: 1_700_000_000)
+        let local = SavedDevice(
+            peripheralID: peripheralID,
+            advertisedName: "本机设备",
+            markedAt: localMark,
+            updatedAt: localMark,
+            syncState: .pending,
+            markedAtPatch: .set(localMark)
+        )
+        try savedDeviceStore.upsert(local)
+
+        let server = makeRemote(
+            id: local.id.uuidString,
+            externalID: peripheralID.uuidString.uppercased(),
+            alias: "云端设备",
+            markedAt: .clear,
+            updatedAt: Date(timeIntervalSince1970: 1_700_000_100)
+        )
+        api.pushResults = [.success(PushResult(conflicts: [
+            SyncConflict(
+                id: local.id.uuidString,
+                externalID: peripheralID.uuidString,
+                reason: "server_newer",
+                server: server
+            ),
+        ]))]
+
+        let engine = makeEngine()
+        guard case .success = try XCTUnwrap(runSync(engine)) else {
+            return XCTFail("冲突不应导致整个同步失败")
+        }
+
+        let stored = try XCTUnwrap(savedDeviceStore.fetch(id: local.id))
+        XCTAssertNil(stored.markedAt, "服务端 null 取消标记获胜，本地旧标记被覆盖")
+        XCTAssertEqual(stored.markedAtPatch, .absent, "冲突已应用，不再重复上报")
+        XCTAssertEqual(stored.syncState, .synced)
+        XCTAssertEqual(engine.status.pendingCount, 0)
+        XCTAssertTrue(
+            try XCTUnwrap(engine.status.lastConflictMessages.first).contains("另一台设备改过这条")
+        )
+    }
+
+    /// 增量同步 `entity=user_device` 的 payload 落地 markedAt：时间写入、null 清除。
+    func testIncrementalChangeAppliesAndClearsMark() throws {
+        let markDate = try XCTUnwrap(SyncDateCodec.parse("2026-11-05T08:09:10Z"))
+        let json = """
+        {
+          "changes": [
+            {"seq": 1, "entity": "user_device", "entityId": "d-1", "op": "upsert", "payload": {
+              "id": "d-1", "platform": "ios", "externalId": "EXT-MARK",
+              "markedAt": "2026-11-05T08:09:10Z",
+              "updatedAt": "2026-11-05T08:00:00Z"
+            }},
+            {"seq": 2, "entity": "user_device", "entityId": "d-2", "op": "upsert", "payload": {
+              "id": "d-2", "platform": "ios", "externalId": "EXT-CLEAR",
+              "markedAt": null,
+              "updatedAt": "2026-11-05T08:00:00Z"
+            }}
+          ],
+          "nextCursor": 2,
+          "hasMore": false
+        }
+        """
+        api.changesPages = [
+            .success(try JSONDecoder().decode(SyncChangesPage.self, from: Data(json.utf8))),
+        ]
+
+        let engine = makeEngine()
+        _ = runSync(engine)
+
+        let marked = try XCTUnwrap(
+            savedDeviceStore.fetch(platform: SavedDevice.iosPlatform, externalID: "EXT-MARK")
+        )
+        XCTAssertEqual(marked.markedAt, markDate, "增量 payload 的 markedAt 落地本机")
+        XCTAssertEqual(marked.markedAtPatch, .absent)
+
+        let cleared = try XCTUnwrap(
+            savedDeviceStore.fetch(platform: SavedDevice.iosPlatform, externalID: "EXT-CLEAR")
+        )
+        XCTAssertNil(cleared.markedAt, "payload markedAt=null 即未标记")
+    }
+
+    /// 账号切换：本机数据不串，重新上传时逐设备带上自已的标记三态（未标记不写 null）。
+    func testReloginReuploadsMarkPerDeviceWithoutCrossAccountLeak() throws {
+        let markDate = Date(timeIntervalSince1970: 1_700_000_050)
+        let markedPeripheral = UUID()
+        let unmarkedPeripheral = UUID()
+        let marked = SavedDevice(
+            peripheralID: markedPeripheral,
+            advertisedName: "已标记设备",
+            markedAt: markDate,
+            updatedAt: markDate,
+            syncState: .synced
+        )
+        let unmarked = SavedDevice(
+            peripheralID: unmarkedPeripheral,
+            advertisedName: "未标记设备",
+            updatedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            syncState: .synced
+        )
+        try savedDeviceStore.upsert(marked)
+        try savedDeviceStore.upsert(unmarked)
+        metadata.userID = "user-1"
+        tokenStore.session = AnonymousSession(userID: "user-1", token: "old-token")
+        api.authResult = .success(AnonymousSession(userID: "user-2", token: "token-2"))
+
+        let engine = makeEngine()
+        guard case .success = try XCTUnwrap(runRelogin(engine)) else {
+            return XCTFail("重新登录应成功")
+        }
+
+        XCTAssertEqual(metadata.userID, "user-2")
+        XCTAssertEqual(engine.status.pendingCount, 0)
+        let pushes = try XCTUnwrap(api.pushRequests.last?.devices)
+        let markedPush = try XCTUnwrap(pushes.first { $0.externalID == markedPeripheral.uuidString.uppercased() })
+        let unmarkedPush = try XCTUnwrap(pushes.first { $0.externalID == unmarkedPeripheral.uuidString.uppercased() })
+        XCTAssertEqual(markedPush.markedAt, .set(markDate), "本机标记随账号重新上传，不丢")
+        XCTAssertEqual(unmarkedPush.markedAt, .absent, "未标记设备不写入 null 覆盖新账号")
+
+        let storedMarked = try XCTUnwrap(savedDeviceStore.fetch(id: marked.id))
+        let storedUnmarked = try XCTUnwrap(savedDeviceStore.fetch(id: unmarked.id))
+        XCTAssertEqual(storedMarked.markedAt, markDate, "换号后本机标记保留")
+        XCTAssertNil(storedUnmarked.markedAt)
     }
 
     // MARK: - v0.16.0：结构变更进增量同步

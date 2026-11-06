@@ -231,6 +231,33 @@ final class DeviceDetailViewModel {
         try? savedDeviceStore.upsert(device)
     }
 
+    // MARK: - Mark
+
+    /// 详情行展示值：已标记时间 + 未同步时明确标注「待同步」，未标记显示「未标记」。
+    var markValueText: String {
+        guard let markedAt = device.markedAt else {
+            return L10n.t("device.detail.notMarked")
+        }
+        let base = L10n.f("device.detail.markedAt", AppDateFormat.absolute(markedAt))
+        return device.syncState == .synced ? base : "\(base) · \(L10n.t("sync.state.pending"))"
+    }
+
+    /// 标记 / 取消标记：先写本机并置待同步，由下一次 `POST /sync/push` 走字段级 LWW。
+    /// 未登录或离线时不会假装已同步，界面继续显示「待同步」。
+    func toggleMark() {
+        let markedAt: Date? = device.markedAt == nil ? Date() : nil
+        do {
+            try savedDeviceStore.updateMark(id: device.id, markedAt: markedAt, at: Date())
+            device.markedAt = markedAt
+            device.markedAtPatch = markedAt == nil ? .clear : .set(markedAt ?? Date())
+            device.updatedAt = Date()
+            device.syncState = .pending
+            onChange?()
+        } catch {
+            notice = L10n.f("device.detail.markFailed", String(describing: error))
+        }
+    }
+
     // MARK: - Rooms
 
     var canChangeRoom: Bool { roomStore != nil || householdService != nil }

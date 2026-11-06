@@ -4,6 +4,7 @@
 
 | Tag | MARKETING_VERSION | Build | 日期 | 对齐后端 |
 | --- | --- | --- | --- | --- |
+| `v0.29.0` | 0.29.0 | 38 | 2026-11-07 | PJGoIoT v0.25.0（openapi 0.20.0；设备标记 `markedAt` 三态进 `devices[]` 字段级 LWW、迁移 v17、增量落地、列表/详情标记状态与待同步提示） |
 | `v0.28.0` | 0.28.0 | 37 | 2026-11-07 | PJGoIoT v0.23.0（无后端契约变更；6.9 英寸 1320×2868 与 iPad 13 英寸 2064×2752 整组截图导出、APNs 令牌隐私申报与二进制对齐、新增隐私清单一致性单测） |
 | `v0.27.0` | 0.27.0 | 36 | 2026-11-07 | PJGoIoT v0.23.0（无后端契约变更；重截「我的」含推送注册行、真 Postgres 重跑并断言 `push_devices` 幂等 / `inactive` 重置 / 跨用户隔离 / `change_log` 无新增、补 App Store 上架材料与隐私营养标签） |
 | `v0.26.0` | 0.26.0 | 35 | 2026-11-07 | PJGoIoT v0.23.0（openapi 0.18.0；`POST /push/devices` / `DELETE /push/devices/{deviceId}`、通知权限与注册解耦、迁移 v16 `push_devices`、`PushMessageHandler`，e2e 升级 460 项） |
@@ -42,6 +43,18 @@
 | `v0.1.0` | — | 1 | 2026-11-05 | — |
 
 ---
+
+## v0.29.0（build 38）
+
+**主题：设备标记 `markedAt` 接入（契约 0.20.0）**
+
+- **契约**：`markedAt` 可空，未标记为 `null`。三态：字段缺省 = 保持原值；`null` 或 `""` = 取消标记；RFC3339 时间 = 标记。写入只走 `POST /sync/push` 的 `devices[]`，与 `alias` / `group` / `deviceType` 同一条字段级 LWW；`PATCH /my/devices` 不接受该字段。LWW 受设备整体 `updatedAt` 门控，服务端比较前按微秒截断；旧 `updatedAt` 返回 `conflict(server_newer)`，走既有冲突路径，以服务端为准。
+- **本地持久化**：迁移 **v17** 为 `saved_devices` 增加 `marked_at`（`REAL`，`nil` = 未标记）与 `marked_at_patch`（`TEXT`，`absent` / `clear` / `set`）。沿用 `PRAGMA table_info` 判列、`PRAGMA user_version = 17`，可重复执行，旧行保留。
+- **同步**：`PushDevice` 新增 `markedAt` 三态编码（缺省省略 / 取消 `encodeNil` / 时间 RFC3339），参与幂等签名；增量 `entity=user_device` 的 payload 落地 `markedAt`，未标记为 `null`；`markSynced` 归零 `marked_at_patch`；换号重传时逐设备带上本机标记，未标记不发 `null` 覆盖新账号。
+- **界面**：设备管理列表与首页卡片显示「已标记」；先写本机、尚未同步时显示「已标记 · 待同步」，不显示成已同步。设备详情新增「标记」行，点击标记 / 取消标记，未同步时明确标注「待同步」。
+- **测试 / 构建**：新增 7 个单测（三态解码、push 三态编码、标记与取消走 push、旧 `updatedAt` 冲突、增量落地与清除、换号隔离、详情待同步展示），合计 **456 个 0 失败**，构建 `BUILD SUCCEEDED`。
+- **e2e**：后端 `PJGoIoT` v0.25.0 干净 worktree，`scripts/e2e-contract.sh` **460 项 0 失败**；`scripts/e2e-postgres.sh` 真实 Postgres 同为 **460 项 0 失败**，推送表 / 幂等 / `inactive` 重置 / 跨用户隔离 / `change_log` 无新增断言保持通过。设备标记未新增 e2e 断言（项数不变），由单测覆盖。
+- **未验证**：真实 APNs 推送、真机 BLE 与多端（Android）同时在线的标记冲突表现。
 
 ## v0.28.0（build 37）
 
