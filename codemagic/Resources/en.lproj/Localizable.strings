@@ -341,7 +341,7 @@
 "onboarding.waitingAuth" = "Waiting for system permission…";
 "permission.localOnly.message" = "Bluetooth permission is off, so new devices cannot be scanned. Saved devices and reading history remain available.";
 "permission.localOnly.title" = "Local use only";
-"permission.notificationOff.message" = "Notifications are off. Threshold alerts are still recorded in Automation, and you can enable notifications in Settings.";
+"permission.notificationOff.message" = "Notifications are off, so push messages will not be shown. Threshold alerts are still recorded in Automation, and you can enable notifications in Settings.";
 "permission.openSettings" = "Open Settings";
 "permission.status.denied" = "Denied";
 "permission.status.ephemeral" = "Allowed temporarily";
@@ -1155,3 +1155,35 @@
 "profile.reloginWithCode" = "Restore with pairing code";
 "profile.reloginNewAnonymous" = "Continue as a new anonymous account";
 
+
+// MARK: - Push registration (v0.26.0)
+"profile.pushRegistration" = "Push registration";
+"push.status.noSession" = "Not signed in";
+"push.status.missingToken" = "Push not configured";
+"push.status.pending" = "Registering";
+"push.status.retrying" = "Waiting to retry";
+"push.status.registered" = "Enabled";
+"push.status.registeredWithoutPermission" = "Registered · notifications denied";
+"push.status.rejected" = "Registration failed";
+"push.status.unauthorized" = "Session expired";
+"push.status.deactivated" = "Deactivated";
+"push.guidance.noSession" = "Push registration starts automatically once a sign-in session is ready.";
+"push.guidance.missingToken" = "Push is not configured: the push certificate and aps-environment entitlement are missing, so no APNs token is available. No placeholder token is registered.";
+"push.guidance.missingTokenDetail" = "Push is not configured or no APNs token is available: %@. No placeholder token is registered.";
+"push.guidance.pending" = "Registration is not finished yet; it will retry automatically with exponential backoff when the network is available.";
+"push.guidance.pendingDetail" = "The last registration attempt failed: %@. It will retry automatically with exponential backoff when the network is available.";
+"push.guidance.pendingRetryAt" = "%@ Next attempt around %@.";
+"push.guidance.registered" = "The push token is registered and the server can send notifications to this device.";
+"push.guidance.registeredWithoutPermission" = "The push token is registered, but notifications are not authorized, so push messages will not be shown. Enable notifications in Settings.";
+"push.guidance.rejectedDetail" = "The server rejected registration: %@. This state will not retry automatically.";
+"push.guidance.unauthorized" = "The sign-in session has expired. Push registration will resume after signing in again.";
+"push.guidance.deactivated" = "The push token has been deactivated.";
+"push.token.timeout" = "Registration timed out before an APNs token arrived.";
+"push.token.empty" = "The system returned an empty APNs token.";
+"push.log.registered" = "Push device registered: %@";
+"push.log.rejected" = "Push registration rejected by the server: %@";
+"push.log.unauthorized" = "Push registration failed because the session expired: %@";
+"push.log.retryScheduled" = "Push registration failed; retry has been scheduled: %@";
+"push.log.missingConfiguration" = "Push is not configured; no APNs token is available: %@";
+"push.log.tokenFailed" = "Could not obtain an APNs token: %@";
+"push.log.deactivateFailed" = "Could not deactivate the push device: %@";

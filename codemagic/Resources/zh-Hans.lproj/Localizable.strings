@@ -341,7 +341,7 @@
 "onboarding.waitingAuth" = "等待系统授权…";
 "permission.localOnly.message" = "蓝牙权限已关闭，无法扫描新设备；已保存设备与历史读数仍可查看。";
 "permission.localOnly.title" = "仅本机可用";
-"permission.notificationOff.message" = "通知未开启，阈值告警仍会记录在「智能」页，可在系统设置开启通知。";
+"permission.notificationOff.message" = "通知未开启，推送不会展示；阈值告警仍会记录在「智能」页，可在系统设置开启通知。";
 "permission.openSettings" = "去系统设置";
 "permission.status.denied" = "已拒绝";
 "permission.status.ephemeral" = "临时允许";
@@ -1155,3 +1155,35 @@
 "profile.reloginWithCode" = "用配对码恢复原账号";
 "profile.reloginNewAnonymous" = "以新匿名账号继续";
 
+
+// MARK: - 推送注册（v0.26.0）
+"profile.pushRegistration" = "推送注册";
+"push.status.noSession" = "未登录";
+"push.status.missingToken" = "未配置推送";
+"push.status.pending" = "注册中";
+"push.status.retrying" = "等待重试";
+"push.status.registered" = "已开启";
+"push.status.registeredWithoutPermission" = "已注册 · 通知未授权";
+"push.status.rejected" = "注册失败";
+"push.status.unauthorized" = "会话失效";
+"push.status.deactivated" = "已停用";
+"push.guidance.noSession" = "登录会话就绪后会自动注册推送令牌。";
+"push.guidance.missingToken" = "未配置推送：缺少推送证书与 aps-environment entitlement，无法获取 APNs 令牌；不会注册占位令牌。";
+"push.guidance.missingTokenDetail" = "未配置推送或无法获取 APNs 令牌：%@。不会注册占位令牌。";
+"push.guidance.pending" = "注册尚未完成，将在网络可用时按指数退避自动重试。";
+"push.guidance.pendingDetail" = "上次注册失败：%@。将在网络可用时按指数退避自动重试。";
+"push.guidance.pendingRetryAt" = "%@ 预计 %@ 重试。";
+"push.guidance.registered" = "推送令牌已注册，服务端可用该设备发送通知。";
+"push.guidance.registeredWithoutPermission" = "推送令牌已注册，但未授权通知，推送不会展示；可在系统设置开启通知。";
+"push.guidance.rejectedDetail" = "服务端拒绝注册：%@。此状态不会自动重试。";
+"push.guidance.unauthorized" = "登录会话已失效，重新登录后会自动注册。";
+"push.guidance.deactivated" = "推送令牌已停用。";
+"push.token.timeout" = "注册超时，未收到 APNs 令牌。";
+"push.token.empty" = "系统返回了空的 APNs 令牌。";
+"push.log.registered" = "推送设备已注册：%@";
+"push.log.rejected" = "推送注册被服务端拒绝：%@";
+"push.log.unauthorized" = "推送注册失败，会话已失效：%@";
+"push.log.retryScheduled" = "推送注册失败，已安排退避重试：%@";
+"push.log.missingConfiguration" = "未配置推送，无法获取 APNs 令牌：%@";
+"push.log.tokenFailed" = "无法获取 APNs 令牌：%@";
+"push.log.deactivateFailed" = "注销推送设备失败：%@";

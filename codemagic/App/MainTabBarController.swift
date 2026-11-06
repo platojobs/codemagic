@@ -123,7 +123,8 @@ final class MainTabBarController: UITabBarController {
                     startupWarning: environment.startupWarning,
                     notifications: environment.notificationService,
                     householdService: environment.householdService,
-                    sessionManager: environment.sessionManager
+                    sessionManager: environment.sessionManager,
+                    pushRegistrationService: environment.pushRegistrationService
                 ),
                 scanLogStore: environment.scanLogStore,
                 roomStore: environment.roomStore,
@@ -148,6 +149,20 @@ final class MainTabBarController: UITabBarController {
         else { return }
         navigation.popToRootViewController(animated: false)
         home.openDeviceDetail(deviceID: deviceID)
+    }
+
+    /// 场景类通知：切到「智能」并回到场景列表。
+    func openScenes() {
+        selectedIndex = 1
+        guard let navigation = viewControllers?[1] as? UINavigationController else { return }
+        navigation.popToRootViewController(animated: false)
+    }
+
+    /// 无法定位设备时回首页列表，不猜测目标。
+    func openHome() {
+        selectedIndex = 0
+        guard let navigation = viewControllers?[0] as? UINavigationController else { return }
+        navigation.popToRootViewController(animated: false)
     }
 
     /// 市场页「配对向导」：切到首页并打开扫描页。

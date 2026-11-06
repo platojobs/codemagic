@@ -9,6 +9,8 @@ final class SessionManager {
     private let tokenStore: TokenStoring
     private let metadataStore: SyncMetadataStore
     private let logStore: ScanLogStore
+    /// 退出前先注销推送设备，避免服务端保留已失效 token。
+    private let pushRegistration: PushRegistrationServicing?
 
     var onChange: (() -> Void)?
 
@@ -16,12 +18,14 @@ final class SessionManager {
         api: AuthServicing,
         tokenStore: TokenStoring,
         metadataStore: SyncMetadataStore,
-        logStore: ScanLogStore
+        logStore: ScanLogStore,
+        pushRegistration: PushRegistrationServicing? = nil
     ) {
         self.api = api
         self.tokenStore = tokenStore
         self.metadataStore = metadataStore
         self.logStore = logStore
+        self.pushRegistration = pushRegistration
     }
 
     /// 当前是否持有可用会话 token（不代表服务端一定接受，401 仍可能发生）。
@@ -56,6 +60,7 @@ final class SessionManager {
     }
 
     /// 退出当前会话。网络失败也会在本地登出，避免用户「点了退出却还带 token 发请求」。
+    /// 有推送设备时先 `DELETE /push/devices/{deviceId}`，成功 / 404 / 失败后都继续退出。
     func logoutCurrent(completion: @escaping (Result<Void, AppError>) -> Void) {
         guard let session = tokenStore.load(), !session.token.isEmpty else {
             // 已经没有 token：直接进入待重新登录态即可。
@@ -63,7 +68,22 @@ final class SessionManager {
             completion(.success(()))
             return
         }
-        api.logout(token: session.token) { [weak self] result in
+        let performLogout = { [weak self] in
+            guard let self else { return }
+            self.performLogout(token: session.token, completion: completion)
+        }
+        if let pushRegistration {
+            pushRegistration.deactivate(completion: performLogout)
+        } else {
+            performLogout()
+        }
+    }
+
+    private func performLogout(
+        token: String,
+        completion: @escaping (Result<Void, AppError>) -> Void
+    ) {
+        api.logout(token: token) { [weak self] result in
             guard let self else { return }
             switch result {
             case .success:

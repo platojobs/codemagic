@@ -594,7 +594,7 @@ extension ProfileViewController: UITableViewDataSource {
         case .accountData: return 2
         case .account: return 2
         case .sessions: return viewModel.canManageSessions ? 2 : 0
-        case .alerts: return 3
+        case .alerts: return 4
         case .appearance: return 1
         case .settings: return 3
         case .support: return feedbackCoordinator == nil ? 1 : 3
@@ -634,7 +634,7 @@ extension ProfileViewController: UITableViewDataSource {
         case .sessions:
             return viewModel.canManageSessions ? L10n.t("session.logoutNote") : nil
         case .alerts:
-            return viewModel.notificationGuidance
+            return "\(viewModel.notificationGuidance)\n\(viewModel.pushGuidanceText)"
         case .appearance:
             return L10n.t("profile.footnote.appearance")
         case .settings:
@@ -753,10 +753,17 @@ extension ProfileViewController: UITableViewDataSource {
                     showsDisclosure: true
                 )
             }
+            if indexPath.row == 2 {
+                return makeValueCell(
+                    title: L10n.t("profile.notificationPermission"),
+                    value: viewModel.notificationAuthorizationText,
+                    showsDisclosure: viewModel.needsNotificationSettings
+                )
+            }
             return makeValueCell(
-                title: L10n.t("profile.notificationPermission"),
-                value: viewModel.notificationAuthorizationText,
-                showsDisclosure: viewModel.needsNotificationSettings
+                title: L10n.t("profile.pushRegistration"),
+                value: viewModel.pushStatusText,
+                showsDisclosure: false
             )
 
         case .appearance:
@@ -865,6 +872,8 @@ extension ProfileViewController: UITableViewDelegate {
             presentThrottlePicker()
         case .alerts where indexPath.row == 2 && viewModel.needsNotificationSettings:
             openSystemSettings()
+        case .alerts where indexPath.row == 3:
+            viewModel.retryPushRegistration()
         case .appearance where indexPath.row == 0:
             presentAppearancePicker()
         case .support where indexPath.row == 0:

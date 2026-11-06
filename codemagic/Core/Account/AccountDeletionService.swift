@@ -91,12 +91,15 @@ final class AccountDeletionService {
     private let clearURLCache: () -> Void
     private let disconnectBluetooth: () -> Void
     private let additionalCleanup: () -> Void
+    /// 删除账号前先注销推送设备（best effort，不阻塞删号）。
+    private let pushRegistration: PushRegistrationServicing?
 
     init(
         api: AccountAPIServicing,
         tokenStore: TokenStoring,
         database: SQLiteDatabase,
         metadataStore: SyncMetadataStore,
+        pushRegistration: PushRegistrationServicing? = nil,
         clearURLCache: @escaping () -> Void = { URLCache.shared.removeAllCachedResponses() },
         disconnectBluetooth: @escaping () -> Void = {},
         additionalCleanup: @escaping () -> Void = {}
@@ -105,6 +108,7 @@ final class AccountDeletionService {
         self.tokenStore = tokenStore
         self.database = database
         self.metadataStore = metadataStore
+        self.pushRegistration = pushRegistration
         self.clearURLCache = clearURLCache
         self.disconnectBluetooth = disconnectBluetooth
         self.additionalCleanup = additionalCleanup
@@ -141,6 +145,22 @@ final class AccountDeletionService {
     }
 
     func confirmDeletion(
+        _ challenge: DeletionChallenge,
+        completion: @escaping (Result<AccountDeletionOutcome, AccountDeletionError>) -> Void
+    ) {
+        let performDeletion = { [weak self] in
+            guard let self else { return }
+            self.performDeletion(challenge, completion: completion)
+        }
+        // 删除账号前先注销推送设备；失败也不阻塞删号（服务端随后会删除账号）。
+        if let pushRegistration {
+            pushRegistration.deactivate(completion: performDeletion)
+        } else {
+            performDeletion()
+        }
+    }
+
+    private func performDeletion(
         _ challenge: DeletionChallenge,
         completion: @escaping (Result<AccountDeletionOutcome, AccountDeletionError>) -> Void
     ) {

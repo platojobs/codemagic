@@ -49,6 +49,8 @@ final class AppEnvironment {
     let householdAPI: HouseholdAPIServicing
     /// 家庭 / 邀请码 / 房间 / 设备归属业务协调器。
     let householdService: HouseholdService
+    /// 推送令牌注册：会话就绪后注册、token 变化重注册、登出 / 删号前注销。
+    let pushRegistrationService: PushRegistrationServicing
 
     /// 启动期降级说明，非空时在「我的」页展示。
     private(set) var startupWarning: String?
@@ -88,6 +90,7 @@ final class AppEnvironment {
             notifications: notifications
         )
 
+        let pushAPI: PushDeviceAPIServicing
         if let configuration = try? APIConfiguration.fromBundle() {
             apiConfiguration = configuration
             let baseHTTP = URLSessionHTTPClient()
@@ -107,6 +110,7 @@ final class AppEnvironment {
                 base: baseHTTP,
                 refreshCoordinator: refreshCoordinator
             )
+            pushAPI = PushDeviceAPIClient(configuration: configuration, httpClient: authenticatedHTTP)
             feedbackCoordinator = FeedbackCoordinator(
                 store: feedbackStore,
                 client: FeedbackAPIClient(
@@ -166,6 +170,7 @@ final class AppEnvironment {
         } else {
             apiConfiguration = nil
             deviceCatalogService = nil
+            pushAPI = UnavailablePushDeviceAPI()
             feedbackCoordinator = FeedbackCoordinator(
                 store: feedbackStore,
                 client: UnavailableFeedbackService()
@@ -213,6 +218,18 @@ final class AppEnvironment {
             }
         }
 
+        let pushService = PushRegistrationService(
+            api: pushAPI,
+            store: PushDeviceStore(database: resolved.database),
+            tokenStore: tokenStore,
+            tokenProvider: APNSTokenProvider.shared,
+            logStore: scanLogStore
+        )
+        pushRegistrationService = pushService
+        syncEngine.onSessionReady = { [weak pushService] in
+            pushService?.requestRegistration(force: false)
+        }
+
         sceneEngine = SceneEngine(
             store: sceneStore,
             deviceStore: savedDeviceStore,
@@ -247,6 +264,7 @@ final class AppEnvironment {
             tokenStore: tokenStore,
             database: resolved.database,
             metadataStore: syncMetadataStore,
+            pushRegistration: pushService,
             disconnectBluetooth: { [weak resolvedBluetooth] in
                 resolvedBluetooth?.disconnectAll()
             },
@@ -287,7 +305,8 @@ final class AppEnvironment {
             api: authAPI,
             tokenStore: tokenStore,
             metadataStore: syncMetadataStore,
-            logStore: scanLogStore
+            logStore: scanLogStore,
+            pushRegistration: pushService
         )
 
         LaunchMetrics.mark("environment-init")

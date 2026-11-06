@@ -24,6 +24,7 @@ final class ProfileViewModel {
     private let accountDeletionService: AccountDeletionService
     private let householdService: HouseholdService?
     private let sessionManager: SessionManager?
+    private let pushRegistrationService: PushRegistrationServicing?
 
     init(
         bluetooth: BluetoothServicing,
@@ -37,7 +38,8 @@ final class ProfileViewModel {
         startupWarning: String?,
         notifications: LocalNotificationServing = UserNotificationService.shared,
         householdService: HouseholdService? = nil,
-        sessionManager: SessionManager? = nil
+        sessionManager: SessionManager? = nil,
+        pushRegistrationService: PushRegistrationServicing? = nil
     ) {
         self.bluetooth = bluetooth
         self.scanLogStore = scanLogStore
@@ -49,6 +51,7 @@ final class ProfileViewModel {
         self.notifications = notifications
         self.householdService = householdService
         self.sessionManager = sessionManager
+        self.pushRegistrationService = pushRegistrationService
         self.baseURLText = baseURLText
         self.startupWarning = startupWarning
     }
@@ -65,12 +68,16 @@ final class ProfileViewModel {
             self.syncStatus = self.syncEngine.status
             self.onChange?()
         }
+        pushRegistrationService?.onChange = { [weak self] in
+            self?.onChange?()
+        }
         refresh()
     }
 
     func deactivate() {
         bluetooth.stateChangeHandler = nil
         syncEngine.onChange = nil
+        pushRegistrationService?.onChange = nil
     }
 
     func refresh() {
@@ -370,6 +377,27 @@ final class ProfileViewModel {
 
     var needsNotificationSettings: Bool {
         ruleAlertsEnabled && notificationAuthorization == .denied
+    }
+
+    /// 推送令牌注册状态。未拿到真实 APNs token 时显示「未配置推送」，绝不显示「已开启」。
+    var pushStatusText: String {
+        PushStatusPresentation.value(
+            for: pushRegistrationService?.record,
+            authorization: notificationAuthorization
+        )
+    }
+
+    /// 推送注册说明：包含最后错误 / 退避时间；通知被拒时明确「推送不会展示」。
+    var pushGuidanceText: String {
+        PushStatusPresentation.guidance(
+            for: pushRegistrationService?.record,
+            authorization: notificationAuthorization
+        )
+    }
+
+    /// 手动重试一次注册（退避未到期时也会立即尝试）。
+    func retryPushRegistration() {
+        pushRegistrationService?.requestRegistration(force: true)
     }
 
     // MARK: - Appearance

@@ -33,6 +33,9 @@ final class SyncEngine {
 
     private(set) var status = Status()
     var onChange: (() -> Void)?
+    /// 会话就绪（首次匿名登录成功 / 已有 token 可用 / 重新登录成功）时回调。
+    /// 推送令牌注册依赖它，避免在还没有 Bearer 时发起请求。
+    var onSessionReady: (() -> Void)?
 
     private let api: SyncAPIServicing
     private let tokenStore: TokenStoring
@@ -239,6 +242,7 @@ final class SyncEngine {
                 self.metadataStore.sessionExpiresAt = session.expiresAt
                 self.metadataStore.reloginRequired = false
                 self.status.needsRelogin = false
+                self.sessionDidBecomeReady()
                 self.runSync(session: session, summary: Summary(), completion: completion)
             }
         }
@@ -246,8 +250,15 @@ final class SyncEngine {
 
     // MARK: - Session
 
+    private func sessionDidBecomeReady() {
+        DispatchQueue.main.async { [weak self] in
+            self?.onSessionReady?()
+        }
+    }
+
     private func ensureSession(completion: @escaping (Result<AnonymousSession, AppError>) -> Void) {
         if let session = tokenStore.load(), !session.token.isEmpty {
+            sessionDidBecomeReady()
             completion(.success(session))
             return
         }
@@ -268,6 +279,7 @@ final class SyncEngine {
                 }
                 self.metadataStore.userID = session.userID
                 self.metadataStore.sessionExpiresAt = session.expiresAt
+                self.sessionDidBecomeReady()
                 completion(.success(session))
             case .failure(let error):
                 completion(.failure(error))

@@ -81,7 +81,7 @@ jobs:
         with:
           repository: platojobs/PJGoIoT
           path: PJGoIoT
-          ref: v0.22.0
+          ref: v0.23.0
           persist-credentials: false
 
       - name: Set up Go (version from PJGoIoT/go.mod)

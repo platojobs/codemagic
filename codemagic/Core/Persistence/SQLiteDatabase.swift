@@ -112,7 +112,8 @@ final class SQLiteDatabase {
                 "households",
                 "device_assignment_pending",
                 "feedback_drafts",
-                "device_catalog_cache"
+                "device_catalog_cache",
+                "push_devices"
             ]
             try performExecute("BEGIN IMMEDIATE;", [])
             do {
@@ -175,6 +176,9 @@ final class SQLiteDatabase {
         }
         if version < 15 {
             try migrateToVersion15()
+        }
+        if version < 16 {
+            try migrateToVersion16()
         }
     }
 
@@ -686,6 +690,52 @@ final class SQLiteDatabase {
         add("rejected_at", "REAL")
         add("next_retry_at", "REAL")
         script += "PRAGMA user_version = 15;"
+        try executeScript(script)
+    }
+
+    /// v16：推送令牌注册的单行状态。
+    ///
+    /// 表内固定一行（`id = 'current'`），保存当前 APNs token、远端 deviceId、注册状态、
+    /// 最后错误、失败次数与下次重试时间。`token` 允许为空 —— 本机拿不到真实 token 时
+    /// 只记录「未配置推送 / 无法获取令牌」，绝不写入占位令牌。
+    ///
+    /// 可重复执行：`PRAGMA table_info` 判列，缺列才 `ALTER`，旧行保留。
+    private func migrateToVersion16() throws {
+        let columns = Set(try performQuery("PRAGMA table_info(push_devices);", [])
+            .compactMap { $0.text("name") })
+        if columns.isEmpty {
+            try executeScript("""
+            CREATE TABLE IF NOT EXISTS push_devices (
+                id TEXT PRIMARY KEY NOT NULL,
+                token TEXT,
+                remote_device_id TEXT,
+                platform TEXT NOT NULL DEFAULT 'ios',
+                status TEXT NOT NULL DEFAULT 'missingToken',
+                last_error TEXT,
+                attempts INTEGER NOT NULL DEFAULT 0,
+                next_retry_at REAL,
+                created_at REAL NOT NULL DEFAULT 0,
+                updated_at REAL NOT NULL DEFAULT 0
+            );
+            PRAGMA user_version = 16;
+            """)
+            return
+        }
+        var script = ""
+        func add(_ name: String, _ definition: String) {
+            guard !columns.contains(name) else { return }
+            script += "ALTER TABLE push_devices ADD COLUMN \(name) \(definition);\n"
+        }
+        add("token", "TEXT")
+        add("remote_device_id", "TEXT")
+        add("platform", "TEXT NOT NULL DEFAULT 'ios'")
+        add("status", "TEXT NOT NULL DEFAULT 'missingToken'")
+        add("last_error", "TEXT")
+        add("attempts", "INTEGER NOT NULL DEFAULT 0")
+        add("next_retry_at", "REAL")
+        add("created_at", "REAL NOT NULL DEFAULT 0")
+        add("updated_at", "REAL NOT NULL DEFAULT 0")
+        script += "PRAGMA user_version = 16;"
         try executeScript(script)
     }
 

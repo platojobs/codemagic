@@ -227,8 +227,9 @@ iOS 端不再存在“历史端点”调用；唯一保留的旧路径 `/api/v1/
 - 家庭（v0.14.0）：三个匿名账号（owner / member / outsider）——个人家庭自动创建且不可删（403 `FORBIDDEN`）→ 创建家庭 → 邀请码 8 位且 `expiresAt` 为未来、一次性（重复领取 404）→ member 用小写码领取成功（`role=member`、成员数 2）→ 成员列表 owner / member 对应 → owner 建房并 PATCH 设备归属 → member `GET /my/devices` 可见该设备及 `householdId` / `roomId` → member 改房间 / 建房 / 签发邀请码 / 改家庭名均 403 `FORBIDDEN` → 跨家庭读取家庭 / 成员 / 房间均 404 `NOT_FOUND` → 非成员读取与改房间 404 → member 改 owner 设备 404 → 归属三态（缺失不变 / 空串清除 `roomId` 与 `householdId` 回落个人家庭 / 非空覆盖）→ 删除家庭后设备回到个人家庭、`roomId = null`。
 - 家庭管理（v0.15.0）：owner 创建家庭 → 邀请 `member` 领取 → 邀请码列表只含 `codeHashPrefix` / `status` / `expiresAt`（响应无明文字段、响应原文不含明文）→ 撤销 204 后第三人 claim 404 → 建房 3 间 → 整段 `PUT /rooms/order` 成功且顺序生效 → 缺项 / 多项 / 重复均 409（`CONFLICT` 或 `ROOM_SET_MISMATCH`）→ `GET /households` 的 `memberCount=2` / `roomCount=3` / `deviceCount=0` 为真实值 → 成员设备 PATCH 加入家庭 → owner 带成员退出 409 `CONFLICT` 且 message 非空 → owner 移除成员 204 → 被移除成员 `GET /households/{id}` 404、其设备回个人家庭且 `roomId=null` → 移除后 owner 退出 204、家庭 404。
 - 会话与反馈（v0.22.0）：`GET /sessions` 200 且标出 `current`；`POST /auth/refresh` 200 返回新 token、旧 token 立即 401、新 token 可访问；吊销不存在的会话 404；`POST /auth/logout` 204 后该 token 失效；`GET /feedback/{id}` 200 含 `statusMessage`；`PATCH /feedback/{id}` 200 关闭，再次 PATCH 409。
+- 推送与场景分页（v0.23.0，iOS v0.26.0）：未带 token 注册 401；`POST /push/devices` 200 且 `status=active` / `platform=ios` / 返回 `id`；同一 `(user, token)` 幂等同一 `id` 并更新 `appVersion`；非法 `platform` / 空 `token` 均 400 `PUSH_DEVICE_INVALID`；跨用户 DELETE 404；本人 DELETE 204 且重复 DELETE 幂等 204；`GET /scenes` 不传参数仍是全量且无分页字段，`limit=2` 返回 2 条 + `hasMore` + `nextCursor`，游标翻页取回剩余 1 条且 `hasMore=false`，`limit=0` 400。
 
-当前共 **430 项断言全部通过**（2026-11-06，后端 `PJGoIoT` **v0.22.0**，`STORE=fixture`；`scripts/e2e-contract.sh` 实跑 **430 PASS / 0 SKIP / 0 FAIL**）。真 Postgres 运行同一套契约，并额外直接查库验证邀请码只存 64 位哈希、移除成员后成员行删除、owner 退出后成员行清空。
+当前共 **460 项断言全部通过**（2026-11-07，后端 `PJGoIoT` **v0.23.0**，`STORE=fixture`；`scripts/e2e-contract.sh` 实跑 **460 PASS / 0 SKIP / 0 FAIL**，v0.26.0 新增第 12 节推送设备注册 / 注销 / 幂等 / `PUSH_DEVICE_INVALID` / 跨用户 404 与 `/scenes` 可选 `limit` / `cursor` 分页）。真 Postgres 运行同一套契约，并额外直接查库验证邀请码只存 64 位哈希、移除成员后成员行删除、owner 退出后成员行清空。
 
 #### v0.23.0：430 / 432 差异定位与消除
 
@@ -559,6 +560,18 @@ Android 自 v0.22.0 起把服务端 `SCENE_*` 4xx 视为终态；iOS v0.24.0 对
 - **429 跨进程保留**：`SceneStore.markRateLimited` 把 `Retry-After`（缺省 30 秒）写入 `next_retry_at`；`fetchPending(now:)` 过滤 `next_retry_at IS NULL OR next_retry_at <= now`。同步服务注入同一时钟，重启后仍按截止时间才开始重试。
 - **徽章顺序（与 Android 同序）**：设备已移除 → 拒绝原因 → 同步状态。`rejected` 行隐藏「待同步」徽章，详情追加「拒绝原因：…」；无障碍状态优先播报拒绝原因。
 - **测试**：`codemagicTests/SceneSyncTests.swift` 覆盖「拒绝后不重试」「关闭并重开数据库后仍不重试」「编辑字段后回 pending 并重新上传」「429 `Retry-After` 跨重启保留且截止后恢复」，另加 `scenarios` INSERT 列顺序回归（`created_at` 必须落在 `created_at`，不能把 `next_retry_at` 写成 `created_at`）。
+
+### 3.21 推送令牌注册（v0.26.0，后端 v0.23.0）
+
+- **契约**：`POST /api/v1/push/devices`（Bearer）body `{platform, token, appVersion?, deviceModel?}`；同 `(user, token)` 幂等 upsert，`inactive` 重置为 `active`。缺 `platform` / `token` 返回 400 `PUSH_DEVICE_INVALID`。`DELETE /api/v1/push/devices/{deviceId}` 置 `inactive`（不硬删），404 视为已不存在。
+- **表结构（迁移 v16）**：单行表 `push_devices`（`id='current'`），列 `token TEXT`、`remote_device_id TEXT`、`platform TEXT`、`status TEXT`、`last_error TEXT`、`attempts INTEGER`、`next_retry_at REAL`、`created_at REAL`、`updated_at REAL`。`PRAGMA table_info(push_devices)` 判列后按需增列，可重复执行；`PRAGMA user_version = 16`；旧库其它表数据不动。
+- **触发点**：① `SyncEngine.onSessionReady`（已有 token / 首次匿名登录成功 / 重新登录成功）；② App 回到前台（`SceneDelegate.sceneDidBecomeActive`）补注册到期的 pending；③ APNs token 变化（`PushTokenProvider.onUpdate`，先 DELETE 旧 deviceId 再注册新 token）；④ 引导页处理完通知权限后（权限结果不参与是否注册）；⑤ 登出 / 删除账号前先 DELETE。
+- **权限与注册解耦**：`UNUserNotificationCenter.requestAuthorization` 只决定「是否展示」。无论用户允许还是拒绝，都调用 `UIApplication.registerForRemoteNotifications()` 并完成服务端注册；拒绝时界面写「已注册 · 通知未授权」与「推送不会展示」，不把通知关闭显示成推送未开启。
+- **拿不到真实 token**：没有推送证书 / `aps-environment` entitlement 时系统回调失败，状态落 `missingToken`，`token` / `remote_device_id` 为空，**不写占位 token、不调用注册接口**。界面显示「未配置推送」而不是「已开启」。配好证书与 entitlement 后无需改代码，系统回调成功即走同一注册路径。
+- **失败分类**：网络、5xx、429 可重试 —— `status='pending'`、`attempts+1`、`next_retry_at = now + min(30·2^(attempts-1), 3600)` 秒（429 优先用 `Retry-After`），保留 token 待下次前台 / 到期重试；400 及其它非 401/429 的 4xx 为终态 `rejected`，落可读原因（如 `PUSH_DEVICE_INVALID platform 与 token 不能为空`），不自动重试；401 落 `unauthorized`，等下一次会话就绪。
+- **注销顺序**：`SessionManager.logoutCurrent` 与 `AccountDeletionService.confirmDeletion` 都先调用 `PushRegistrationService.deactivate`（DELETE；404 也算成功），完成或失败后才清本地 / 清 token。DELETE 网络失败不阻塞登出与删号，本地记录仍清理。
+- **通知点击**：`PushMessageHandler` 从 `userInfo`（含 `data` 嵌套）解析 `alertId` / `kind` / `deviceId` / `externalId`。`kind` 含 `scene` → 智能场景页；含 `device` 或带设备标识 → 设备详情（本地 UUID 直接打开，`externalId` 用本地设备表解析）；无法定位回首页，不猜测。
+- **测试**：`codemagicTests/PushRegistrationTests.swift` 覆盖注册、token 变化重注册并注销旧 device、拿不到 token 不注册占位值、权限拒绝仍注册、网络 / 5xx 退避与到期重试、400 终态、401 终态、注销顺序（含 404）、本地字段跨重启保留、迁移列集合与幂等、推送解析与路由。
 
 ## 4. 错误码
 

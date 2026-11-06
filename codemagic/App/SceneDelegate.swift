@@ -6,6 +6,7 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     var window: UIWindow?
     private let environment = AppEnvironment.shared
     private weak var tabBarController: MainTabBarController?
+    private let pushMessageHandler = PushMessageHandler()
 
     func scene(
         _ scene: UIScene,
@@ -42,6 +43,8 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         SyncCoordinator.shared.syncOnForeground()
         // 反馈队列按有界指数退避补发到期草稿；幂等键保证不会产生重复记录。
         environment.feedbackCoordinator.retryEligible()
+        // 补一次未成功的推送注册；退避未到期时不会发请求。
+        environment.pushRegistrationService.appDidBecomeActive()
     }
 
     /// 首启引导：仅首次或未走完时出现；走完 / 跳过由引导页持久化。
@@ -75,14 +78,34 @@ extension SceneDelegate: UNUserNotificationCenterDelegate {
         completionHandler([.banner, .list, .sound])
     }
 
-    /// 点击通知进入对应设备详情；设备已被删除时只回到设备列表。
+    /// 点击通知按 `kind` 跳转设备详情或场景页；解析不到目标时回首页。
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
-        let deviceIDText = response.notification.request.content.userInfo[UserNotificationService.deviceIDKey] as? String
-        if let deviceIDText, let deviceID = UUID(uuidString: deviceIDText) {
+        let userInfo = response.notification.request.content.userInfo
+        if let message = pushMessageHandler.message(from: userInfo) {
+            switch pushMessageHandler.destination(for: message) {
+            case .deviceDetail(let deviceID):
+                tabBarController?.openDeviceDetail(deviceID: deviceID)
+            case .externalDevice(let platform, let externalID):
+                if let device = try? environment.savedDeviceStore.fetch(
+                    platform: platform,
+                    externalID: externalID
+                ) {
+                    tabBarController?.openDeviceDetail(deviceID: device.id)
+                } else {
+                    tabBarController?.openHome()
+                }
+            case .scenes:
+                tabBarController?.openScenes()
+            case .home:
+                tabBarController?.openHome()
+            }
+        } else if let deviceIDText = userInfo[UserNotificationService.deviceIDKey] as? String,
+                  let deviceID = UUID(uuidString: deviceIDText) {
+            // 兼容本地通知（只带本地设备 UUID）。
             tabBarController?.openDeviceDetail(deviceID: deviceID)
         }
         completionHandler()

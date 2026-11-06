@@ -2491,6 +2491,128 @@ private func run() -> Int32 {
         report.check(closeAgain.status == 409, "已关闭再改返回 409", "status=\(closeAgain.status)")
     }
 
+    // MARK: 12. 推送设备注册 / 注销 与 /scenes 可选分页（v0.23.0）
+
+    report.section("12. 推送设备注册 / 注销 / 场景分页（v0.23.0）")
+
+    if let pushAccount = anonymousAccount("push") {
+        let pushToken = "e2e-push-token"
+        let pushBody: [String: Any] = [
+            "platform": "ios",
+            "token": pushToken,
+            "appVersion": "0.26.0",
+            "deviceModel": "iPhone",
+        ]
+
+        let noAuth = client.request("POST", "push/devices", json: pushBody)
+        report.check(noAuth.status == 401, "未带 token 注册推送设备返回 401", "status=\(noAuth.status)")
+
+        let registered = client.request("POST", "push/devices", token: pushAccount.token, json: pushBody)
+        let registeredObject = jsonObject(registered.body) ?? [:]
+        let pushDeviceID = text(registeredObject, "id")
+        report.check(registered.status == 200, "POST /push/devices 返回 200", "status=\(registered.status) body=\(bodyText(registered.body))")
+        report.check(
+            text(registeredObject, "status") == "active" && text(registeredObject, "platform") == "ios",
+            "注册响应 status=active、platform=ios"
+        )
+        report.check(!pushDeviceID.isEmpty, "注册响应包含远端 deviceId")
+
+        let repeated = client.request(
+            "POST",
+            "push/devices",
+            token: pushAccount.token,
+            json: ["platform": "ios", "token": pushToken, "appVersion": "2.0.0"]
+        )
+        let repeatedObject = jsonObject(repeated.body) ?? [:]
+        report.check(repeated.status == 200, "同一 token 重复注册返回 200", "status=\(repeated.status)")
+        report.check(text(repeatedObject, "id") == pushDeviceID, "同一 (user, token) 幂等复用同一 deviceId")
+        report.check(text(repeatedObject, "appVersion") == "2.0.0", "重复注册更新 appVersion")
+
+        let invalidPlatform = client.request(
+            "POST",
+            "push/devices",
+            token: pushAccount.token,
+            json: ["platform": "web", "token": "e2e-invalid"]
+        )
+        report.check(invalidPlatform.status == 400, "非法 platform 返回 400", "status=\(invalidPlatform.status)")
+        report.check(
+            errorCode(invalidPlatform.body) == "PUSH_DEVICE_INVALID",
+            "非法 platform 返回 PUSH_DEVICE_INVALID",
+            "code=\(errorCode(invalidPlatform.body))"
+        )
+
+        let emptyToken = client.request(
+            "POST",
+            "push/devices",
+            token: pushAccount.token,
+            json: ["platform": "ios", "token": ""]
+        )
+        report.check(emptyToken.status == 400, "空 token 返回 400", "status=\(emptyToken.status)")
+        report.check(
+            errorCode(emptyToken.body) == "PUSH_DEVICE_INVALID",
+            "空 token 返回 PUSH_DEVICE_INVALID",
+            "code=\(errorCode(emptyToken.body))"
+        )
+
+        if let otherPushAccount = anonymousAccount("push-other") {
+            let crossUser = client.request(
+                "DELETE",
+                "push/devices/\(pushDeviceID)",
+                token: otherPushAccount.token
+            )
+            report.check(crossUser.status == 404, "跨用户注销推送设备返回 404", "status=\(crossUser.status)")
+        }
+
+        let deactivated = client.request("DELETE", "push/devices/\(pushDeviceID)", token: pushAccount.token)
+        report.check(deactivated.status == 204, "本人注销推送设备返回 204", "status=\(deactivated.status)")
+        let deactivatedAgain = client.request("DELETE", "push/devices/\(pushDeviceID)", token: pushAccount.token)
+        report.check(deactivatedAgain.status == 204, "已停用再次注销仍幂等 204", "status=\(deactivatedAgain.status)")
+
+        // /scenes 可选分页：不传参数维持全量；limit/cursor 能翻页；非法参数 400。
+        var createdSceneIDs: [String] = []
+        for index in 0..<3 {
+            let body: [String: Any] = [
+                "name": "分页场景 \(index)",
+                "trigger": ["kind": "schedule", "timeOfDay": "08:0\(index)"],
+                "actions": [["kind": "log", "message": "m\(index)"]],
+            ]
+            let created = client.request("POST", "scenes", token: pushAccount.token, json: body)
+            if let id = jsonObject(created.body).map({ text($0, "id") }), !id.isEmpty {
+                createdSceneIDs.append(id)
+            }
+            report.check(created.status == 201, "分页前置：创建场景 \(index)", "status=\(created.status) body=\(bodyText(created.body))")
+        }
+
+        let full = client.request("GET", "scenes", token: pushAccount.token)
+        let fullObject = jsonObject(full.body) ?? [:]
+        let fullItems = list(fullObject["items"])
+        report.check(full.status == 200, "GET /scenes 不传分页参数返回 200", "status=\(full.status)")
+        report.check(fullItems.count == createdSceneIDs.count, "不传 limit 保持全量返回", "items=\(fullItems.count)")
+        report.check(
+            fullObject["nextCursor"] == nil && fullObject["hasMore"] == nil,
+            "不传 limit 不出现分页字段"
+        )
+
+        let firstPage = client.request("GET", "scenes?limit=2", token: pushAccount.token)
+        let firstPageObject = jsonObject(firstPage.body) ?? [:]
+        let firstItems = list(firstPageObject["items"])
+        let firstCursor = text(firstPageObject, "nextCursor")
+        report.check(firstPage.status == 200, "GET /scenes?limit=2 返回 200", "status=\(firstPage.status)")
+        report.check(firstItems.count == 2, "limit=2 每页 2 条", "items=\(firstItems.count)")
+        report.check(firstPageObject["hasMore"] as? Bool == true, "第一页 hasMore=true")
+        report.check(!firstCursor.isEmpty, "hasMore=true 时返回 nextCursor")
+
+        let secondPage = client.request("GET", "scenes?limit=2&cursor=\(firstCursor)", token: pushAccount.token)
+        let secondPageObject = jsonObject(secondPage.body) ?? [:]
+        let secondItems = list(secondPageObject["items"])
+        report.check(secondPage.status == 200, "游标翻页返回 200", "status=\(secondPage.status)")
+        report.check(secondItems.count == 1, "第二页返回剩余 1 条", "items=\(secondItems.count)")
+        report.check(secondPageObject["hasMore"] as? Bool == false, "第二页 hasMore=false")
+
+        let invalidLimit = client.request("GET", "scenes?limit=0", token: pushAccount.token)
+        report.check(invalidLimit.status == 400, "非法 limit=0 返回 400", "status=\(invalidLimit.status)")
+    }
+
     // MARK: 汇总
 
     print("\n=== E2E 合同联调结果 ===")

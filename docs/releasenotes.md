@@ -4,6 +4,7 @@
 
 | Tag | MARKETING_VERSION | Build | 日期 | 对齐后端 |
 | --- | --- | --- | --- | --- |
+| `v0.26.0` | 0.26.0 | 35 | 2026-11-07 | PJGoIoT v0.23.0（openapi 0.18.0；`POST /push/devices` / `DELETE /push/devices/{deviceId}`、通知权限与注册解耦、迁移 v16 `push_devices`、`PushMessageHandler`，e2e 升级 460 项） |
 | `v0.25.1` | 0.25.1 | 34 | 2026-11-07 | PJGoIoT v0.22.0（无后端契约变更；悬浮 Tab 胶囊下方到底部安全区的条带改为不透明遮挡，`BottomBand` 高度纯函数 + 单测） |
 | `v0.25.0` | 0.25.0 | 33 | 2026-11-06 | PJGoIoT v0.22.0（无后端契约变更；家庭房间分区去掉「房间」导航行、首页底部留白与设备卡名称/状态分行） |
 | `v0.24.0` | 0.24.0 | 32 | 2026-11-06 | PJGoIoT v0.22.0（无后端契约变更；场景 `rejected` 终态对齐 Android、429 退避持久化、首页 chip 与 AX 布局、成员可读名、底部 inset、房间列表一致性、seed 读数差异化） |
@@ -37,6 +38,24 @@
 | `v0.3.0` | 0.3.0 | 4 | 2026-11-05 | 0.3.0 |
 | `v0.2.0` | 0.2.0 | 3 | 2026-11-05 | 0.2.0 |
 | `v0.1.0` | — | 1 | 2026-11-05 | — |
+
+---
+
+## v0.26.0（build 35）
+
+**主题：接推送令牌注册 —— 会话就绪即注册、token 变化重注册、登出 / 删号先注销；拿不到真实 token 时如实显示「未配置推送」**
+
+- **契约（PJGoIoT v0.23.0 / openapi 0.18.0）**：`POST /push/devices`（Bearer）body `{platform, token, appVersion?, deviceModel?}`，同 `(user, token)` 幂等 upsert，`inactive` 会重置为 `active`；缺 `platform` / `token` 返回 400 `PUSH_DEVICE_INVALID`。`DELETE /push/devices/{deviceId}` 置 `inactive` 不硬删，404 视为已不存在并在本地清理。`/scenes` 新增可选 `limit` / `cursor`，不传参数维持全量，现有全量拉取未改。
+- **注册触发点**：`SyncEngine.onSessionReady`（已有 token / 首次匿名登录 / 重新登录成功）、`SceneDelegate.sceneDidBecomeActive`（补一次未成功 / 退避到期）、`PushTokenProvider.onUpdate`（APNs token 变化，先 DELETE 旧 deviceId 再注册新 token）、引导页处理完通知权限后、以及登出 / 删除账号前。
+- **权限与注册解耦**：通知授权只决定是否展示。用户拒绝通知仍调用 `registerForRemoteNotifications` 并完成服务端注册；「我的 → 阈值告警」显示「已注册 · 通知未授权」，说明「推送不会展示」，不会把通知关闭显示成推送未开启。
+- **真实 token 边界**：没有推送证书与 `aps-environment` entitlement 时系统回调失败，状态落 `missingToken`，本地不写 token / deviceId，**不调用注册接口、不注册占位 token**，界面显示「未配置推送」而不是「已开启」。模拟器实跑确认数据库为 `status=missingToken`、`token` 与 `remote_device_id` 为空，系统原因原样记录；配好证书与 entitlement 后同一路径即可直接工作。
+- **本地持久化（迁移 v16）**：单行 `push_devices`（`id='current'`）保存 `token` / `remote_device_id` / `platform` / `status` / `last_error` / `attempts` / `next_retry_at` / 时间戳；`PRAGMA table_info` 判列后按需 `ALTER`，可重复执行，旧数据保留。
+- **失败路径**：网络、5xx、429 可重试 —— 保留 token，`status=pending`，`attempts+1`，`next_retry_at = now + min(30·2^(attempts-1), 3600)` 秒（429 优先 `Retry-After`）；400 及其它非 401/429 的 4xx 为终态 `rejected`，记录可读原因且不再自动重试；401 落 `unauthorized`，等下一次会话就绪。
+- **注销**：`SessionManager.logoutCurrent` 与 `AccountDeletionService.confirmDeletion` 都先调用 `PushRegistrationService.deactivate`（DELETE，404 也算成功），完成或失败后才清本地 / 清 token；DELETE 网络失败不阻塞登出与删号。
+- **通知点击**：新增 `PushMessageHandler`，从 `userInfo`（含 `data` 嵌套）解析 `alertId` / `kind` / `deviceId` / `externalId`。`kind` 含 `scene` → 场景页；含 `device` 或带设备标识 → 设备详情（本地 UUID 直接打开，`externalId` 走本地设备表解析）；无法定位回首页。
+- **测试**：单测 **447 个，0 失败**（新增 20 个：注册、token 变化重注册并注销旧设备、拿不到 token 不注册占位值、权限拒绝仍注册、网络 / 5xx 指数退避、到期重试、400 / 401 终态、注销顺序（含 404）、本地字段跨重启保留、迁移列集合、通知解析与路由）；e2e 升级到 PJGoIoT v0.23.0，新增推送注册 / 注销 / 幂等 / `PUSH_DEVICE_INVALID` / 跨用户 404 与 `/scenes` `limit` / `cursor` 分页断言，本机 **460 项，0 失败**。
+- **CI**：待 v0.26.0 推送后填写。
+- **未验证**：真实 APNs 推送、证书 / entitlement 配置后的真机注册与通知点击跳转（本机无 Apple 开发者账号与推送证书）；e2e 真实 Postgres 本轮未重跑；截图本轮未重截（`profile.png` 顶部布局未变，推送注册行位于「阈值告警」分区，截图未滚到该处）。
 
 ---
 

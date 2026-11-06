@@ -298,6 +298,9 @@ final class FirstRunOnboardingViewController: UIViewController {
             self.isRequestingAuthorization = false
             self.primaryButton.isEnabled = true
             self.refreshPermissionState()
+            // 通知权限与注册解耦：拒绝通知也要完成推送令牌注册，
+            // 否则用户以后在系统设置开启通知时还得重新走一遍注册。
+            self.environment.pushRegistrationService.requestRegistration(force: true)
             if granted {
                 self.advance()
             } else {
