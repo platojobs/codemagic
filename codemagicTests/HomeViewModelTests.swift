@@ -1,3 +1,4 @@
+import UIKit
 import XCTest
 @testable import codemagic
 
@@ -205,5 +206,46 @@ final class HomeViewModelTests: XCTestCase {
 
         emit(-88, offset: 2)
         XCTAssertEqual(try scanLogStore.fetchRecent().count, 3, "恢复后重新武装，可再次告警")
+    }
+}
+
+/// 家庭管理房间分区的回归：房间行数与分区头「管理」入口。
+final class HomeLayoutTests: XCTestCase {
+    /// 家庭房间分区只统计真实房间；「管理」入口移到分区头，不再占一行。
+    func testHouseholdRoomSectionCountsOnlyRealRooms() {
+        XCTAssertEqual(HouseholdRoomSection.rowCount(roomCount: 3), 3)
+        XCTAssertEqual(HouseholdRoomSection.rowCount(roomCount: 0), 0)
+    }
+
+    /// 房间分区头的「管理」入口能触发房间管理，且带有稳定的无障碍标识。
+    func testRoomsHeaderManageEntryTriggersManagement() {
+        let header = RoomsSectionHeaderView(frame: CGRect(x: 0, y: 0, width: 370, height: 44))
+        var triggered = false
+        header.onManage = { triggered = true }
+        header.layoutIfNeeded()
+
+        guard let button = firstButton(in: header, identifier: "household.rooms.manage") else {
+            return XCTFail("找到管理入口")
+        }
+        XCTAssertEqual(button.title(for: .normal) ?? button.configuration?.title, L10n.t("household.rooms.manage"))
+        XCTAssertGreaterThanOrEqual(button.bounds.height, Layout.touchMin - 0.5, "管理入口满足触达高度")
+        button.sendActions(for: .touchUpInside)
+        XCTAssertTrue(triggered)
+    }
+
+    private func firstLabel(in view: UIView, text: String) -> UILabel? {
+        if let label = view as? UILabel, label.text == text { return label }
+        for subview in view.subviews {
+            if let found = firstLabel(in: subview, text: text) { return found }
+        }
+        return nil
+    }
+
+    private func firstButton(in view: UIView, identifier: String) -> UIButton? {
+        if let button = view as? UIButton, button.accessibilityIdentifier == identifier { return button }
+        for subview in view.subviews {
+            if let found = firstButton(in: subview, identifier: identifier) { return found }
+        }
+        return nil
     }
 }

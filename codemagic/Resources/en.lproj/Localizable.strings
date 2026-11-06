@@ -757,6 +757,7 @@
 "household.join.success" = "Joined \"%@\"";
 "household.switch" = "Switch household";
 "household.rooms" = "Household rooms";
+"household.rooms.manage" = "Manage";
 "household.rooms.empty" = "No rooms in this household";
 "household.rooms.serverNote" = "Rooms follow the server; offline edits are kept locally and marked unsynced.";
 "household.permission.memberNote" = "You are not the household owner, so household and rooms are read-only.";

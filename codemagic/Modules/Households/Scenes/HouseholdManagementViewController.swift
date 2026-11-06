@@ -24,6 +24,9 @@ final class HouseholdManagementViewController: UIViewController {
     private let savedDeviceStore: SavedDeviceStore
     private let householdService: HouseholdService
     private let tableView = UITableView(frame: .zero, style: .insetGrouped)
+    /// 房间分区头：标题在左、管理入口在右。管理入口不再作为房间列表的一行，
+    /// 否则会与房间管理页的真实房间项混在一起，看起来多出一个叫「房间」的房间。
+    private let roomsHeader = RoomsSectionHeaderView()
 
     init(
         viewModel: HouseholdManagementViewModel,
@@ -65,6 +68,7 @@ final class HouseholdManagementViewController: UIViewController {
         tableView.dataSource = self
         tableView.delegate = self
         tableView.register(UITableViewCell.self, forCellReuseIdentifier: "Cell")
+        roomsHeader.onManage = { [weak self] in self?.presentRoomManagement() }
         tableView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(tableView)
         NSLayoutConstraint.activate([
@@ -341,7 +345,7 @@ extension HouseholdManagementViewController: UITableViewDataSource {
         case .invitations:
             return viewModel.invitations.isEmpty ? 1 : viewModel.invitations.count
         case .rooms:
-            return viewModel.rooms.count + 1
+            return HouseholdRoomSection.rowCount(roomCount: viewModel.rooms.count)
         case .actions:
             return actionRows.count
         }
@@ -356,6 +360,18 @@ extension HouseholdManagementViewController: UITableViewDataSource {
         case .rooms: return L10n.t("household.rooms")
         case .actions: return nil
         }
+    }
+
+    func tableView(_ tableView: UITableView, viewForHeaderInSection section: Int) -> UIView? {
+        guard let section = sectionType(at: section), section == .rooms else { return nil }
+        return roomsHeader
+    }
+
+    func tableView(_ tableView: UITableView, heightForHeaderInSection section: Int) -> CGFloat {
+        guard let section = sectionType(at: section), section == .rooms else {
+            return UITableView.automaticDimension
+        }
+        return max(Layout.touchMin, AppText.caption.font().lineHeight + Layout.space8)
     }
 
     func tableView(_ tableView: UITableView, titleForFooterInSection section: Int) -> String? {
@@ -424,15 +440,9 @@ extension HouseholdManagementViewController: UITableViewDataSource {
                 cell.selectionStyle = .default
             }
         case .rooms:
-            if indexPath.row == 0 {
-                configuration.text = L10n.t("room.manage")
-                cell.accessoryType = .disclosureIndicator
-                cell.selectionStyle = .default
-            } else {
-                let room = viewModel.rooms[indexPath.row - 1]
-                configuration.text = room.name
-                configuration.secondaryText = viewModel.roomSubtitle(for: room)
-            }
+            let room = viewModel.rooms[indexPath.row]
+            configuration.text = room.name
+            configuration.secondaryText = viewModel.roomSubtitle(for: room)
         case .actions:
             let action = actionRows[indexPath.row]
             configuration.text = action.title
@@ -490,7 +500,8 @@ extension HouseholdManagementViewController: UITableViewDelegate {
             guard !viewModel.invitations.isEmpty else { return }
             confirmRevoke(viewModel.invitations[indexPath.row])
         case .rooms:
-            if indexPath.row == 0 { presentRoomManagement() }
+            // 房间项只读，管理入口在分区头。
+            break
         case .actions:
             switch actionRows[indexPath.row].action {
             case .create: presentCreateHousehold()
@@ -535,6 +546,74 @@ extension HouseholdManagementViewController: UITableViewDelegate {
         }
         guard !actions.isEmpty else { return nil }
         return UISwipeActionsConfiguration(actions: actions)
+    }
+}
+
+// MARK: - 房间分区
+
+/// 房间分区的行数只包含真实房间；「管理」入口在分区头，不占房间项的一行。
+enum HouseholdRoomSection {
+    static func rowCount(roomCount: Int) -> Int {
+        max(0, roomCount)
+    }
+}
+
+/// 房间分区头：左侧标题、右侧「管理」入口。
+final class RoomsSectionHeaderView: UIView {
+    var onManage: (() -> Void)?
+
+    private let titleLabel = UILabel()
+    private let manageButton = UIButton(type: .system)
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        titleLabel.text = L10n.t("household.rooms")
+        titleLabel.applyFont(AppText.caption.font())
+        titleLabel.textColor = AppTheme.Palette.secondaryText
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        var configuration = UIButton.Configuration.plain()
+        configuration.title = L10n.t("household.rooms.manage")
+        configuration.baseForegroundColor = AppTheme.Palette.primaryText
+        configuration.contentInsets = NSDirectionalEdgeInsets(
+            top: Layout.space8,
+            leading: Layout.space8,
+            bottom: Layout.space8,
+            trailing: Layout.pageMargin
+        )
+        // UIButton.Configuration 不会自动跟随动态字体，这里用同一套 AppText 字号。
+        configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
+            var outgoing = incoming
+            outgoing.font = AppText.caption.font(weight: .medium)
+            return outgoing
+        }
+        manageButton.configuration = configuration
+        manageButton.accessibilityIdentifier = "household.rooms.manage"
+        manageButton.addTarget(self, action: #selector(handleManage), for: .touchUpInside)
+        manageButton.translatesAutoresizingMaskIntoConstraints = false
+
+        addSubview(titleLabel)
+        addSubview(manageButton)
+        NSLayoutConstraint.activate([
+            titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Layout.pageMargin),
+            titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            manageButton.trailingAnchor.constraint(equalTo: trailingAnchor),
+            manageButton.centerYAnchor.constraint(equalTo: centerYAnchor),
+            manageButton.leadingAnchor.constraint(
+                greaterThanOrEqualTo: titleLabel.trailingAnchor,
+                constant: Layout.space8
+            ),
+            manageButton.heightAnchor.constraint(greaterThanOrEqualToConstant: Layout.touchMin),
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    @objc private func handleManage() {
+        onManage?()
     }
 }
 

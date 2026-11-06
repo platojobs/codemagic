@@ -757,6 +757,7 @@
 "household.join.success" = "已加入家庭「%@」";
 "household.switch" = "切换家庭";
 "household.rooms" = "家庭房间";
+"household.rooms.manage" = "管理";
 "household.rooms.empty" = "这个家庭还没有房间";
 "household.rooms.serverNote" = "房间以服务端为准；离线修改会先保存在本机并标注「未同步」。";
 "household.permission.memberNote" = "你不是该家庭的所有者，只能查看家庭与房间，不能创建、改名或删除。";
