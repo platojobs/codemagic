@@ -54,7 +54,7 @@
 - **注销**：`SessionManager.logoutCurrent` 与 `AccountDeletionService.confirmDeletion` 都先调用 `PushRegistrationService.deactivate`（DELETE，404 也算成功），完成或失败后才清本地 / 清 token；DELETE 网络失败不阻塞登出与删号。
 - **通知点击**：新增 `PushMessageHandler`，从 `userInfo`（含 `data` 嵌套）解析 `alertId` / `kind` / `deviceId` / `externalId`。`kind` 含 `scene` → 场景页；含 `device` 或带设备标识 → 设备详情（本地 UUID 直接打开，`externalId` 走本地设备表解析）；无法定位回首页。
 - **测试**：单测 **447 个，0 失败**（新增 20 个：注册、token 变化重注册并注销旧设备、拿不到 token 不注册占位值、权限拒绝仍注册、网络 / 5xx 指数退避、到期重试、400 / 401 终态、注销顺序（含 404）、本地字段跨重启保留、迁移列集合、通知解析与路由）；e2e 升级到 PJGoIoT v0.23.0，新增推送注册 / 注销 / 幂等 / `PUSH_DEVICE_INVALID` / 跨用户 404 与 `/scenes` `limit` / `cursor` 分页断言，本机 **460 项，0 失败**。
-- **CI**：待 v0.26.0 推送后填写。
+- **CI**：tag run [42267209102](https://github.com/platojobs/codemagic/actions/runs/42267209102) success（447 单测 / 460 项 E2E）；main run [42267160450](https://github.com/platojobs/codemagic/actions/runs/42267160450) 因 `concurrency: ios-${sha}` 先被取消，tag run 结束后重跑为 success（447 单测 / 460 项 E2E）。tag `v0.26.0` 未移动。
 - **未验证**：真实 APNs 推送、证书 / entitlement 配置后的真机注册与通知点击跳转（本机无 Apple 开发者账号与推送证书）；e2e 真实 Postgres 本轮未重跑；截图本轮未重截（`profile.png` 顶部布局未变，推送注册行位于「阈值告警」分区，截图未滚到该处）。
 
 ---
