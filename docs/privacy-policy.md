@@ -1,7 +1,7 @@
 # 隐私政策（codemagic · iOS）
 
 生效日期：2026-11-07
-适用版本：`0.27.0`（build 36）
+适用版本：`0.28.0`（build 37）
 
 本政策只描述 **当前版本已实现** 的数据处理。codemagic 由本 App 的开发者（以下称「我们」）提供；如有疑问，可通过 App Store 商品页展示的开发者联系方式与我们联系。
 
@@ -22,7 +22,9 @@ codemagic 用蓝牙读取附近设备的读数，并把设备、读数与规则�
 | 同步元数据 | 游标、上次同步时间、客户端标识 `clientId` | App 运行 | 增量同步、诊断 | `clientId` 随账号请求发送 | 否 |
 | 家庭与房间关系 | 家庭名、房间名、成员 `userId`、角色（owner / member） | 用户输入 / 服务端 | 家庭与房间管理、设备归属、同步 | 是 | 否 |
 | 反馈内容 | 主题、正文、可选联系方式、App 版本 / iOS 版本 / 设备型号 | 用户主动提交 | 处理反馈与排查问题 | 是 | 否 |
-| APNs 推送令牌 | `push_devices.token`、远端 `deviceId`、状态与最后错误 | 系统 `registerForRemoteNotifications` | 阈值告警推送、注册失败排查 | 是 | 否 |
+| APNs 推送令牌 | `push_devices.token`、远端 `deviceId`、状态与最后错误 | 系统 `registerForRemoteNotifications` | 阈值告警推送、注册失败排查 | 将来启用推送后与匿名账号关联 | 否 |
+
+> **当前版本（0.28.0/build 37）不采集 APNs 推送令牌**：App 没有 `aps-environment` entitlement 与推送证书，系统不会下发令牌，`push_devices` 只保存「未配置推送」状态与错误，界面同样如实显示。只有配置推送证书后才开始采集；届时本表、第 7 节与商店隐私问卷会同步改为「已采集」。
 
 说明：
 
@@ -79,7 +81,8 @@ codemagic 用蓝牙读取附近设备的读数，并把设备、读数与规则�
 ## 7. 通知
 
 - 阈值告警默认使用 **本地通知**（`UNUserNotificationCenter`），由设备读数在本机触发。
-- 配置推送证书与 `aps-environment` entitlement 后，App 会把 APNs 设备令牌注册到本 App 的服务端，用于发送阈值告警类远程通知；**当前版本未配置证书，因此不产生、不上报 token**，界面如实显示「未配置推送」。
+- **当前版本不采集 APNs 令牌**：App 与签名配置中都没有 `aps-environment` entitlement，也没有推送证书，`registerForRemoteNotifications` 不会得到令牌；本地 `push_devices` 只记录「未配置推送」状态与错误，不上报任何占位值，界面如实显示「未配置推送」。
+- 将来配置推送证书与 entitlement 后，App 会把 APNs 设备令牌注册到本 App 的服务端，用于发送阈值告警类远程通知。启用时需同步更新本政策第 2、7 节、`docs/app-privacy.md`、`docs/store-listing.md` 与商店隐私问卷（APNs 令牌仍归入「标识符 → 设备 ID」，`Linked = Yes`、`Tracking = No`、用途 App Functionality）；未完成这些更新前，商店申报必须保持「当前不采集」。
 - 推送令牌只用于告警投递，不用于营销；通知权限与注册解耦，拒绝通知权限仍会尝试注册令牌，但通知不会展示。
 - 通知权限可随时在系统设置关闭；关闭后规则仍会在「智能」页记录触发历史。
 

@@ -4,6 +4,7 @@
 
 | Tag | MARKETING_VERSION | Build | 日期 | 对齐后端 |
 | --- | --- | --- | --- | --- |
+| `v0.28.0` | 0.28.0 | 37 | 2026-11-07 | PJGoIoT v0.23.0（无后端契约变更；6.9 英寸 1320×2868 与 iPad 13 英寸 2064×2752 整组截图导出、APNs 令牌隐私申报与二进制对齐、新增隐私清单一致性单测） |
 | `v0.27.0` | 0.27.0 | 36 | 2026-11-07 | PJGoIoT v0.23.0（无后端契约变更；重截「我的」含推送注册行、真 Postgres 重跑并断言 `push_devices` 幂等 / `inactive` 重置 / 跨用户隔离 / `change_log` 无新增、补 App Store 上架材料与隐私营养标签） |
 | `v0.26.0` | 0.26.0 | 35 | 2026-11-07 | PJGoIoT v0.23.0（openapi 0.18.0；`POST /push/devices` / `DELETE /push/devices/{deviceId}`、通知权限与注册解耦、迁移 v16 `push_devices`、`PushMessageHandler`，e2e 升级 460 项） |
 | `v0.25.1` | 0.25.1 | 34 | 2026-11-07 | PJGoIoT v0.22.0（无后端契约变更；悬浮 Tab 胶囊下方到底部安全区的条带改为不透明遮挡，`BottomBand` 高度纯函数 + 单测） |
@@ -39,6 +40,20 @@
 | `v0.3.0` | 0.3.0 | 4 | 2026-11-05 | 0.3.0 |
 | `v0.2.0` | 0.2.0 | 3 | 2026-11-05 | 0.2.0 |
 | `v0.1.0` | — | 1 | 2026-11-05 | — |
+
+---
+
+## v0.28.0（build 37）
+
+**主题：商店规格截图导出 + APNs 令牌隐私申报与二进制对齐**
+
+- **6.9 英寸截图**：在 **iPhone 18 Pro Max · iOS 27.2** 模拟器导出整组 **18 张 1320×2868**，文件名与原有截图集一致，替换 `docs/screenshots`。逐张核对内容与标题；`profile.png` 仍从「登录会话」开始并完整显示「阈值告警 / 推送注册 = 未配置推送」与说明。首页底部截图改为慢速多次上滑（快速连滑在 6.9 英寸会因惯性停在半途），确认次卧最后两张卡完整位于 Tab 顶边 873pt 之上。
+- **iPad 规格**：`TARGETED_DEVICE_FAMILY = "1,2"`、iPad 四方向、无 `UIRequiresFullScreen`，因此 iPad 规格为必需项。在 **iPad Pro 13-inch (M5) · iPadOS 27.2** 导出同名 **18 张 2064×2752** 到 `docs/screenshots/ipad-13`；iPad 为系统顶部浮动 Tab，无底部条带遮挡。
+- **APNs 申报对齐**：清单 `DeviceID` 当前唯一实际内容是 BLE 外设 UUID；当前二进制无 `aps-environment`、不产生也不上报 APNs 令牌，`push_devices` 只存「未配置推送」状态。`store-listing.md` / `app-privacy.md` / `privacy-policy.md` 明确「当前不采集」，并列出启用推送后需同步修改的 6 处（entitlement / 证书、`APNSTokenProvider`、清单、两份隐私文档、商店文案与问卷、单测）。
+- **8 类逐项一致**：新增 `PrivacyManifestTests`（2 例）解析 `PrivacyInfo.xcprivacy` 并断言键集合恰为 8 个、全部 Linked / Tracking=false / AppFunctionality；同时解析 `store-listing.md` 的 `NSPrivacyCollectedDataType*`，断言与清单完全相同，防止两边不一致。
+- **测试 / 构建**：单测 **449 个 0 失败**（447 + 2），构建 `BUILD SUCCEEDED`；e2e 仍为 **460 项**。
+- **CI**：待推送后回填。
+- **未验证**：真实 APNs 推送、真机 BLE、公网隐私政策 URL、生产环境 / 隐藏本机信息的商店截图、App Store 隐私问卷实际提交。
 
 ---
 

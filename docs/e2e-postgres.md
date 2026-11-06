@@ -1,10 +1,10 @@
-# 真实 Postgres 端到端联调（v0.27.0）
+# 真实 Postgres 端到端联调（v0.28.0）
 
 本文件记录 `scripts/e2e-postgres.sh` 的**真实本地运行输出**。与 `scripts/e2e-contract.sh`（后端 `STORE=fixture` 内存态）不同，本项起真实 Postgres + 真实 API，额外覆盖只有真实库才能构造的分支，并直接查库核对家庭链路的数据不变量。
 
 ## 环境与命令
 
-- iOS 仓库：`codemagic`（v0.27.0）
+- iOS 仓库：`codemagic`（v0.28.0）
 - 后端：`PJGoIoT` **`v0.23.0`**，通过 `PJGOIOT_DIR` 指向干净 worktree（固定在该 tag，不改原仓库未提交内容）
 - 本机：macOS + Docker + Go 1.24+（Docker daemon 可用）
 - 命令：
@@ -28,17 +28,17 @@ PJGOIOT_DIR=/tmp/pjgoiot-v023 ./scripts/e2e-postgres.sh
 
 隔离说明：所有后端状态与日志都在 `mktemp` 目录（`E2E_STATE_DIR`）；契约 runner 是纯网络、无本地状态，**不读写 App 开发用的 SQLite / UserDefaults**。
 
-## 真实输出（2026-11-07，v0.27.0 / 后端 v0.23.0）
+## 真实输出（2026-11-07，v0.28.0 / 后端 v0.23.0）
 
 ```text
 == 起真实 Postgres + API（状态目录 /var/folders/…/codemagic-e2e-pg.r5TCIS/stack） ==
-BASE_URL=http://127.0.0.1:58669
-PG_CONTAINER=pjgoiot-e2e-pg-80616-1 DATABASE_URL=postgres://pjgoiot:pjgoiot-e2e-only@127.0.0.1:58656/pjgoiot_e2e?sslmode=disable
+BASE_URL=http://127.0.0.1:57610
+PG_CONTAINER=pjgoiot-e2e-pg-9525-1 DATABASE_URL=postgres://pjgoiot:pjgoiot-e2e-only@127.0.0.1:57589/pjgoiot_e2e?sslmode=disable
 
 == 跑现有契约套件（复用真实栈） ==
 [e2e] 后端：/tmp/pjgoiot-v023
-[e2e] 复用外部后端：http://127.0.0.1:58669（跳过构建与启动）
-[e2e] 等待 http://127.0.0.1:58669/api/v1/health 返回 200…
+[e2e] 复用外部后端：http://127.0.0.1:57610（跳过构建与启动）
+[e2e] 等待 http://127.0.0.1:57610/api/v1/health 返回 200…
 …
 === E2E 合同联调结果 ===
 通过：460 项，跳过：0 项，失败：0 项
@@ -58,7 +58,7 @@ PASS 真 Postgres 结构变更：转让 owner_user_id / 移除可见性 / 删房
 PASS 真 Postgres 推送：表存在 / 同 token 幂等 1 行 / 停用不硬删 / inactive 重置 active / 跨用户独立且互不可停用 / change_log 无新增
 
 == 匿名登录 ==
-PASS 匿名登录: userId=1e94bb53-a332-4acf-a259-fca8e111f9d7 expiresAt=2027-05-05T12:36:54.180221Z
+PASS 匿名登录: userId=79271609-a47b-4459-9544-9fde1a2370cf expiresAt=2027-05-05T20:28:23.662399Z
 
 == 推送 iOS 设备 + 读数（第一次） ==
 PASS push#1: applied=1 appliedReadings=4
@@ -67,16 +67,16 @@ PASS push#1: applied=1 appliedReadings=4
 PASS push#2: applied=1
 
 == 增量拉取（cursor=0） ==
-最老 seq=103，用 cursor=102（小于保留边界）构造 410
+最老 seq=106，用 cursor=105（小于保留边界）构造 410
 
 == 构造游标失效：最老 seq server_ts 改为 100 天前，再跑 cleanup(90 天) ==
-cleanup: change_log_deleted=1 change_log_cutoff=2026-08-08T12:36:54Z change_log_retention_days=90
+cleanup: change_log_deleted=1 change_log_cutoff=2026-08-08T20:28:24Z change_log_retention_days=90
 
 == 旧游标应返回 410 RESYNC_REQUIRED ==
 PASS 410: code=RESYNC_REQUIRED message=游标已过期，请全量重新同步
 
 == cursor=0 全量重拉（永不 410） ==
-PASS 全量拉取: changes=1 nextCursor=104
+PASS 全量拉取: changes=1 nextCursor=107
 
 == series / metrics ==
 PASS series: buckets=2 count=3 unit=celsius

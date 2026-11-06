@@ -8,6 +8,7 @@
 	<array/>
 	<key>NSPrivacyCollectedDataTypes</key>
 	<array>
+		<!-- 当前版本（0.28.0/build 37）DeviceID 仅含 BLE 外设 UUID；APNs 令牌仅在配置推送证书与 aps-environment 后才采集。 -->
 		<dict>
 			<key>NSPrivacyCollectedDataType</key>
 			<string>NSPrivacyCollectedDataTypeDeviceID</string>

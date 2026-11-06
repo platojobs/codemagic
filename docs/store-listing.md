@@ -1,8 +1,8 @@
-# App Store 上架材料（iOS v0.27.0）
+# App Store 上架材料（iOS v0.28.0）
 
 > 状态：**材料已补齐，但尚未上传 App Store Connect、尚未提交审核、未上架**。
 > 本机没有 Apple Developer Program 账号，也没有任何 App Store 审核记录；仓库中没有分发证书、
-> Provisioning Profile 与 APNs 推送证书。`MARKETING_VERSION 0.27.0` / `CURRENT_PROJECT_VERSION 36`
+> Provisioning Profile 与 APNs 推送证书。`MARKETING_VERSION 0.28.0` / `CURRENT_PROJECT_VERSION 37`
 > 只用于模拟器构建与 CI，不能直接提交商店。
 >
 > 本文只描述仓库中**已实现并有代码证据**的能力。未实现的能力（账号密码、云备份、OTA、
@@ -17,7 +17,7 @@
 | 副标题（中文，≤30 字符） | `扫描、读数、曲线与阈值告警`（13 字符） |
 | 副标题（英文，≤30 字符） | `Scan, read, chart, alert`（24 字符） |
 | Bundle ID | `com.platojobs.codemagic` |
-| 版本 | `MARKETING_VERSION 0.27.0`、`CURRENT_PROJECT_VERSION 36` |
+| 版本 | `MARKETING_VERSION 0.28.0`、`CURRENT_PROJECT_VERSION 37` |
 | 默认语言 | 中文（简体）；另含英文 `en` |
 | 主分类 | 工具 |
 | 次分类 | 效率 |
@@ -154,8 +154,8 @@ bluetooth,ble,sensor,readings,heart rate,chart,alerts,home,devices
 
 | App Store 类别 | 具体数据 | 清单键 | 本地存储 | 服务端 | 触发条件 |
 | --- | --- | --- | --- | --- | --- |
-| 标识符 → 设备 ID | BLE 外设 `CBPeripheral.identifier`（大写 UUID） | `NSPrivacyCollectedDataTypeDeviceID` | `saved_devices` / `device_info_cache` | `user_devices.external_id` | 扫描并保存设备后 |
-| 标识符 → 设备 ID | **APNs 推送令牌**（`push_devices.token`） | `NSPrivacyCollectedDataTypeDeviceID` | `push_devices`（迁移 v16） | `push_devices.token` | **仅配置推送证书与 entitlement 后**；当前构建不产生、不上报 |
+| 标识符 → 设备 ID | BLE 外设 `CBPeripheral.identifier`（大写 UUID） | `NSPrivacyCollectedDataTypeDeviceID` | `saved_devices` / `device_info_cache` | `user_devices.external_id` | 扫描并保存设备后（**当前版本 DeviceID 唯一实际采集项**） |
+| 标识符 → 设备 ID | **APNs 推送令牌**（`push_devices.token`） | `NSPrivacyCollectedDataTypeDeviceID` | `push_devices`（迁移 v16；当前只存状态 / 错误） | `push_devices.token` | **仅配置推送证书与 entitlement 后**；当前构建不产生、不上报 |
 | 标识符 → 用户 ID | 匿名 `userId`、Keychain token | `NSPrivacyCollectedDataTypeUserID` | Keychain + `sync_metadata` | `users.id` | 首次匿名登录 |
 | 健康与健身 → 健康 | 心率读数（特征 `0x2A37`） | `NSPrivacyCollectedDataTypeHealth` | `readings`（7 天） | `readings`（90 天） | 设备上报心率时 |
 | 其他数据类型 | 温度、电量与 NUS 透传指标值、单位、`recordedAt` | `NSPrivacyCollectedDataTypeOtherDataTypes` | `readings`（7 天） | `readings`（90 天） | 设备上报对应指标时 |
@@ -168,9 +168,11 @@ bluetooth,ble,sensor,readings,heart rate,chart,alerts,home,devices
 **数据不用于追踪、不出售、不与第三方广告共享。** 不收集位置、通讯录、照片、麦克风、IDFA、
 浏览历史或搜索历史；无第三方 SDK。
 
-> 本版在 `PrivacyInfo.xcprivacy` 中新增 `OtherDataTypes`、`OtherUserContactInfo`、
-> `OtherDiagnosticData` 三类，以覆盖温湿度 / 电量等传感器指标、反馈可选联系方式与客户端诊断信息。
-> `plutil -lint` 已通过。
+**8 类一致性**：`PrivacyInfo.xcprivacy` 的 `NSPrivacyCollectedDataTypes` **恰好 8 个键**，与上表 8 个「清单键」逐项一致；上表有 9 行数据，但「BLE 外设 UUID」与「APNs 推送令牌」两行同属 `DeviceID`，不是第 9 类。`PrivacyManifestTests` 会解析清单与本文并断言键集合完全相同，防止一边 8 类、另一边另一套。
+
+**APNs 令牌当前不采集**：当前二进制（0.28.0/build 37）没有 `aps-environment` entitlement，`registerForRemoteNotifications` 拿不到令牌，`PushRegistrationService` 停在 `missingToken`，本地 `push_devices` 仅记录状态与错误，**不写占位 token、不调用 `POST /push/devices`**。因此隐私问卷中 DeviceID 的实际内容只有 BLE 外设 UUID。启用推送时必须同步修改：① 工程增加 `aps-environment` entitlement 与 APNs 证书；② `Core/Notifications/APNSTokenProvider.swift` 取真实令牌；③ 本表「触发条件」改为「配置推送后即采集」；④ 审核备注移除「推送服务当前未配置」；⑤ `docs/privacy-policy.md` 与 `docs/app-privacy.md` 同步改写；⑥ `PrivacyManifestTests` 复核。完整清单见 [`app-privacy.md`](app-privacy.md) 2.2 节。
+
+> v0.27.0 在清单中新增 `OtherDataTypes`、`OtherUserContactInfo`、`OtherDiagnosticData` 三类以覆盖传感器指标、反馈可选联系方式与客户端诊断；v0.28.0 **未新增类别**，只把 APNs 令牌的「当前不采集」边界写清。`plutil -lint` 已通过。
 
 ## 6. 审核备注（给 App Review）
 
@@ -191,11 +193,10 @@ bluetooth,ble,sensor,readings,heart rate,chart,alerts,home,devices
 
 ## 7. 商店截图现状
 
-- 现有截图为 **iPhone 18 Pro · iOS 27.2 模拟器** 原图，尺寸 **1206×2622**；
-  最新一张 `docs/screenshots/profile.png` 已滚到「阈值告警」分区，完整显示
-  「推送注册 = 未配置推送」与三行说明，顶部无半行、底部未被悬浮 Tab 条带切断。
-- App Store Connect 要求 6.9 英寸 **1320×2868**（或 6.5 英寸 1284×2778 / 1242×2688）等规格；
-  当前原图**尚未**按这些尺寸导出或加画布，**不能声称已具备可直接上传的截图**。上架前需按规格重排。
+- **iPhone 6.9 英寸**：已在 **iPhone 18 Pro Max · iOS 27.2 模拟器** 导出整组 **18 张**，尺寸 **1320×2868**，落在 [`docs/screenshots/`](screenshots/)，文件名与原截图集完全一致。逐张核对内容与标题对应：`profile.png` 从「登录会话」分区开始，完整显示「阈值告警」4 行（含「推送注册 = 未配置推送」）与三行说明，顶部无半行、底部未被悬浮 Tab 条带切断（Tab 顶边 873pt / 条带高 83pt，条带内无业务节点）。
+- **iPad 13 英寸**：工程 `TARGETED_DEVICE_FAMILY = "1,2"`，`Info.plist` 声明 iPad 四个方向，且**没有** `UIRequiresFullScreen`（即支持 iPad 多任务、非全屏强制），因此 iPad 规格为必需项。已在 **iPad Pro 13-inch (M5) · iPadOS 27.2 模拟器** 导出同名 18 张，尺寸 **2064×2752**，落在 [`docs/screenshots/ipad-13/`](screenshots/ipad-13/)。iPad 顶部为系统浮动 Tab 栏，不存在底部条带遮挡，截图按内容可视区顶部对齐。
+- 两组截图均为「模拟器 + 本机 Postgres 后端 + seed 数据」，页面内可见匿名账号 UUID 与本地后端地址，**不是生产环境截图**；上架前如需隐藏本机信息，应另用生产配置重截。
+- 旧的 1206×2622（iPhone 18 Pro）原图已被本组替换，不再作为商店候选。
 
 ## 8. 明确未完成 / 未验证
 
@@ -207,6 +208,8 @@ bluetooth,ble,sensor,readings,heart rate,chart,alerts,home,devices
 | 分发证书与 Provisioning Profile | **无**（仓库仅有模拟器构建） |
 | APNs 推送证书与 `aps-environment` entitlement | **无**，远程推送未验证 |
 | 公网隐私政策 URL | **未发布**（仅仓库内 Markdown） |
-| 商店规格截图（6.9 英寸等） | **未导出** |
+| 商店规格截图（6.9 英寸 1320×2868） | **已导出 18 张**（iPhone 18 Pro Max 模拟器） |
+| iPad 13 英寸规格截图（2064×2752） | **已导出 18 张**（iPad Pro 13-inch (M5) 模拟器） |
+| 生产环境 / 隐藏本机信息的商店截图 | **未重截**（当前可见本地后端地址与匿名账号 UUID） |
 | 真机 BLE 读数 / 图表 / 后台采集 | **未验证**（无真机与外设） |
 | App Store 隐私问卷实际提交 | **未填写**（本文仅为填写依据） |
