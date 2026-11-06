@@ -52,7 +52,7 @@
 - **隐私同步**：`PrivacyInfo.xcprivacy` 新增 `OtherDataTypes` / `OtherUserContactInfo` / `OtherDiagnosticData`（`plutil -lint` 通过）；`docs/app-privacy.md` 补对应代码位置，`docs/privacy-policy.md` 补家庭关系、反馈内容与推送令牌，注销步骤改为先停用推送设备。
 - **审核备注**：说明蓝牙权限用途、无真实设备时的空态（不伪造设备 / 读数）、推送服务当前未配置（无 APNs 证书与 entitlement，不注册占位 token）。文档顶部明确：**未上传 App Store Connect、无 Apple Developer Program 账号、无审核记录、无分发证书与 APNs 证书**。
 - **测试 / 构建**：单测 **447 个 0 失败**（无新增用例），签名构建 `BUILD SUCCEEDED`，e2e **460 项**与 CI 一致。
-- **CI**：待推送后回填。
+- **CI**：tag run [42279655318](https://github.com/platojobs/codemagic/actions/runs/42279655318) success（447 单测 / 460 项 E2E）；main run [42279033117](https://github.com/platojobs/codemagic/actions/runs/42279033117) success（同为 447 / 460）；tag `v0.27.0` 未移动。
 - **未验证**：真实 APNs 推送、真机 BLE、公网隐私政策 URL、App Store 规格截图（6.9 英寸 1320×2868）、隐私问卷实际提交。
 
 ---
