@@ -84,7 +84,7 @@ else
         fail "8080 与 18080 均被占用，请设置 E2E_PORT 指定空闲端口"
     fi
 
-    echo "[e2e] 启动后端：STORE=fixture ADDR=127.0.0.1:${PORT}（本套用例 ~100 次请求，关闭限流避免 429 抖动）"
+    echo "[e2e] 启动后端：STORE=fixture ADDR=127.0.0.1:${PORT}（本套用例 ~120 次请求，关闭全局限流与配对码领取限流避免 429 抖动）"
     (
         cd "$PJGOIOT_DIR" || exit 1
         STORE=fixture \
@@ -93,6 +93,8 @@ else
         LOG_LEVEL=warn \
         RATE_LIMIT_PER_MINUTE=0 \
         RATE_LIMIT_BURST=0 \
+        PAIRING_CLAIM_RATE_PER_MINUTE=0 \
+        PAIRING_CLAIM_BURST=0 \
         FIXTURES_DIR="$PJGOIOT_DIR/fixtures" \
         "$SERVER_BIN" >>"$SERVER_LOG" 2>&1
     ) &

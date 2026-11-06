@@ -187,14 +187,23 @@ final class AppEnvironment {
             metadataStore: syncMetadataStore,
             logStore: scanLogStore
         )
-        accountExportService = AccountExportService(api: accountAPI, tokenStore: tokenStore)
+        let exportService = AccountExportService(api: accountAPI, tokenStore: tokenStore)
+        accountExportService = exportService
+        let resolvedBluetooth = bluetooth ?? CoreBluetoothService()
         accountDeletionService = AccountDeletionService(
             api: accountAPI,
             tokenStore: tokenStore,
             database: resolved.database,
-            metadataStore: syncMetadataStore
+            metadataStore: syncMetadataStore,
+            disconnectBluetooth: { [weak resolvedBluetooth] in
+                resolvedBluetooth?.disconnectAll()
+            },
+            additionalCleanup: { [weak exportService] in
+                // 注销后不保留任何本地导出文件。
+                exportService?.removeAllExportedFiles()
+            }
         )
-        self.bluetooth = bluetooth ?? CoreBluetoothService()
+        self.bluetooth = resolvedBluetooth
         let ingestor = readingsIngestor
         self.bluetooth.readingHandler = { sample in
             ingestor.ingest(sample)

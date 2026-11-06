@@ -18,6 +18,24 @@ final class MainTabBarController: UITabBarController {
     override func viewDidLoad() {
         super.viewDidLoad()
         configureTabs()
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleAccountDeleted),
+            name: .accountDeleted,
+            object: nil
+        )
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+
+    /// 账号删除后重建五个 Tab，丢弃所有内存中的旧设备 / 读数视图模型，停在「我的」未登录态。
+    @objc private func handleAccountDeleted() {
+        configureTabs()
+        selectedIndex = 4
+        guard let navigation = viewControllers?[4] as? UINavigationController else { return }
+        navigation.popToRootViewController(animated: false)
     }
 
     private func configureTabs() {

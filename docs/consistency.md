@@ -378,16 +378,22 @@ iOS 用例固化在 `codemagicTests/ReadingsGoldenTests.swift`；新增特征或
 - 接管成功后：用返回 token **替换 Keychain**；保留本机已有设备与全部读数，并把设备（含本地别名/分组/广播名状态）与读数**全部重新标记 pending**；同步游标清零、`userID` 更新、`reloginRequired` 清除，随后自动触发一次前台同步把本机数据推给新账号。
 - 旧账号云端数据不会自动合并；tombstone 设备不上传。
 
-**账号数据导出**
-- `GET /api/v1/me/export?limit=5000[&cursor=…]`，按 `hasMore` / `nextCursor` 循环拉全；`cursor` **不透明**，原样回传、不解析不构造，重复游标或超过 1000 页视为异常失败。
-- 合并各页 `readings`；`user` / `devices` / `exportedAt` 取第一页。
-- 写临时 JSON 文件后 `UIActivityViewController` 分享，分享面板关闭即删除；退出遗留文件 1 天后自动清理。
-- 进度为真实已读取读数条数；失败按 401 / 网络 / 解析分别提示，网络与游标/写入错误可重试。
+**账号数据导出（v0.20.0 异步任务）**
+- `POST /api/v1/me/export`（Bearer）→ **202** `{id, status, createdAt}`；任务异步生成，客户端按 `GET /api/v1/me/export/{id}` 轮询。
+- 轮询节流：首次 **2.5s** 起步、每次 ×1.4、封顶 **5s**（`AccountExportService.pollDelay(for:)`），**不每秒请求**；最多 60 次后报超时，可重试。
+- `status` 为 `pending` / `ready` / `failed`；`ready` 响应带 `downloadUrl` 与 `downloadExpiresAt`。**每次查询 ready 都会签发新的一次性下载令牌并覆盖旧链接**（10 分钟有效），客户端不得缓存旧链接。
+- 下载 `GET …/download?token=…` **不带 Bearer**（链接本身即凭据）：首次 200，重放 **410 `EXPORT_DOWNLOAD_EXPIRED`**，错令牌 **403 `EXPORT_DOWNLOAD_INVALID`**。客户端遇 410 自动重新 `GET /me/export/{id}` 换新链接并**只重试一次**，成功后提示「下载链接已刷新」；第二次仍 410 才失败。
+- 文件写临时目录 `codemagic-account-export/account-export-{taskID}-{uuid}.json`，`UIActivityViewController` 关闭即删除；退出遗留文件 1 天后自动清理。
+- 失败按 401 / 网络 / 解析 / 任务失败 / 超时 / 下载失效分别提示；除 401 外全部保留可重试状态。
 
-**注销账号**
-- `DELETE /api/v1/me`（Bearer）→ 204。二次确认文案必须写明「设备与读数将永久删除且不可恢复」。
-- 顺序：**服务端删除成功后** → 清 Keychain token → 清 SQLite 全部业务表（`readings` / `saved_devices` / `rules` / `scan_logs` / `recent_devices` / `device_info_cache`，单事务）→ 清同步元数据（`cursor` / `lastSyncAt` / `userID` / `reloginRequired` / `lastBackgroundPushAt`），保留 `clientID` 与界面设置，回到全新匿名状态。
-- 401 与网络错误**不清理本地数据**，分别提示且网络错误可重试；本地清理失败必须明确上报（不得静默假装成功）。
+**注销账号（v0.20.0 两步令牌）**
+- `POST /api/v1/me/deletion-request`（Bearer）→ **201** `{token, expiresAt}`，令牌 **10 分钟**有效、服务端只存哈希；**同一账号再次申请会作废旧令牌**。
+- `DELETE /api/v1/me` **只带 `X-Deletion-Token`，不带 `Authorization`** → 204。缺令牌 400 `DELETION_TOKEN_REQUIRED`，无效 / 已过期 403 `DELETION_TOKEN_INVALID`（过期升级为 410），owner 家庭还有其他成员 409 `ACCOUNT_DELETION_BLOCKED`。
+- 409 时**服务端不删数据、令牌不消耗**：界面提示「请先转让所有权或移除成员」并提供跳转家庭页入口与「重试删除」；转让或移除成员后**同一个未消耗令牌仍可用**。
+- 删除后旧 Bearer 立即 401；同一令牌重放 404（视为「账号已删除」，客户端仍执行本地清空并回到未登录态）；令牌被新申请 / 清理后降级 403。
+- 顺序：**服务端删除成功后** → 断开 BLE（避免清理后继续写读数）→ 清 Keychain token → 清 SQLite 全部业务表（`readings` / `saved_devices` / `rules` / `scan_logs` / `recent_devices` / `device_info_cache` / `feedback_drafts` / `scenarios` / `device_catalog_cache`，单事务）→ 清同步元数据（`cursor` / `lastSyncAt` / `userID` / `reloginRequired` / `lastBackgroundPushAt`）→ 清 `URLCache` → 删除导出临时文件，保留 `clientID` 与界面设置，回到全新匿名状态。
+- 409 / 403 / 401 / 网络错误 / 本地清理失败**都不静默**；前三者与网络错误不清理本地数据，提供重新申请或原令牌重试；本地清理失败提示可重试（服务端已删除时重放 404 仍会重新执行清库）。
+- 删除后通过 `.accountDeleted` 通知重建五个 Tab，停在「我的」未登录态，避免内存中的旧设备 / 读数被重新写回；重启后业务表仍为空。
 
 **后台采集**
 - `Info.plist` 声明 `UIBackgroundModes = fetch + bluetooth-central`；连接状态下后台继续接收 notify 并走同一 `ReadingsIngestor` 入库。
@@ -444,10 +450,9 @@ iOS 用例固化在 `codemagicTests/ReadingsGoldenTests.swift`；新增特征或
 | --- | --- | --- |
 | `GET /sync/changes` | 500 | 默认 200 / 页，`APILimits.clamp(…, 500)` |
 | `GET /my/devices/…/readings` | 500 | 详情页默认 100，导出翻页 200，均 `clamp(…, 500)` |
-| `GET /me/export` | 5000 | 单页 5000，`clamp(…, 5000)` |
 
-- `APILimits`（`Core/Networking/APIErrorCatalog.swift`）集中定义三个上限；`SyncEngine` 的 `pageLimit` 在 init 时同样收敛。
-- 测试：`NetworkingTests.testChangesLimitIsClampedTo500` / `testReadingsLimitIsClampedTo500` / `testExportLimitIsClampedTo5000`。
+- `APILimits`（`Core/Networking/APIErrorCatalog.swift`）集中定义上限；`SyncEngine` 的 `pageLimit` 在 init 时同样收敛。v0.20.0 起 `/me/export` 改为异步任务，不再有分页上限。
+- 测试：`NetworkingTests.testChangesLimitIsClampedTo500` / `testReadingsLimitIsClampedTo500`。
 
 ---
 

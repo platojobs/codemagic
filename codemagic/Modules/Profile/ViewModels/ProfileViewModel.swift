@@ -200,21 +200,36 @@ final class ProfileViewModel {
 
     // MARK: - Account
 
-    /// 导出账号数据：进度为已读取的真实读数条数；完成后返回临时文件，由界面分享后删除。
+    /// 异步导出：创建任务 → 轮询 → 下载 → 返回临时文件，由界面分享后删除。
     func exportAccountData(
-        progress: @escaping (Int) -> Void,
-        completion: @escaping (Result<URL, AccountExportError>) -> Void
+        progress: @escaping (AccountExportPhase) -> Void,
+        completion: @escaping (Result<AccountExportResult, AccountExportError>) -> Void
     ) {
         accountExportService.export(progress: progress, completion: completion)
+    }
+
+    func cancelExport() {
+        accountExportService.cancel()
     }
 
     func removeExportedFile(at url: URL) {
         accountExportService.removeExportedFile(at: url)
     }
 
-    /// 注销账号。服务端失败时本地数据完全保留；成功则由服务按 token → 业务表 → 元数据顺序清理。
-    func deleteAccount(completion: @escaping (Result<Void, AccountDeletionError>) -> Void) {
-        accountDeletionService.deleteAccount { [weak self] result in
+    /// 注销第一步：申请 10 分钟有效的删除令牌，供二次确认时提交。
+    func requestDeletionToken(
+        completion: @escaping (Result<DeletionChallenge, AccountDeletionError>) -> Void
+    ) {
+        accountDeletionService.requestDeletionToken(completion: completion)
+    }
+
+    /// 注销第二步：提交令牌。成功或 404（已删除）后服务会清空本地并刷新登录态。
+    func confirmDeletion(
+        _ challenge: DeletionChallenge,
+        completion: @escaping (Result<AccountDeletionOutcome, AccountDeletionError>) -> Void
+    ) {
+        accountDeletionService.confirmDeletion(challenge) { [weak self] result in
+            self?.syncEngine.refreshStatus()
             self?.refresh()
             completion(result)
         }

@@ -4,6 +4,7 @@
 
 | Tag | MARKETING_VERSION | Build | 日期 | 对齐后端 |
 | --- | --- | --- | --- | --- |
+| `v0.20.0` | 0.20.0 | 28 | 2026-11-06 | PJGoIoT v0.19.0（openapi 0.15.0；两步删除令牌、异步导出任务与一次性下载链接） |
 | `v0.19.0` | 0.19.0 | 27 | 2026-11-06 | PJGoIoT v0.18.0（openapi 0.14.0；`GET /catalog/device-types` 成为设备类型目录唯一事实源，条件请求 / 304 / 离线缓存） |
 | `v0.18.0` | 0.18.0 | 26 | 2026-11-06 | PJGoIoT v0.16.0（openapi 0.12.0；`POST /feedback` / `GET /feedback/mine` 真链路、幂等与限流） |
 | `v0.17.0` | 0.17.0 | 25 | 2026-11-06 | PJGoIoT v0.15.0（openapi 0.11.0；无契约变更，市场 / 产品 / 我的为纯客户端能力） |
@@ -30,6 +31,26 @@
 | `v0.3.0` | 0.3.0 | 4 | 2026-11-05 | 0.3.0 |
 | `v0.2.0` | 0.2.0 | 3 | 2026-11-05 | 0.2.0 |
 | `v0.1.0` | — | 1 | 2026-11-05 | — |
+
+---
+
+## v0.20.0（build 28）
+
+**主题：账号删除两步令牌 + 异步数据导出 —— 更安全的删除鉴权、可轮询的导出任务与一次性下载链接**
+
+- **契约（PJGoIoT v0.19.0 / openapi 0.15.0）**：
+  - `POST /me/deletion-request`（Bearer）→ 201 `{token, expiresAt}`；令牌 10 分钟、服务端只存哈希，再次申请作废旧令牌。
+  - `DELETE /me` **只用 `X-Deletion-Token`，不用 Bearer** → 204；缺令牌 400 `DELETION_TOKEN_REQUIRED`，无效 403 `DELETION_TOKEN_INVALID`，过期 410，owner 家庭仍有成员 409 `ACCOUNT_DELETION_BLOCKED`。
+  - 删除后旧 Bearer 立即 401；同一令牌重放 404；令牌被清理后降级 403。
+  - `POST /me/export` → 202 异步任务；`GET /me/export/{id}` 轮询 `pending|ready|failed`；`ready` 每次签发新的一次性下载令牌（10 分钟、覆盖旧链接）。
+  - `GET /me/export/{id}/download?token=…` 首次 200，重放 410 `EXPORT_DOWNLOAD_EXPIRED`，错误令牌 403 `EXPORT_DOWNLOAD_INVALID`。
+- **「我的」新增「账号与数据」区域**：导出我的数据、删除账号两个入口，副标题说明后果；原账号接管码区域保留在下方，标题改为「跨设备接管」。
+- **删除流程**：申请令牌 → 二次确认（明确「设备、读数、场景、家庭关系、反馈都会被删除且不可恢复」）→ 提交令牌。409 如实提示「请先转让所有权或移除成员」，提供「去家庭管理」与「重试删除」，并保留同一个未消耗令牌；403 提示「重新申请」；404 视为账号已删除，仍执行本地清空并回未登录态；网络 / 5xx 保留可重试状态，不中途踢回首页。
+- **删除后本地彻底清空**：断开 BLE → 清 Keychain → 单事务清 9 张业务表（`readings` / `saved_devices` / `rules` / `scan_logs` / `recent_devices` / `device_info_cache` / `feedback_drafts` / `scenarios` / `device_catalog_cache`）→ 清同步元数据 → 清 `URLCache` → 删除导出临时文件；`.accountDeleted` 通知重建五个 Tab，停在「我的」未登录态；重启后业务表仍为空，不复活设备与读数。
+- **导出流程**：创建后展示「处理中」，轮询 2.5s 起、×1.4、封顶 5s；ready 后下载到临时目录并调 `UIActivityViewController`，分享关闭即删；下载 410 自动重新查询任务换新链接并提示「下载链接已刷新」，只自动重试一次；取消 / 失败保留可重试状态。
+- **UI 约束**：UIKit 纯代码、iOS 15；中英双语；`UIFontMetrics` 动态字号；操作行 48pt 触达；`accessibilityLabel`；颜色 / 间距 / 字号全部来自 `DesignTokens`。
+- 单测 **364 个，0 失败**（新增 8 个：删除令牌申请与 `DELETE /me` 只带 `X-Deletion-Token`、409/403/404/410 分流、异步导出 DTO / 相对 URL 解析 / 下载 410·403、轮询退避 `[2.5, 3.5, 4.9]`、410 自动刷新一次、409 → 转让后同一令牌成功、删除后业务表计数归零 + 目录缓存清空 + 重启不复活的存库验证）。E2E fixture **367 项全 PASS**（后端 v0.19.0 干净 worktree：令牌申请 / 401 / 旧令牌作废 / 400 / 403、删除 204 / 旧 Bearer 401 / 重放 404、导出 202 → pending/ready → 下载 200 → 重放 410 → 错令牌 403 → 换新链接再下载、409 → 转让后同一令牌 204）。
+- **CI**：结果待回填（tag `v0.20.0` 与 `main` 触发后补充 run ID）。
 
 ---
 

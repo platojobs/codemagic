@@ -1180,7 +1180,7 @@ private func run() -> Int32 {
 
     // MARK: 8. 账号（配对码 / 导出 / 注销）
 
-    report.section("8. 账号：配对码接管 / 数据导出 / 注销")
+    report.section("8. 账号：配对码接管 / 异步导出 / 删除令牌注销")
     let codeResponse = client.request("POST", "auth/pairing-code", token: tokenA, json: [String: Any]())
     let codeObject = jsonObject(codeResponse.body) ?? [:]
     let firstCode = text(codeObject, "code")
@@ -1232,45 +1232,173 @@ private func run() -> Int32 {
     let reusedClaim = client.request("POST", "auth/pairing-code/claim", json: ["code": secondCode])
     report.check(reusedClaim.status == 404, "配对码只能使用一次（404）", "status=\(reusedClaim.status)")
 
-    let exportNoToken = client.request("GET", "me/export")
-    report.check(exportNoToken.status == 401, "导出无 token 返回 401", "status=\(exportNoToken.status)")
+    let exportCreateNoToken = client.request("POST", "me/export", json: [String: Any]())
+    report.check(exportCreateNoToken.status == 401, "创建导出无 token 返回 401", "status=\(exportCreateNoToken.status)")
 
-    let exportFirst = client.request("GET", "me/export?limit=1", token: claimedToken)
-    let exportFirstObject = jsonObject(exportFirst.body) ?? [:]
-    report.check(exportFirst.status == 200, "导出首页返回 200", "status=\(exportFirst.status) body=\(bodyText(exportFirst.body))")
-    let exportUser = exportFirstObject["user"] as? [String: Any] ?? [:]
-    report.check(text(exportUser, "id") == userA, "导出 user.id 与当前账号一致", "user=\(text(exportUser, "id"))")
-    report.check(!list(exportFirstObject["devices"]).isEmpty, "导出包含本机设备")
-    report.check(list(exportFirstObject["readings"]).count <= 1, "导出遵守 limit=1")
-    report.check((exportFirstObject["hasMore"] as? Bool) == true, "首页 hasMore 为 true")
-    report.check(!text(exportFirstObject, "nextCursor").isEmpty, "首页返回 nextCursor")
+    // 删除令牌：Bearer 申请 → 401 无凭据 → 10 分钟有效 → 再次申请作废旧令牌
+    let deletionRequestNoToken = client.request("POST", "me/deletion-request", json: [String: Any]())
+    report.check(deletionRequestNoToken.status == 401, "申请删除令牌无 token 返回 401", "status=\(deletionRequestNoToken.status)")
 
-    var exportPage = exportFirstObject
-    var cursorCount = 0
-    var exportedReadings = list(exportPage["readings"]).count
-    var exportHasMore = (exportPage["hasMore"] as? Bool) ?? false
-    while exportHasMore && cursorCount < 10 {
-        let cursor = text(exportPage, "nextCursor")
-        cursorCount += 1
-        var allowed = CharacterSet.alphanumerics
-        allowed.insert(charactersIn: "-._~")
-        let encodedCursor = cursor.addingPercentEncoding(withAllowedCharacters: allowed) ?? cursor
-        let next = client.request("GET", "me/export?limit=1&cursor=\(encodedCursor)", token: claimedToken)
-        let nextObject = jsonObject(next.body) ?? [:]
-        report.check(next.status == 200, "导出第 \(cursorCount + 1) 页返回 200", "status=\(next.status) body=\(bodyText(next.body))")
-        exportedReadings += list(nextObject["readings"]).count
-        exportHasMore = (nextObject["hasMore"] as? Bool) ?? false
-        exportPage = nextObject
+    let firstDeletion = client.request("POST", "me/deletion-request", token: claimedToken, json: [String: Any]())
+    let firstDeletionObject = jsonObject(firstDeletion.body) ?? [:]
+    let firstDeletionToken = text(firstDeletionObject, "token")
+    report.check(
+        firstDeletion.status == 201,
+        "申请删除令牌返回 201",
+        "status=\(firstDeletion.status) body=\(bodyText(firstDeletion.body))"
+    )
+    report.check(!firstDeletionToken.isEmpty, "删除令牌非空")
+    report.check(
+        parsedDate(firstDeletionObject, "expiresAt").map { $0 > Date() } ?? false,
+        "删除令牌 expiresAt 为未来时间",
+        "expiresAt=\(text(firstDeletionObject, "expiresAt"))"
+    )
+
+    let secondDeletion = client.request("POST", "me/deletion-request", token: claimedToken, json: [String: Any]())
+    let secondDeletionObject = jsonObject(secondDeletion.body) ?? [:]
+    let deletionToken = text(secondDeletionObject, "token")
+    report.check(secondDeletion.status == 201, "再次申请删除令牌返回 201", "status=\(secondDeletion.status)")
+    report.check(!deletionToken.isEmpty && deletionToken != firstDeletionToken, "再次申请签发新令牌并作废旧令牌")
+
+    let staleDelete = client.request("DELETE", "me", headers: ["X-Deletion-Token": firstDeletionToken])
+    report.check(staleDelete.status == 403, "被作废的旧删除令牌返回 403", "status=\(staleDelete.status) body=\(bodyText(staleDelete.body))")
+    report.check(
+        errorCode(staleDelete.body) == "DELETION_TOKEN_INVALID",
+        "旧令牌错误码为 DELETION_TOKEN_INVALID",
+        "code=\(errorCode(staleDelete.body))"
+    )
+
+    let missingTokenDelete = client.request("DELETE", "me")
+    report.check(missingTokenDelete.status == 400, "缺少删除令牌返回 400", "status=\(missingTokenDelete.status)")
+    report.check(
+        errorCode(missingTokenDelete.body) == "DELETION_TOKEN_REQUIRED",
+        "缺少令牌错误码为 DELETION_TOKEN_REQUIRED",
+        "code=\(errorCode(missingTokenDelete.body))"
+    )
+
+    let invalidDelete = client.request("DELETE", "me", headers: ["X-Deletion-Token": "not-a-token"])
+    report.check(invalidDelete.status == 403, "错误删除令牌返回 403", "status=\(invalidDelete.status)")
+    report.check(
+        errorCode(invalidDelete.body) == "DELETION_TOKEN_INVALID",
+        "错误令牌错误码为 DELETION_TOKEN_INVALID",
+        "code=\(errorCode(invalidDelete.body))"
+    )
+
+    // 异步导出：创建 202 → 轮询 pending/ready → ready 签发一次性下载链接
+    let exportCreate = client.request("POST", "me/export", token: claimedToken, json: [String: Any]())
+    let exportCreateObject = jsonObject(exportCreate.body) ?? [:]
+    let exportID = text(exportCreateObject, "id")
+    report.check(
+        exportCreate.status == 202,
+        "创建导出任务返回 202",
+        "status=\(exportCreate.status) body=\(bodyText(exportCreate.body))"
+    )
+    report.check(!exportID.isEmpty, "导出任务 id 非空")
+    report.check(
+        ["pending", "ready", "failed"].contains(text(exportCreateObject, "status")),
+        "创建响应状态合法",
+        "status=\(text(exportCreateObject, "status"))"
+    )
+
+    /// 服务端返回的是 `/api/v1/...` 相对地址；E2E 客户端 baseURL 已含 `/api/v1`，这里剥掉前缀。
+    func exportRelativePath(_ raw: String) -> String? {
+        guard raw.contains("/me/export/") else { return nil }
+        if let range = raw.range(of: "/api/v1/") {
+            return String(raw[range.upperBound...])
+        }
+        return raw.hasPrefix("/") ? String(raw.dropFirst()) : raw
     }
-    report.check(!exportHasMore, "按 hasMore/nextCursor 可循环拉全", "pages=\(cursorCount + 1)")
-    report.check(exportedReadings >= 3, "导出合并了全部读数", "readings=\(exportedReadings)")
 
-    let deleteResponse = client.request("DELETE", "me", token: claimedToken)
-    report.check(deleteResponse.status == 204, "注销账号返回 204", "status=\(deleteResponse.status) body=\(bodyText(deleteResponse.body))")
-    let exportAfterDelete = client.request("GET", "me/export", token: claimedToken)
-    report.check(exportAfterDelete.status == 401, "注销后新 token 失效（401）", "status=\(exportAfterDelete.status)")
-    let exportOldToken = client.request("GET", "me/export", token: tokenA)
-    report.check(exportOldToken.status == 401, "注销后旧 token 也失效（401）", "status=\(exportOldToken.status)")
+    var latestExportURL = ""
+    var exportReady = false
+    var exportPollCount = 0
+    while exportPollCount < 20 {
+        exportPollCount += 1
+        let poll = client.request("GET", "me/export/\(exportID)", token: claimedToken)
+        let pollObject = jsonObject(poll.body) ?? [:]
+        let status = text(pollObject, "status")
+        report.check(poll.status == 200, "轮询导出任务返回 200（第 \(exportPollCount) 次）", "status=\(poll.status)")
+        report.check(["pending", "ready", "failed"].contains(status), "轮询状态合法", "status=\(status)")
+        if status == "ready" {
+            exportReady = true
+            latestExportURL = text(pollObject, "downloadUrl")
+            report.check(!latestExportURL.isEmpty, "ready 响应含 downloadUrl")
+            report.check(
+                parsedDate(pollObject, "downloadExpiresAt").map { $0 > Date() } ?? false,
+                "downloadExpiresAt 为未来时间",
+                "downloadExpiresAt=\(text(pollObject, "downloadExpiresAt"))"
+            )
+            break
+        }
+        if status == "failed" {
+            report.check(false, "导出任务不应失败", "status=\(status)")
+            break
+        }
+        Thread.sleep(forTimeInterval: 0.2)
+    }
+    report.check(exportReady, "导出任务在限定次数内就绪", "polls=\(exportPollCount)")
+
+    if exportReady, let exportPath = exportRelativePath(latestExportURL) {
+        let download = client.request("GET", exportPath)
+        let downloadedObject = jsonObject(download.body) ?? [:]
+        let downloadedUser = downloadedObject["user"] as? [String: Any] ?? [:]
+        report.check(download.status == 200, "一次性链接下载返回 200", "status=\(download.status)")
+        report.check(
+            text(downloadedUser, "id") == userA,
+            "下载内容 user.id 与当前账号一致",
+            "user=\(text(downloadedUser, "id"))"
+        )
+        report.check(!list(downloadedObject["devices"]).isEmpty, "下载内容包含本机设备")
+        report.check(!list(downloadedObject["readings"]).isEmpty, "下载内容包含读数聚合")
+
+        let replayDownload = client.request("GET", exportPath)
+        report.check(replayDownload.status == 410, "同一下载链接重放返回 410", "status=\(replayDownload.status)")
+        report.check(
+            errorCode(replayDownload.body) == "EXPORT_DOWNLOAD_EXPIRED",
+            "重放错误码为 EXPORT_DOWNLOAD_EXPIRED",
+            "code=\(errorCode(replayDownload.body))"
+        )
+
+        let wrongTokenDownload = client.request("GET", "me/export/\(exportID)/download?token=wrong-token")
+        report.check(wrongTokenDownload.status == 403, "错误下载令牌返回 403", "status=\(wrongTokenDownload.status)")
+        report.check(
+            errorCode(wrongTokenDownload.body) == "EXPORT_DOWNLOAD_INVALID",
+            "错误令牌错误码为 EXPORT_DOWNLOAD_INVALID",
+            "code=\(errorCode(wrongTokenDownload.body))"
+        )
+
+        // ready 时每次查询都覆盖旧链接；新链接仍可下载一次。
+        let refreshedPoll = client.request("GET", "me/export/\(exportID)", token: claimedToken)
+        let refreshedObject = jsonObject(refreshedPoll.body) ?? [:]
+        let refreshedURL = text(refreshedObject, "downloadUrl")
+        report.check(
+            text(refreshedObject, "status") == "ready",
+            "重新查询任务仍为 ready",
+            "status=\(text(refreshedObject, "status"))"
+        )
+        report.check(
+            !refreshedURL.isEmpty && refreshedURL != latestExportURL,
+            "重新查询签发新的下载链接",
+            "old=\(latestExportURL) new=\(refreshedURL)"
+        )
+        if let refreshedPath = exportRelativePath(refreshedURL) {
+            let freshDownload = client.request("GET", refreshedPath)
+            report.check(freshDownload.status == 200, "新下载链接可再次下载（200）", "status=\(freshDownload.status)")
+        }
+    }
+
+    let deleteResponse = client.request("DELETE", "me", headers: ["X-Deletion-Token": deletionToken])
+    report.check(
+        deleteResponse.status == 204,
+        "注销账号返回 204",
+        "status=\(deleteResponse.status) body=\(bodyText(deleteResponse.body))"
+    )
+    let bearerAfterDelete = client.request("POST", "me/export", token: claimedToken, json: [String: Any]())
+    report.check(bearerAfterDelete.status == 401, "注销后旧 Bearer 立即失效（401）", "status=\(bearerAfterDelete.status)")
+    let oldBearerAfterDelete = client.request("POST", "me/export", token: tokenA, json: [String: Any]())
+    report.check(oldBearerAfterDelete.status == 401, "注销后最早 token 也失效（401）", "status=\(oldBearerAfterDelete.status)")
+    let replayDelete = client.request("DELETE", "me", headers: ["X-Deletion-Token": deletionToken])
+    report.check(replayDelete.status == 404, "同一删除令牌重放返回 404", "status=\(replayDelete.status) body=\(bodyText(replayDelete.body))")
 
     // MARK: 9. 家庭链路（创建 / 邀请码 / 成员可见 / 权限降级）
 
@@ -1941,6 +2069,70 @@ private func run() -> Int32 {
         "payload=\(deletePayload)"
     )
 
+    // 9.13 账号删除阻塞：owner 家庭仍有成员 → 409；转让所有权后同一未消耗令牌仍可用
+    let blockedHousehold = client.request(
+        "POST", "households", token: ownerAccount.token, json: ["name": "e2e-注销阻塞"]
+    )
+    let blockedHouseholdID = text(jsonObject(blockedHousehold.body) ?? [:], "id")
+    report.check(
+        blockedHousehold.status == 201 && !blockedHouseholdID.isEmpty,
+        "创建注销测试家庭",
+        "status=\(blockedHousehold.status)"
+    )
+    let blockedInvite = client.request(
+        "POST", "households/\(blockedHouseholdID)/invitations", token: ownerAccount.token, json: [String: Any]()
+    )
+    let blockedCode = text(jsonObject(blockedInvite.body) ?? [:], "code")
+    let blockedClaim = client.request(
+        "POST", "households/invitations/claim", token: memberAccount.token, json: ["code": blockedCode]
+    )
+    report.check(blockedClaim.status == 200, "成员加入注销测试家庭", "status=\(blockedClaim.status)")
+
+    let blockedDeletionRequest = client.request(
+        "POST", "me/deletion-request", token: ownerAccount.token, json: [String: Any]()
+    )
+    let blockedDeletionObject = jsonObject(blockedDeletionRequest.body) ?? [:]
+    let blockedDeletionToken = text(blockedDeletionObject, "token")
+    report.check(
+        blockedDeletionRequest.status == 201 && !blockedDeletionToken.isEmpty,
+        "家庭阻塞前申请删除令牌成功",
+        "status=\(blockedDeletionRequest.status)"
+    )
+    let blockedDelete = client.request("DELETE", "me", headers: ["X-Deletion-Token": blockedDeletionToken])
+    report.check(
+        blockedDelete.status == 409,
+        "owner 家庭仍有成员时注销返回 409",
+        "status=\(blockedDelete.status) body=\(bodyText(blockedDelete.body))"
+    )
+    report.check(
+        errorCode(blockedDelete.body) == "ACCOUNT_DELETION_BLOCKED",
+        "409 错误码为 ACCOUNT_DELETION_BLOCKED",
+        "code=\(errorCode(blockedDelete.body))"
+    )
+    let stillAlive = client.request("GET", "households", token: ownerAccount.token)
+    report.check(stillAlive.status == 200, "409 后账号数据仍保留", "status=\(stillAlive.status)")
+
+    let transferForDeletion = client.request(
+        "POST", "households/\(blockedHouseholdID)/transfer-ownership", token: ownerAccount.token,
+        json: ["userId": memberAccount.userID]
+    )
+    report.check(
+        transferForDeletion.status == 200,
+        "注销前转让所有权成功",
+        "status=\(transferForDeletion.status) body=\(bodyText(transferForDeletion.body))"
+    )
+
+    let deleteAfterTransfer = client.request("DELETE", "me", headers: ["X-Deletion-Token": blockedDeletionToken])
+    report.check(
+        deleteAfterTransfer.status == 204,
+        "转让后同一未消耗令牌可注销（204）",
+        "status=\(deleteAfterTransfer.status) body=\(bodyText(deleteAfterTransfer.body))"
+    )
+    let ownerBearerAfterDelete = client.request("POST", "me/export", token: ownerAccount.token, json: [String: Any]())
+    report.check(ownerBearerAfterDelete.status == 401, "注销后 owner 的 Bearer 立即失效（401）", "status=\(ownerBearerAfterDelete.status)")
+    let ownerReplayDelete = client.request("DELETE", "me", headers: ["X-Deletion-Token": blockedDeletionToken])
+    report.check(ownerReplayDelete.status == 404, "注销删除令牌重放返回 404", "status=\(ownerReplayDelete.status)")
+
     // MARK: 反馈提交与读回
 
     report.section("10. 反馈：提交 / 幂等重放 / 冲突 / 我的列表")
@@ -1956,7 +2148,7 @@ private func run() -> Int32 {
         "diagnostics": "e2e diagnostics",
         "context": [
             "platform": "ios",
-            "appVersion": "0.19.0",
+            "appVersion": "0.20.0",
             "buildType": "debug",
             "osVersion": "15.5",
             "deviceModel": "iPhone15,3",

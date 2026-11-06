@@ -7,6 +7,7 @@ final class ProfileViewController: UIViewController {
         case localData
         case household
         case sync
+        case accountData
         case account
         case alerts
         case appearance
@@ -22,6 +23,10 @@ final class ProfileViewController: UIViewController {
     private let savedDeviceStore: SavedDeviceStore?
     private let householdService: HouseholdService?
     private let feedbackCoordinator: FeedbackCoordinator?
+    /// 409 后保留未消耗令牌，用户从家庭页返回可直接重试，无需重新申请。
+    private var pendingDeletionChallenge: DeletionChallenge?
+    /// 导出请求代次；取消或重新发起后旧回调不再弹分享。
+    private var exportGeneration = UUID()
 
     init(
         viewModel: ProfileViewModel,
@@ -91,6 +96,12 @@ final class ProfileViewController: UIViewController {
         configuration.text = title
         configuration.secondaryText = value
         configuration.secondaryTextProperties.color = AppTheme.Palette.secondaryText
+        configuration.directionalLayoutMargins = NSDirectionalEdgeInsets(
+            top: Layout.space16,
+            leading: Layout.pageMargin,
+            bottom: Layout.space16,
+            trailing: Layout.pageMargin
+        )
         cell.contentConfiguration = configuration
         cell.accessoryType = showsDisclosure ? .disclosureIndicator : .none
         cell.selectionStyle = showsDisclosure ? .default : .none
@@ -103,6 +114,12 @@ final class ProfileViewController: UIViewController {
         var configuration = UIListContentConfiguration.cell()
         configuration.text = title
         configuration.textProperties.color = color
+        configuration.directionalLayoutMargins = NSDirectionalEdgeInsets(
+            top: Layout.space16,
+            leading: Layout.pageMargin,
+            bottom: Layout.space16,
+            trailing: Layout.pageMargin
+        )
         cell.contentConfiguration = configuration
         cell.selectionStyle = .default
         return cell
@@ -263,28 +280,68 @@ final class ProfileViewController: UIViewController {
         navigationController?.pushViewController(controller, animated: true)
     }
 
-    /// 导出进度使用真实已读取读数条数；文件落临时目录，分享面板关闭后删除。
+    /// 异步导出：创建任务 → 轮询 → 下载；文件落临时目录，分享面板关闭后删除。
     private func exportAccountData() {
+        let generation = UUID()
+        exportGeneration = generation
         let progress = UIAlertController(
             title: L10n.t("profile.exportData"),
-            message: L10n.t("profile.exportReading"),
+            message: exportPhaseText(.creating),
             preferredStyle: .alert
         )
+        progress.addAction(UIAlertAction(title: L10n.t("common.cancel"), style: .cancel) { [weak self] _ in
+            // 用户取消后停止轮询，旧回调不再弹分享。
+            self?.exportGeneration = UUID()
+            self?.viewModel.cancelExport()
+        })
         present(progress, animated: true)
 
-        viewModel.exportAccountData(progress: { [weak progress] count in
-            progress?.message = count > 0 ? L10n.f("profile.exportProgress", String(describing: count)) : L10n.t("profile.exportReading")
+        viewModel.exportAccountData(progress: { [weak self, weak progress] phase in
+            guard let self, self.exportGeneration == generation else { return }
+            progress?.message = self.exportPhaseText(phase)
         }, completion: { [weak self, weak progress] result in
+            guard let self, self.exportGeneration == generation else { return }
             progress?.dismiss(animated: true) {
-                guard let self else { return }
+                guard self.exportGeneration == generation else { return }
                 switch result {
-                case .success(let url):
-                    self.presentShareSheet(for: url)
+                case .success(let output):
+                    if output.refreshedDownloadToken {
+                        self.presentDownloadRefreshed { [weak self] in
+                            self?.presentShareSheet(for: output.fileURL)
+                        }
+                    } else {
+                        self.presentShareSheet(for: output.fileURL)
+                    }
                 case .failure(let error):
                     self.presentExportError(error)
                 }
             }
         })
+    }
+
+    private func exportPhaseText(_ phase: AccountExportPhase) -> String {
+        switch phase {
+        case .creating:
+            return L10n.t("profile.exportCreating")
+        case .pending(let attempt):
+            return L10n.f("profile.exportPending", String(describing: attempt))
+        case .downloading:
+            return L10n.t("profile.exportDownloading")
+        case .refreshingDownload:
+            return L10n.t("profile.exportRefreshing")
+        }
+    }
+
+    private func presentDownloadRefreshed(then share: @escaping () -> Void) {
+        let alert = UIAlertController(
+            title: L10n.t("profile.exportRefreshedTitle"),
+            message: L10n.t("profile.exportRefreshedMessage"),
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: L10n.t("common.ok"), style: .default) { _ in
+            share()
+        })
+        present(alert, animated: true)
     }
 
     private func presentShareSheet(for url: URL) {
@@ -315,24 +372,49 @@ final class ProfileViewController: UIViewController {
         present(alert, animated: true)
     }
 
+    /// 第一步：申请删除令牌；成功后用令牌做二次确认。
     private func confirmDeleteAccount() {
+        guard !viewModel.isSyncing else {
+            presentMessage(
+                title: L10n.t("profile.deleteAccountBlocked"),
+                message: L10n.t("profile.deleteAccountBlockedMessage")
+            )
+            return
+        }
+        pendingDeletionChallenge = nil
+        viewModel.requestDeletionToken { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success(let challenge):
+                self.pendingDeletionChallenge = challenge
+                self.presentDeletionConfirmation(challenge)
+            case .failure(let error):
+                self.presentDeletionFailure(error)
+            }
+        }
+    }
+
+    private func presentDeletionConfirmation(_ challenge: DeletionChallenge) {
+        let expiry = AppDateFormat.absolute(challenge.expiresAt)
+        let message = viewModel.accountDeletionConfirmationText
+            + "\n\n"
+            + L10n.f("profile.deleteTokenExpiry", String(describing: expiry))
         let alert = UIAlertController(
-            title: L10n.t("profile.deleteAccountTitle"),
-            message: viewModel.accountDeletionConfirmationText,
+            title: L10n.t("profile.deleteAccountConfirm"),
+            message: message,
             preferredStyle: .alert
         )
-        alert.addAction(UIAlertAction(title: L10n.t("common.cancel"), style: .cancel))
+        alert.addAction(UIAlertAction(title: L10n.t("common.cancel"), style: .cancel) { [weak self] _ in
+            self?.pendingDeletionChallenge = nil
+        })
         alert.addAction(UIAlertAction(title: L10n.t("profile.deleteAccountAction"), style: .destructive) { [weak self] _ in
-            self?.performDeleteAccount()
+            self?.performDeleteAccount(challenge)
         })
         present(alert, animated: true)
     }
 
-    private func performDeleteAccount() {
-        guard !viewModel.isSyncing else {
-            presentMessage(title: L10n.t("profile.deleteAccountBlocked"), message: L10n.t("profile.deleteAccountBlockedMessage"))
-            return
-        }
+    /// 第二步：提交令牌。成功或 404 都按「账号已删除」处理，由服务清空本地。
+    private func performDeleteAccount(_ challenge: DeletionChallenge) {
         let progress = UIAlertController(
             title: L10n.t("profile.deleteAccount"),
             message: L10n.t("profile.deleteAccountProgress"),
@@ -340,30 +422,104 @@ final class ProfileViewController: UIViewController {
         )
         present(progress, animated: true)
 
-        viewModel.deleteAccount { [weak self, weak progress] result in
+        viewModel.confirmDeletion(challenge) { [weak self, weak progress] result in
             progress?.dismiss(animated: true) {
                 guard let self else { return }
                 switch result {
-                case .success:
-                    self.presentMessage(
-                        title: L10n.t("profile.deleteAccountDone"),
-                        message: L10n.t("profile.deleteAccountDoneMessage")
-                    )
+                case .success(let outcome):
+                    self.pendingDeletionChallenge = nil
+                    self.presentDeletionDone(outcome)
                 case .failure(let error):
-                    let alert = UIAlertController(
-                        title: L10n.t("profile.deleteAccountFailed"),
-                        message: error.errorDescription ?? L10n.t("common.tryAgainLater"),
-                        preferredStyle: .alert
-                    )
-                    if error.isRetryable {
-                        alert.addAction(UIAlertAction(title: L10n.t("common.retry"), style: .default) { [weak self] _ in
-                            self?.performDeleteAccount()
-                        })
-                    }
-                    alert.addAction(UIAlertAction(title: L10n.t("common.ok"), style: .cancel))
-                    self.present(alert, animated: true)
+                    self.presentDeletionFailure(error)
                 }
             }
+        }
+    }
+
+    private func presentDeletionDone(_ outcome: AccountDeletionOutcome) {
+        var message = L10n.t("profile.deleteAccountDoneMessage")
+        if outcome == .alreadyDeleted {
+            message += "\n\n" + L10n.t("account.delete.alreadyDeleted")
+        }
+        let alert = UIAlertController(
+            title: L10n.t("profile.deleteAccountDone"),
+            message: message,
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: L10n.t("common.ok"), style: .default) { _ in
+            // 等弹窗收起后再重建界面，避免正在呈现弹窗的页面被替换。
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                NotificationCenter.default.post(name: .accountDeleted, object: nil)
+            }
+        })
+        present(alert, animated: true)
+    }
+
+    private func presentDeletionFailure(_ error: AccountDeletionError) {
+        switch error {
+        case .blocked:
+            let alert = UIAlertController(
+                title: L10n.t("profile.deleteAccountBlocked"),
+                message: error.errorDescription ?? L10n.t("profile.deleteAccountBlockedMessage"),
+                preferredStyle: .alert
+            )
+            alert.addAction(UIAlertAction(title: L10n.t("profile.deleteGoHousehold"), style: .default) { [weak self] _ in
+                self?.openHousehold()
+            })
+            if let challenge = pendingDeletionChallenge {
+                alert.addAction(UIAlertAction(title: L10n.t("common.retry"), style: .default) { [weak self] _ in
+                    // 同一未消耗令牌在转让 / 移除成员后仍可用，无需重新申请。
+                    self?.performDeleteAccount(challenge)
+                })
+            }
+            alert.addAction(UIAlertAction(title: L10n.t("common.cancel"), style: .cancel))
+            present(alert, animated: true)
+        case .tokenInvalid, .tokenExpired:
+            let alert = UIAlertController(
+                title: L10n.t("profile.deleteAccountFailed"),
+                message: error.errorDescription,
+                preferredStyle: .alert
+            )
+            alert.addAction(UIAlertAction(title: L10n.t("profile.deleteReapply"), style: .default) { [weak self] _ in
+                self?.confirmDeleteAccount()
+            })
+            alert.addAction(UIAlertAction(title: L10n.t("common.cancel"), style: .cancel))
+            present(alert, animated: true)
+        case .unauthorized:
+            presentMessage(
+                title: L10n.t("profile.deleteAccountFailed"),
+                message: error.errorDescription ?? L10n.t("account.delete.sessionExpired")
+            )
+        case .network, .api:
+            let alert = UIAlertController(
+                title: L10n.t("profile.deleteAccountFailed"),
+                message: error.errorDescription ?? L10n.t("common.tryAgainLater"),
+                preferredStyle: .alert
+            )
+            alert.addAction(UIAlertAction(title: L10n.t("common.retry"), style: .default) { [weak self] _ in
+                guard let self else { return }
+                if let challenge = self.pendingDeletionChallenge {
+                    self.performDeleteAccount(challenge)
+                } else {
+                    self.confirmDeleteAccount()
+                }
+            })
+            alert.addAction(UIAlertAction(title: L10n.t("common.cancel"), style: .cancel))
+            present(alert, animated: true)
+        case .localCleanupFailed:
+            let alert = UIAlertController(
+                title: L10n.t("profile.deleteAccountFailed"),
+                message: error.errorDescription,
+                preferredStyle: .alert
+            )
+            if let challenge = pendingDeletionChallenge {
+                alert.addAction(UIAlertAction(title: L10n.t("common.retry"), style: .default) { [weak self] _ in
+                    // 服务端账号已删除；再次提交只会得到 404，但会重新执行本地清理。
+                    self?.performDeleteAccount(challenge)
+                })
+            }
+            alert.addAction(UIAlertAction(title: L10n.t("common.ok"), style: .cancel))
+            present(alert, animated: true)
         }
     }
 
@@ -388,7 +544,8 @@ extension ProfileViewController: UITableViewDataSource {
         case .localData: return 2
         case .household: return 1
         case .sync: return 5 + (viewModel.needsRelogin ? 1 : 0)
-        case .account: return 4
+        case .accountData: return 2
+        case .account: return 2
         case .alerts: return 3
         case .appearance: return 1
         case .settings: return 3
@@ -404,7 +561,8 @@ extension ProfileViewController: UITableViewDataSource {
         case .localData: return L10n.t("device.detail.sourceLocal")
         case .household: return L10n.t("profile.section.household")
         case .sync: return L10n.t("profile.section.sync")
-        case .account: return L10n.t("profile.section.account")
+        case .accountData: return L10n.t("profile.section.account")
+        case .account: return L10n.t("profile.section.transfer")
         case .alerts: return L10n.t("profile.section.alerts")
         case .appearance: return L10n.t("profile.appearance")
         case .settings: return L10n.t("profile.section.settings")
@@ -420,6 +578,8 @@ extension ProfileViewController: UITableViewDataSource {
             return viewModel.permissionGuidance
         case .sync:
             return "\(viewModel.syncStatusText)\n\(viewModel.syncDegradationText)"
+        case .accountData:
+            return L10n.t("profile.footnote.accountData")
         case .account:
             return L10n.t("profile.footnote.transfer")
         case .alerts:
@@ -495,16 +655,18 @@ extension ProfileViewController: UITableViewDataSource {
                 )
             }
 
+        case .accountData:
+            if indexPath.row == 0 {
+                return makeActionCell(title: L10n.t("profile.exportData"), color: AppTheme.Palette.accent)
+            }
+            return makeActionCell(title: L10n.t("profile.deleteAccount"), color: AppTheme.Palette.promotion)
+
         case .account:
             switch indexPath.row {
             case 0:
                 return makeValueCell(title: L10n.t("transfer.code.title"), value: L10n.t("profile.generateTransferCode"), showsDisclosure: true)
-            case 1:
-                return makeValueCell(title: L10n.t("transfer.claim.title"), value: L10n.t("profile.enterTransferCode"), showsDisclosure: true)
-            case 2:
-                return makeActionCell(title: L10n.t("profile.exportData"), color: AppTheme.Palette.accent)
             default:
-                return makeActionCell(title: L10n.t("profile.deleteAccount"), color: AppTheme.Palette.promotion)
+                return makeValueCell(title: L10n.t("transfer.claim.title"), value: L10n.t("profile.enterTransferCode"), showsDisclosure: true)
             }
 
         case .alerts:
@@ -626,14 +788,14 @@ extension ProfileViewController: UITableViewDelegate {
             viewModel.manualSync()
         case .sync where indexPath.row == 5:
             confirmRelogin()
+        case .accountData where indexPath.row == 0:
+            exportAccountData()
+        case .accountData where indexPath.row == 1:
+            confirmDeleteAccount()
         case .account where indexPath.row == 0:
             openPairingCode()
         case .account where indexPath.row == 1:
             openPairingClaim()
-        case .account where indexPath.row == 2:
-            exportAccountData()
-        case .account where indexPath.row == 3:
-            confirmDeleteAccount()
         case .alerts where indexPath.row == 1:
             presentThrottlePicker()
         case .alerts where indexPath.row == 2 && viewModel.needsNotificationSettings:

@@ -29,6 +29,7 @@ codemagic/
 │   ├── Persistence/            # SQLiteDatabase 与各 Store（含 ReadingsStore）
 │   ├── Readings/               # ReadingParser（四特征独立解析）+ ReadingsIngestor
 │   ├── Sync/                   # SyncEngine / SyncAPIClient / SyncModels / KeychainTokenStore / SyncMetadataStore
+│   ├── Account/                # AccountAPIClient（配对 / 删除令牌 / 异步导出）、AccountDeletionService、AccountExportService
 │   ├── Bluetooth/              # CoreBluetoothService（扫描 / 连接 / 授权 / notify 订阅）
 │   ├── Rules/                  # RuleEvaluator（断开 / RSSI 阈值）
 │   └── Formatting/             # 时间与 RSSI 格式化
@@ -43,7 +44,7 @@ codemagic/
 Config/
 ├── Debug.xcconfig              # BASE_URL → 本地 Go 服务
 └── Release.xcconfig            # BASE_URL → 线上（当前为与 Android 共用的 mock）
-codemagicTests/                 # XCTest 单元测试（122 个用例）
+codemagicTests/                 # XCTest 单元测试（364 个用例）
 scripts/                        # e2e-contract.sh + 独立 Swift 联调 runner（CI 的 e2e-contract job 复用）
 docs/
 ├── architecture.md             # 本文件
@@ -153,6 +154,28 @@ SyncEngine
 - 产品 / 市场 / 详情：`ProductAPIClient` 以 `catalog/device-types` 为目录唯一事实源，`{type}/catalog` 只补充固件与配件，设备详情使用 `my/devices/ios/{externalId}` 复合键，不依赖 MAC。
 - 市场筛选：`MarketViewModel` 维护 `allItems` + `selectedVendor` / `selectedCompatibility`，选项由 `item.vendor` 与 `item.compatibilityTags` 去重排序得到；`dropInvalidFilters` 在刷新后清除已失效的筛选值。
 - 跨平台设备：`SavedDevice.isConnectable` 仅在 `platform == "ios"` 时为真；Android 设备在列表标注不可连接并禁用入口。
+
+### 6.2 账号删除与数据导出（v0.20.0）
+
+```
+「我的 → 账号与数据」
+  ├─ 导出：POST /me/export(202) → 轮询 GET /me/export/{id}（2.5s 起 ×1.4 封顶 5s）
+  │      → ready: downloadUrl(一次性, 10 分钟) → GET download（无 Bearer）
+  │      → 410：重新 GET 任务换新链接，只重试一次并提示「链接已刷新」
+  │      → 临时文件 → UIActivityViewController → 关闭即删
+  └─ 删除：POST /me/deletion-request(Bearer) → {token, expiresAt}
+         → 二次确认（设备/读数/场景/家庭关系/反馈将永久删除）
+         → DELETE /me（仅 X-Deletion-Token，无 Authorization）
+         → 204：断 BLE → Keychain → 业务表（含 v13 目录缓存 / 反馈草稿 / 场景）
+                → 同步元数据 → URLCache → 导出临时文件 → 通知重建 Tab
+         → 409：保留令牌，提示「先转让所有权或移除成员」+ 家庭页入口
+         → 403：提示重新申请；404：视为已删除，仍执行本地清空
+```
+
+- 删除令牌与 Bearer 分离：`DELETE /me` 明确不带 `Authorization`，避免服务端用旧 Bearer 走其他分支；令牌重放得到 404 而不是 401。
+- 409 不消耗令牌，界面保留同一个 `DeletionChallenge` 供「重试」；转让所有权后无需重新申请。
+- 本地清理顺序先断 BLE，再单事务清业务表，避免清理后 notify 继续写回读数；`.accountDeleted` 通知让 `MainTabBarController` 重建五个 Tab，清除内存中的旧设备与读数。
+- 导出轮询采用退避而非每秒请求；`AccountExportService.cancel()` 用 generation 标记让旧回调失效，避免取消后仍弹分享。
 
 ## 7. 持久化（SQLite）
 

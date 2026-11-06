@@ -12,7 +12,7 @@
 
 | 项 | 结果 |
 | --- | --- |
-| 版本 | **v0.19.0**（`MARKETING_VERSION 0.19.0`，`CURRENT_PROJECT_VERSION 27`，tag `v0.19.0`：设备类型目录改由服务端 `GET /catalog/device-types` 提供，本地只保留 SQLite 缓存与断网兜底；`ETag` / `Last-Modified` 条件请求、304 复用、离线标注、解析能力对齐；契约对齐 `PJGoIoT` v0.18.0 / openapi 0.14.0） |
+| 版本 | **v0.20.0**（`MARKETING_VERSION 0.20.0`，`CURRENT_PROJECT_VERSION 28`，tag `v0.20.0`：账号删除改为两步一次性令牌，数据导出改为异步任务 + 一次性下载链接；「我的」新增「账号与数据」区域；删除后本地业务表、凭据、缓存（含 v13 目录缓存）、URL 缓存与反馈草稿全部清空；契约对齐 `PJGoIoT` v0.19.0 / openapi 0.15.0） |
 | 五模块（首页 / 智能 / 产品 / 市场 / 我的） | 已实现，纯代码 UIKit，真实数据路径；设备管理并入首页，规则与场景集中在「智能」 |
 | CoreBluetooth 扫描 + 连接 | 已实现（`CBCentralManager`，真实 RSSI） |
 | BLE 读数采集 | 已实现：连接后订阅心率 `0x2A37`、电量 `0x2A19`、温度 `0x2A6E`、Nordic UART TX `6E400003-…`；各特征独立解析器，失败静默丢弃并写本地日志 |
@@ -23,15 +23,15 @@
 | 本地化（v0.12.0） | **已实现**：全部界面文案走 `L10n.t` / `L10n.f`，资源为 `Resources/zh-Hans.lproj/Localizable.strings` 与 `en.lproj/Localizable.strings`；工程 `knownRegions` 含 `zh-Hans`，`CFBundleLocalizations = [en, zh-Hans]`，设置跟随系统语言；术语双语见第 11 节；单测强制扫描 View / ViewModel 源码不得硬编码中文，并校验两语言 key 集合与占位符一致 |
 | 动态字体（v0.12.0） | **已实现**：字号统一走 `AppText`（`UIFontMetrics` 缩放）+ `applyFont(_:)`（`adjustsFontForContentSizeCategory = true`）；表格行高自适应；图表 Y 轴左侧留白随字号测量增长，超大字号缩为 3 个刻度且不与绘图区重叠 |
 | 设计系统（v0.8.0） | **已落地**：`Palette` 36 个语义色（浅/深 `UIColor(dynamicProvider:)`）、`Layout` 4pt 阶梯 / 16 页边距 / 56·72·88 行高 / 12 圆角 / 1dp 描边、`AppText` 10 级字号与等宽数字；代码内无硬编码色值与字号（单测强制扫描） |
-| 网络层 | 已实现（URLSession + Codable；设备类型目录 `GET /catalog/device-types` 对齐 `PJGoIoT` v0.18.0 openapi 0.14.0，带 `If-None-Match` / `If-Modified-Since` 条件请求并处理 304；反馈 `POST /feedback` / `GET /feedback/mine` 对齐 openapi 0.12.0，使用 `Idempotency-Key`（草稿本地 ID）、`Retry-After` 与 `Idempotent-Replayed`；家庭 / 邀请码 / 房间 / 设备归属对齐 openapi 0.9.0；设备/型号/同步/账号对齐 openapi 0.7.0 起的既有契约；读数查询 / summary / series / metrics 对齐 v0.5.1 起；详情页远端刷新 800ms 去抖动 + 失败指数退避 ≤5 分钟，不可见/后台不请求；分页上限 changes 500 / readings 500 / export 5000 / feedback 50） |
+| 网络层 | 已实现（URLSession + Codable；账号删除 / 导出对齐 `PJGoIoT` v0.19.0 openapi 0.15.0：`POST /me/deletion-request` + `X-Deletion-Token` 删除、异步导出任务 + 一次性下载链接；设备类型目录 `GET /catalog/device-types` 对齐 openapi 0.14.0，带 `If-None-Match` / `If-Modified-Since` 条件请求并处理 304；反馈 `POST /feedback` / `GET /feedback/mine` 对齐 openapi 0.12.0，使用 `Idempotency-Key`（草稿本地 ID）、`Retry-After` 与 `Idempotent-Replayed`；家庭 / 邀请码 / 房间 / 设备归属对齐 openapi 0.9.0；设备/型号/同步对齐 openapi 0.7.0 起的既有契约；读数查询 / summary / series / metrics 对齐 v0.5.1 起；详情页远端刷新 800ms 去抖动 + 失败指数退避 ≤5 分钟，不可见/后台不请求；分页上限 changes 500 / readings 500 / feedback 50，导出不再分页） |
 | 同步 | **已实现**：匿名登录、增量拉取、批量推送（设备 ≤100/批 + 读数 ≤200/批、幂等键含读数）、冲突提示、tombstone、Keychain token、前后台 / BGTask 触发、断网累积补传；后台唤醒仅做受限推送（不拉增量、不建号、≥15 分钟间隔）；**410 `RESYNC_REQUIRED` 自动全量重同步（pending 不丢）**，503 `TIMEOUT` 指数退避 |
 | 自绘 RSSI + 自绘折线图 + 代码组装空状态 | 已实现（读数图表纯 `draw(_:)`，无第三方图表库） |
 | 首启引导 | **已实现**：3 步（蓝牙 / 通知 / 后台采集），仅首次或未走完时出现，可跳过；步骤与完成标记持久化到 `UserDefaults` |
-| 单元测试 | **356 个用例，0 失败**（`** TEST SUCCEEDED **`，2026-11-06，Xcode 27.2 / iPhone 18 Pro · iOS 27.2 模拟器；新增目录 200 首次落库、304 命中缓存并刷新使用时间、ETag 变化触发更新、断网有缓存回退 / 无缓存错误、`CATALOG_CACHE_MISSING` 异常分支、目录新增类型界面表现、指标与本地解析能力不一致标注、NUS 透传、`device_catalog_cache` v12→v13 迁移；既有 344 个用例全部保持） |
+| 单元测试 | **364 个用例，0 失败**（`** TEST SUCCEEDED **`，2026-11-06，Xcode 27.2 / iPhone 18 Pro · iOS 27.2 模拟器；新增 8 个：删除令牌申请 / `DELETE /me` 只用 `X-Deletion-Token`、409/403/404/410 分流、异步导出 DTO 与相对 `downloadUrl` 解析、下载 410/403、轮询退避 `[2.5, 3.5, 4.9]`、410 自动刷新一次、409 → 转让后同一令牌成功、删除后 9 张业务表计数归零 + 目录缓存清空 + 重启不复活的迁移验证；既有 356 个用例全部保持） |
 | 模拟器构建 | **通过**（`xcodebuild ... build`，`** BUILD SUCCEEDED **`） |
-| CI | **GitHub Actions 已实际运行 success**：v0.19.0 tag run [42172416077](https://github.com/platojobs/codemagic/actions/runs/42172416077)（success，提交 `0dd12c3`），并行 `Build & Test`（**356 单测**）与 `E2E contract`（**337 项，0 SKIP**，PJGoIoT 固定在 v0.18.0）；同 sha 的 `main` run 被 tag 并发规则取消后，本回填提交会触发新的 `main` 运行；v0.18.0 tag run [42165913126](https://github.com/platojobs/codemagic/actions/runs/42165913126) 与 `main` run [42167202625](https://github.com/platojobs/codemagic/actions/runs/42167202625) 为上一基线；`codemagic.yaml` 作为可选替代保留但未验证 |
+| CI | **GitHub Actions 已实际运行 success**：v0.20.0 提交与 tag 已推送，run 结果待回填；上一基线 v0.19.0 tag run [42172416077](https://github.com/platojobs/codemagic/actions/runs/42172416077)（success，提交 `0dd12c3`），并行 `Build & Test`（**356 单测**）与 `E2E contract`（**337 项，0 SKIP**，PJGoIoT 固定在 v0.18.0）；v0.18.0 tag run [42165913126](https://github.com/platojobs/codemagic/actions/runs/42165913126) 与 `main` run [42167202625](https://github.com/platojobs/codemagic/actions/runs/42167202625) 为更早基线；`codemagic.yaml` 作为可选替代保留但未验证 |
 | 真机 BLE / 签名 | **未验证**：本机无真机与 Apple 开发者账号；读数采集与图表需真机 / 可穿戴设备验证（见第 9 节） |
-| 真实后端同步 | **契约已联调**：`scripts/e2e-contract.sh` 对**干净 worktree 的 `PJGoIoT` v0.18.0**（`/tmp/pjgoiot-v018`，`STORE=fixture`）跑 **337 项断言，全部 PASS**（新增 `GET /catalog/device-types` 匿名 200、版本 / `generatedAt` / 5 个类型、GATT / 指标 / 限制 / 兼容性 / `updatedAt` 字段、完整 UUID 归一化到 `2A6E` / `2A37` / `2A9D`、NUS 空指标、`ETag` / `Last-Modified` / `Cache-Control`、`If-None-Match` 与 `If-Modified-Since` 命中 304）；`scripts/e2e-postgres.sh` 在同一套契约外，另在**真实 Postgres** 直接查库确认邀请码只存 64 位哈希、移除成员后成员行删除、退出后清理，输出见 [docs/e2e-postgres.md](docs/e2e-postgres.md)；App 内目录离线 UI 与同步 UI 仍需真机手动验证 |
+| 真实后端同步 | **契约已联调**：`scripts/e2e-contract.sh` 对**干净 worktree 的 `PJGoIoT` v0.19.0**（`/tmp/pjgoiot-v019`，`STORE=fixture`）跑 **367 项断言，全部 PASS**（新增删除令牌申请 / 401 / 旧令牌作废 / 400 缺令牌 / 403 错令牌、`DELETE /me` 204 / 旧 Bearer 401 / 重放 404、异步导出 202 → pending/ready 轮询 → 一次性下载 200 → 重放 410 → 错令牌 403 → 重新查询换新链接可再下载、owner 家庭有成员 409 → 转让后同一令牌 204）；`scripts/e2e-postgres.sh` 在同一套契约外，另在**真实 Postgres** 直接查库；输出见 [docs/e2e-postgres.md](docs/e2e-postgres.md)；App 内删除 / 导出与分享 UI 仍需真机手动验证 |
 | 上架材料 | **已补齐**：`docs/store-listing.md`、`docs/privacy-policy.md`、`docs/app-privacy.md` 与 `codemagic/Resources/PrivacyInfo.xcprivacy`（未使用能力不声明） |
 
 ---
@@ -100,7 +100,9 @@
 - **登录失效（401）**：token 过期时显示「登录已失效」，出现「重新登录」入口；确认弹窗说明旧账号云端数据不自动合并、本机设备会重新同步，确认后才换新匿名账号（游标重置为 0）。未确认前前后台自动同步不会静默建号，见 `docs/troubleshooting.md` 第 3.1 节。
 - **家庭管理（v0.14.0）**：「我的 → 家庭管理」展示当前家庭与角色、成员列表（owner / member、账号类型）、房间数量；支持创建家庭、生成 8 位一次性邀请码（服务端 `expiresAt` 倒计时、复制、过期后重新生成）、输入邀请码加入（复用 8 位输入规范化与 404 / 429 文案）；member 的写入口隐藏并给出只读说明。
 - 基础设置：自动记录最近设备、启动自动扫描、**后台采集**（v0.7.0，默认开启并说明耗电；关闭后进入后台立即断开连接，状态实时显示）。
-- **账号与数据（v0.7.0）**：迁移到新设备（8 位一次性接管码、真实倒计时、复制/重新生成）、从旧设备接管（自动大写/过滤易混字符、404 统一提示、429 按 `Retry-After` 冷却）、导出我的数据（分页拉全 + 临时文件分享后删除 + 真实进度）、注销账号（二次确认永久删除；成功后清 Keychain / 全部业务表 / 同步元数据，401 与网络错误分别处理）。
+- **账号与数据（v0.7.0，v0.20.0 重做删除与导出）**：迁移到新设备（8 位一次性接管码、真实倒计时、复制/重新生成）、从旧设备接管（自动大写/过滤易混字符、404 统一提示、429 按 `Retry-After` 冷却）；「我的」新增独立「账号与数据」区域，两个入口均说明后果：
+  - **导出我的数据**：`POST /me/export` 创建异步任务，界面展示「创建 / 处理中 / 下载中 / 刷新链接」；轮询 2.5s 起、×1.4、封顶 5s；ready 后用一次性链接下载（不带 Bearer）→ 临时 JSON 文件 → `UIActivityViewController`，分享关闭即删；410 自动重新查询任务换新链接并提示「下载链接已刷新」，只自动重试一次。
+  - **删除账号**：申请 10 分钟一次性令牌 → 二次确认写明「设备、读数、场景、家庭关系、反馈都会被删除且不可恢复」→ `DELETE /me` 仅带 `X-Deletion-Token`；409 提示「请先转让所有权或移除成员」并提供跳转家庭页与「重试删除」（同一令牌可用）；403 提示重新申请；404 视为已删除并回到未登录态；网络失败保留可重试状态，不中途踢回首页。成功后断 BLE → 清 Keychain → 清全部业务表（含 v13 `device_catalog_cache`、`feedback_drafts`、`scenarios`）→ 清同步元数据 / `URLCache` / 导出临时文件 → 通知重建五个 Tab，重启不复活。
 - **阈值告警设置（v0.6.0）**：真实开关、节流窗口（1 / 5 / 30 分钟）与通知权限状态；拒绝时提示前往系统设置。
 - **外观（v0.6.0）**：跟随系统 / 浅色 / 深色三态，窗口级生效并持久化。
 - 版本与关于：读取 `CFBundleShortVersionString / CFBundleVersion` 与当前 `BASE_URL`。
@@ -149,7 +151,7 @@ Config/
 scripts/
 ├── e2e-contract.sh         # 启动本地 fixture 服务 + 运行联调 runner（CI 的 e2e-contract job 复用）
 └── e2e-contract.swift      # 独立 Swift 可执行 runner，真实 URLSession 直连 localhost
-codemagicTests/             # 293 个 XCTest 用例（设计令牌审计 / 场景执行 / 迁移 v9 / 家庭与邀请码 / 黄金读数 / 图表几何 / 节流退避 / 通知 / 导出 / 接管码 / 注销 / 后台推送 / 首启持久化与术语审计）
+codemagicTests/             # 364 个 XCTest 用例（设计令牌审计 / 场景执行 / 迁移 v9 / 家庭与邀请码 / 黄金读数 / 图表几何 / 节流退避 / 通知 / 删除令牌与异步导出 / 接管码 / 后台推送 / 首启持久化与术语审计）
 docs/
 ├── architecture.md
 ├── consistency.md
@@ -233,9 +235,9 @@ cd /path/to/codemagic
 - 联调 runner：`scripts/e2e-contract.swift` 由 `swiftc` 编译为独立 macOS 可执行文件，使用真实 `URLSession` 直连 `127.0.0.1`，**不走 iOS 模拟器**。
 - 依赖本地 Go 服务与 fixture 数据；GitHub Actions `ios.yml` 的 `e2e-contract` job 会 checkout `PJGoIoT` 并执行同一脚本（`PJGOIOT_DIR` 指向 checkout 目录），不使用 `|| true`。
 - CI 中 `build-test` 与 `e2e-contract` 并行，按 `github.sha` 去重（同一次提交的 main push 与 tag 只跑一轮）。
-- 读数断言（第 7 节）采用**能力门控**：探针 `GET .../readings/summary` 返回 404（后端尚未发布 readings）时输出 `[SKIP]` 且不计通过；后端上线后自动执行真实断言。本地 agent 以 `RATE_LIMIT_PER_MINUTE=0` 启动 fixture 服务，避免 ~100 次请求触发 429。
+- 读数断言（第 7 节）采用**能力门控**：探针 `GET .../readings/summary` 返回 404（后端尚未发布 readings）时输出 `[SKIP]` 且不计通过；后端上线后自动执行真实断言。本地 agent 以 `RATE_LIMIT_PER_MINUTE=0` / `PAIRING_CLAIM_RATE_PER_MINUTE=0` 启动 fixture 服务，避免 ~120 次请求与多次邀请码领取触发 429。
 
-本机 2026-11-06 实际运行（后端 `PJGoIoT` v0.18.0 干净 worktree，端口 8080）：
+本机 2026-11-06 实际运行（后端 `PJGoIoT` v0.19.0 干净 worktree，端口 18092）：
 
 ```
 [e2e] health 200
@@ -250,12 +252,12 @@ cd /path/to/codemagic
 [5. LWW 冲突：旧版本不静默覆盖新版本]
 [6. 无 token 401 / 跨用户 404]
 [7. 设备读数 readings（推送 / 倒序 / summary / 重复 id / NaN）]
-[8. 账号：配对码接管 / 数据导出 / 注销]
+[8. 账号：配对码接管 / 异步导出 / 删除令牌注销]
 [9. 家庭：创建 / 邀请码 / 成员可见设备 / 403 与跨家庭 404]
 [10. 反馈：提交 / 幂等重放 / 冲突 / 我的列表]
 
 === E2E 合同联调结果 ===
-通过：337 项，跳过：0 项，失败：0 项
+通过：367 项，跳过：0 项，失败：0 项
 结论：PASS
 ```
 
@@ -365,17 +367,20 @@ cd /path/to/codemagic
 - 采集：CoreBluetooth notify 订阅心率 `0x2A37`、电量 `0x2A19`、温度 `0x2A6E`、Nordic UART TX `6E400003-…`；解析规则见 `docs/consistency.md` 3.7。解析失败静默丢弃并写本地日志（分类「读数」），不崩溃、不写脏数据。
 - 黄金用例：两端共用 `docs/consistency.md` 3.8 的「读数解析黄金用例」表（输入 hex → 唯一期望）；iOS 固化在 `codemagicTests/ReadingsGoldenTests.swift`（18 个用例，含空字节与多行部分失败）。
 
-### 7.4 账号（v0.7.0，契约对齐 PJGoIoT v0.9.0 / openapi 0.7.0）
+### 7.4 账号（v0.20.0，契约对齐 PJGoIoT v0.19.0 / openapi 0.15.0）
 
 | 接口 | 方法 | 说明 |
 | --- | --- | --- |
 | `/api/v1/auth/anonymous` | `POST` | 返回 `{userId, token, expiresAt}`；token 默认 180 天 TTL |
 | `/api/v1/auth/pairing-code` | `POST` | Bearer；返回 `{code, expiresAt}`；8 位、10 分钟、一次性；重新生成使旧码失效 |
 | `/api/v1/auth/pairing-code/claim` | `POST` | Body `{code}`，无需旧 token；返回 `{userId, token, expiresAt}`；404 统一「码无效或已过期」；429 带 `Retry-After` |
-| `/api/v1/me/export?limit=&cursor=` | `GET` | Bearer；返回 `{user, devices, readings, exportedAt, hasMore, nextCursor}`；`limit` 上限 **5000**；`cursor` 不透明 |
-| `/api/v1/me` | `DELETE` | Bearer；204；删除账号、设备、读数并使全部 token 失效 |
+| `/api/v1/me/deletion-request` | `POST` | Bearer；201 `{token, expiresAt}`；令牌 10 分钟、只存哈希；再次申请作废旧令牌 |
+| `/api/v1/me` | `DELETE` | **仅 `X-Deletion-Token`，无 Bearer**；204；缺令牌 400 `DELETION_TOKEN_REQUIRED`，无效 403 `DELETION_TOKEN_INVALID`，过期 410，owner 有成员 409 `ACCOUNT_DELETION_BLOCKED` |
+| `/api/v1/me/export` | `POST` | Bearer；202 `{id, status, createdAt}` 异步任务 |
+| `/api/v1/me/export/{id}` | `GET` | Bearer；轮询 `pending` / `ready` / `failed`；`ready` 每次签发新的一次性 `downloadUrl`（10 分钟、覆盖旧链接） |
+| `/api/v1/me/export/{id}/download?token=` | `GET` | **无 Bearer**；首次 200，重放 410 `EXPORT_DOWNLOAD_EXPIRED`，错令牌 403 `EXPORT_DOWNLOAD_INVALID` |
 
-接管成功后客户端替换 Keychain token，保留本机设备 / 读数并全部重新标记 pending，游标清零；注销成功后按 Keychain → SQLite 业务表 → 同步元数据顺序清理。细节与错误口径见 `docs/consistency.md` 3.11 / 3.13。
+接管成功后客户端替换 Keychain token，保留本机设备 / 读数并全部重新标记 pending，游标清零；注销成功后的本地清理顺序与错误分流见 `docs/consistency.md` 3.11；删除令牌 / 异步导出实现见 `docs/architecture.md` 6.2。
 
 ### 7.5 游标失效与全量重同步（v0.10.0）
 
@@ -485,6 +490,7 @@ HTTP/1.1 410 Gone
 
 ## 10. 版本记录
 
+- `v0.20.0`：账号删除两步令牌 + 异步数据导出（`MARKETING_VERSION 0.20.0` / build 28，tag `v0.20.0`）。「我的」新增独立「账号与数据」区域：**导出**改为 `POST /me/export`（202 异步任务）→ 轮询 `GET /me/export/{id}`（2.5s 起 ×1.4 封顶 5s）→ ready 后一次性链接下载（无 Bearer）→ 临时文件 + `UIActivityViewController`，分享关闭即删；410 自动重新查询任务换新链接并提示，只自动重试一次。**删除**改为 `POST /me/deletion-request` 取得 10 分钟一次性令牌 → 二次确认（写明设备 / 读数 / 场景 / 家庭关系 / 反馈永久删除）→ `DELETE /me` 仅带 `X-Deletion-Token`；409 如实提示「请先转让所有权或移除成员」并给家庭页入口与同一令牌重试，403 提示重新申请，404 视为已删除，网络失败保留可重试状态。成功后断 BLE → 清 Keychain → 清 9 张业务表（含 v13 `device_catalog_cache`、`feedback_drafts`、`scenarios`）→ 清同步元数据 / `URLCache` / 导出临时文件 → `.accountDeleted` 通知重建五个 Tab，重启不复活。新增单测 8 个（共 **364** 个，0 失败），E2E **367** 项全 PASS（fixture，后端 v0.19.0 干净 worktree）；后端 `PJGoIoT` v0.19.0（openapi 0.15.0）。
 - `v0.15.0`：家庭管理补齐 —— 成员移除 / 退出 / 邀请码管理 / 房间整段排序与真实计数（`MARKETING_VERSION 0.15.0` / build 23，tag `v0.15.0`）。SQLite 迁移 **v10** 为 `households` 条件补 `room_count`，`memberCount` / `deviceCount` / `roomCount` 全部来自 `GET /households`，不再本地计数。新增后端 v0.13.0（openapi 0.9.0）接口：`DELETE /households/{id}/members/{userId}`（owner 移除成员 204，对方访问家庭 404、设备回个人家庭、房间清空）；`POST /households/{id}/leave`（204，owner 还有其他成员时 409，界面与服务端统一为「请先转让所有权或移除其他成员」，**机读判断只看状态与端点，不解析 message**）；`GET /households/{id}/invitations`（只含 `codeHashPrefix` / `status` / `attempts` / `expiresAt`，模型无 `code` 字段，绝不显示明文）与 `DELETE .../invitations/{invitationId}`（撤销后 claim 404）；`PUT /households/{id}/rooms/order`（整段提交，缺项 / 多项 / 重复 409，客户端自动重新 GET 并提示「房间列表已变化，已刷新」；v0.13.0 返回 `CONFLICT`、后续版本 `ROOM_SET_MISMATCH`，两者都识别）。家庭管理 UI 增加成员左滑 / 点击移除（二次确认说明设备回落）、退出家庭、邀请码列表 + 撤销、owner 改名；owner / member 入口按角色裁剪（member 看不到签发 / 撤销邀请码、移除成员、改家庭名）。房间管理新增「排序」拖拽模式与左滑上移 / 下移，本地未同步房间不参与整段提交。退出 / 被移除后本地设备回落个人家庭、房间脱钩保留并标「未同步」。新增单测 10 个（共 **303** 个，0 失败），E2E **260** 项全 PASS（fixture，后端 v0.13.0）；真 Postgres 同契约 + 直接查库（邀请码只存 64 位哈希、移除后成员行删除、退出清理）。
 - `v0.14.0`：家庭接入后端 —— 家庭归属、成员共享与房间服务端化（`MARKETING_VERSION 0.14.0` / build 22，tag `v0.14.0`）。SQLite 迁移 **v9** 新增 `households`（`id` 复用远端 UUID / `remote_id` / `name` / `is_personal` / `role`）与 `device_assignment_pending`；`rooms.remote_id` 真正启用并增加 `household_id` / `sync_state` / `deleted`；`saved_devices` 增加 `household_id` / `remote_room_id` / `remote_household_id`，条件 ALTER，旧库不丢房间与归属。登录后 `GET /households` 落库并持久化当前家庭，切换家庭按该家庭拉设备与房间；首次接入把本机未归属房间按 `sort_order` 推服务端，服务端同名房间**认领**本地房间而非重复创建，失败保留 `pending` 重试，**不静默丢弃**；服务端已删除家庭的房间脱钩保留、不自动搬入其他家庭。设备归属独立走 `PATCH /my/devices/{platform}/{externalId}` 三态（缺失 / 空串 / 非空），不塞进 push，失败进 pending 队列。新增「我的 → 家庭管理」（当前家庭与角色、成员列表、创建家庭、8 位一次性邀请码 + 服务端倒计时 / 复制 / 过期重生成、输入码加入）、首页多家庭切换、member 只读与 403 可读降级、跨家庭 404、离线「未同步」标注。新增单测 9 个（共 **293** 个，0 失败），E2E **224** 项全 PASS（新增家庭链路）。后端 `PJGoIoT` v0.12.0（openapi 0.8.0）。
 - `v0.13.0`：房间归属 + 首页按房间分区（`MARKETING_VERSION 0.13.0` / build 21，tag `v0.13.0`）。SQLite 迁移 **v8** 新增 `rooms` 表（`id` / `name` / `sort_order` / `remote_id` / `created_at` / `updated_at`）与 `saved_devices.room_id`（可空，NULL = 未分配），旧数据与原 `group_name` 原样保留；首页从扁平分组改为**按房间分区**，房间标题可展开 / 收起、「未分配」固定最后，无房间显示「还没有房间」+「新建房间」、房间空显示扫描引导；右上角房间管理支持新建 / 重命名 / 删除（二次确认后设备回到未分配），设备可在详情页或首页长按移入 / 移出；房间与归属仅本机、不参与 push / changes，`Room.remoteID` 为远端家庭 / 房间接口预留映射。交互取舍：搜索只匹配设备并隐藏空房间、排序只在房间内生效、分区顺序固定，首页原「分组筛选」移除，`group_name` 仅兼容保留。新增单测 7 个（共 284 个），E2E 151 项无契约变更。

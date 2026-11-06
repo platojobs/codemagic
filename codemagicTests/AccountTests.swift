@@ -10,14 +10,25 @@ final class FakeAccountAPI: AccountAPIServicing {
     var claimResult: Result<AnonymousSession, AccountAPIError> = .success(
         AnonymousSession(userID: "user-new", token: "token-new")
     )
-    var exportPages: [Result<Data, AccountAPIError>] = []
-    var deleteResult: Result<Void, AccountAPIError> = .success(())
+    var deletionRequestResult: Result<DeletionChallenge, AccountAPIError> = .success(
+        DeletionChallenge(token: "delete-token", expiresAt: Date().addingTimeInterval(600))
+    )
+    /// 队列里保留最后一个结果用于后续重复调用；用于模拟 409 → 成功 等连续分支。
+    var deleteResults: [Result<Void, AccountAPIError>] = [.success(())]
+    var exportCreateResult: Result<AccountExportTask, AccountAPIError> = .success(
+        FakeAccountAPI.makeTask(id: "export-1", status: .pending)
+    )
+    var exportFetchResults: [Result<AccountExportTask, AccountAPIError>] = []
+    var downloadResults: [Result<Data, AccountAPIError>] = []
 
     private(set) var createCount = 0
     private(set) var claimCount = 0
     private(set) var claimedCodes: [String] = []
-    private(set) var exportRequests: [(cursor: String?, limit: Int, token: String)] = []
+    private(set) var deletionRequestTokens: [String] = []
     private(set) var deleteTokens: [String] = []
+    private(set) var exportCreateTokens: [String] = []
+    private(set) var exportFetchIDs: [String] = []
+    private(set) var downloadURLs: [URL] = []
 
     func createPairingCode(token: String, completion: @escaping (Result<PairingCode, AccountAPIError>) -> Void) {
         createCount += 1
@@ -30,23 +41,66 @@ final class FakeAccountAPI: AccountAPIServicing {
         completion(claimResult)
     }
 
-    func fetchExportPage(
-        cursor: String?,
-        limit: Int,
+    func createDeletionRequest(
         token: String,
-        completion: @escaping (Result<Data, AccountAPIError>) -> Void
+        completion: @escaping (Result<DeletionChallenge, AccountAPIError>) -> Void
     ) {
-        exportRequests.append((cursor, limit, token))
-        if exportPages.isEmpty {
-            completion(.failure(.decoding("stub 未配置导出页")))
-        } else {
-            completion(exportPages.removeFirst())
-        }
+        deletionRequestTokens.append(token)
+        completion(deletionRequestResult)
     }
 
-    func deleteAccount(token: String, completion: @escaping (Result<Void, AccountAPIError>) -> Void) {
-        deleteTokens.append(token)
-        completion(deleteResult)
+    func deleteAccount(
+        deletionToken: String,
+        completion: @escaping (Result<Void, AccountAPIError>) -> Void
+    ) {
+        deleteTokens.append(deletionToken)
+        completion(Self.next(&deleteResults) ?? .success(()))
+    }
+
+    func createExport(
+        token: String,
+        completion: @escaping (Result<AccountExportTask, AccountAPIError>) -> Void
+    ) {
+        exportCreateTokens.append(token)
+        completion(exportCreateResult)
+    }
+
+    func fetchExport(
+        id: String,
+        token: String,
+        completion: @escaping (Result<AccountExportTask, AccountAPIError>) -> Void
+    ) {
+        exportFetchIDs.append(id)
+        completion(Self.next(&exportFetchResults) ?? .failure(.decoding("stub 未配置导出状态")))
+    }
+
+    func downloadExport(url: URL, completion: @escaping (Result<Data, AccountAPIError>) -> Void) {
+        downloadURLs.append(url)
+        completion(Self.next(&downloadResults) ?? .failure(.decoding("stub 未配置下载")))
+    }
+
+    static func makeTask(
+        id: String,
+        status: AccountExportTask.Status,
+        downloadURL: URL? = nil
+    ) -> AccountExportTask {
+        AccountExportTask(
+            id: id,
+            status: status,
+            createdAt: Date(timeIntervalSince1970: 1_000),
+            completedAt: status == .pending ? nil : Date(timeIntervalSince1970: 1_010),
+            downloadURL: downloadURL,
+            downloadExpiresAt: downloadURL == nil ? nil : Date(timeIntervalSince1970: 2_000),
+            expiresAt: Date(timeIntervalSince1970: 100_000)
+        )
+    }
+
+    private static func next<T>(_ queue: inout [T]) -> T? {
+        guard !queue.isEmpty else { return nil }
+        if queue.count > 1 {
+            return queue.removeFirst()
+        }
+        return queue[0]
     }
 }
 
@@ -129,7 +183,7 @@ final class AccountTests: XCTestCase {
         XCTAssertEqual(PairingCountdown.text(seconds: 0), "00:00")
     }
 
-    // MARK: - API mapping
+    // MARK: - API mapping & DTO contract
 
     func testAccountAPIClient_mapsNotFoundToInvalidCode() {
         let http = StubHTTPClient(statusCode: 404) { _ in .success(Data("{}".utf8)) }
@@ -164,27 +218,6 @@ final class AccountTests: XCTestCase {
         wait(for: [expectation], timeout: 1)
     }
 
-    func testAccountAPIClient_exportPageCarriesOpaqueCursorAndLimit() {
-        let http = StubHTTPClient(statusCode: 200) { _ in .success(Data("{}".utf8)) }
-        let client = AccountAPIClient(
-            configuration: APIConfiguration(baseURL: URL(string: "https://example.com")!),
-            httpClient: http
-        )
-        let expectation = expectation(description: "export page")
-        client.fetchExportPage(cursor: "opaque-secret", limit: 5000, token: "token") { result in
-            if case .failure(let error) = result {
-                XCTFail("不应失败：\(error)")
-            }
-            expectation.fulfill()
-        }
-        wait(for: [expectation], timeout: 1)
-        let url = http.requestedURLs.first
-        let items = url.flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: false)?.queryItems }
-        XCTAssertEqual(items?.first { $0.name == "limit" }?.value, "5000")
-        XCTAssertEqual(items?.first { $0.name == "cursor" }?.value, "opaque-secret")
-        XCTAssertEqual(http.requests.first?.headers["Authorization"], "Bearer token")
-    }
-
     func testAccountAPIClient_decodesPairingCodeWithRealExpiresAt() {
         let data = Data(#"{"code":"K7M2QX9P","expiresAt":"2026-11-05T10:00:00Z"}"#.utf8)
         let http = StubHTTPClient(statusCode: 201) { _ in .success(data) }
@@ -204,6 +237,152 @@ final class AccountTests: XCTestCase {
             expectation.fulfill()
         }
         wait(for: [expectation], timeout: 1)
+    }
+
+    /// DTO 契约（契约 0.15.0）：删除请求返回 token + expiresAt，走 Bearer。
+    func testAccountAPIClient_deletionRequestCarriesBearerAndDecodesToken() {
+        let data = Data(#"{"token":"del-1","expiresAt":"2026-11-06T10:10:00Z"}"#.utf8)
+        let http = StubHTTPClient(statusCode: 201) { _ in .success(data) }
+        let client = AccountAPIClient(
+            configuration: APIConfiguration(baseURL: URL(string: "https://example.com")!),
+            httpClient: http
+        )
+        let expectation = expectation(description: "deletion request")
+        client.createDeletionRequest(token: "bearer") { result in
+            guard case .success(let challenge) = result else {
+                XCTFail("应成功：\(result)")
+                expectation.fulfill()
+                return
+            }
+            XCTAssertEqual(challenge.token, "del-1")
+            XCTAssertEqual(challenge.expiresAt, SyncDateCodec.parse("2026-11-06T10:10:00Z"))
+            expectation.fulfill()
+        }
+        wait(for: [expectation], timeout: 1)
+        XCTAssertEqual(http.requests.first?.method, "POST")
+        XCTAssertEqual(http.requests.first?.url.path, "/api/v1/me/deletion-request")
+        XCTAssertEqual(http.requests.first?.headers["Authorization"], "Bearer bearer")
+    }
+
+    /// `DELETE /me` 只用 X-Deletion-Token，不得带 Bearer。
+    func testAccountAPIClient_deleteUsesDeletionTokenWithoutBearer() {
+        let http = StubHTTPClient(statusCode: 204) { _ in .success(Data()) }
+        let client = AccountAPIClient(
+            configuration: APIConfiguration(baseURL: URL(string: "https://example.com")!),
+            httpClient: http
+        )
+        let expectation = expectation(description: "delete")
+        client.deleteAccount(deletionToken: "del-1") { result in
+            if case .failure(let error) = result { XCTFail("应成功：\(error)") }
+            expectation.fulfill()
+        }
+        wait(for: [expectation], timeout: 1)
+        XCTAssertEqual(http.requests.first?.method, "DELETE")
+        XCTAssertEqual(http.requests.first?.url.path, "/api/v1/me")
+        XCTAssertEqual(http.requests.first?.headers["X-Deletion-Token"], "del-1")
+        XCTAssertNil(http.requests.first?.headers["Authorization"])
+    }
+
+    func testAccountAPIClient_mapsDeletionStatusToDistinctErrors() {
+        let cases: [(Int, String, AccountAPIError)] = [
+            (409, "ACCOUNT_DELETION_BLOCKED", .deletionBlocked),
+            (403, "DELETION_TOKEN_INVALID", .deletionTokenInvalid),
+            (404, "NOT_FOUND", .accountDeleted),
+            (410, "DELETION_TOKEN_EXPIRED", .deletionTokenExpired),
+        ]
+        let baseURL = URL(string: "https://example.com")!
+        for (status, code, expected) in cases {
+            let body = Data(#"{"error":{"code":"\#(code)","message":"detail"}}"#.utf8)
+            let http = StubHTTPClient(statusCode: status) { _ in .success(body) }
+            let client = AccountAPIClient(configuration: APIConfiguration(baseURL: baseURL), httpClient: http)
+            let expectation = expectation(description: "delete \(status)")
+            client.deleteAccount(deletionToken: "del") { result in
+                guard case .failure(let error) = result else {
+                    XCTFail("\(status) 应失败")
+                    expectation.fulfill()
+                    return
+                }
+                XCTAssertEqual(error, expected, "\(status) 应映射为 \(expected)")
+                expectation.fulfill()
+            }
+            wait(for: [expectation], timeout: 1)
+        }
+    }
+
+    func testAccountAPIClient_decodesPendingAndReadyExportTasks() {
+        let pending = Data(#"{"id":"exp-1","status":"pending","createdAt":"2026-11-06T10:00:00Z","completedAt":null,"downloadUrl":null,"downloadExpiresAt":null,"expiresAt":"2026-11-06T11:00:00Z"}"#.utf8)
+        let ready = Data(#"{"id":"exp-1","status":"ready","createdAt":"2026-11-06T10:00:00Z","completedAt":"2026-11-06T10:01:00Z","downloadUrl":"/api/v1/me/export/exp-1/download?token=dl-1","downloadExpiresAt":"2026-11-06T10:11:00Z","expiresAt":"2026-11-06T11:00:00Z"}"#.utf8)
+
+        let pendingHTTP = StubHTTPClient(statusCode: 202) { _ in .success(pending) }
+        let pendingClient = AccountAPIClient(
+            configuration: APIConfiguration(baseURL: URL(string: "https://example.com")!),
+            httpClient: pendingHTTP
+        )
+        let pendingExpectation = expectation(description: "pending task")
+        pendingClient.createExport(token: "bearer") { result in
+            guard case .success(let task) = result else {
+                XCTFail("应成功：\(result)")
+                pendingExpectation.fulfill()
+                return
+            }
+            XCTAssertEqual(task.id, "exp-1")
+            XCTAssertEqual(task.status, .pending)
+            XCTAssertNil(task.downloadURL)
+            XCTAssertEqual(task.createdAt, SyncDateCodec.parse("2026-11-06T10:00:00Z"))
+            XCTAssertEqual(task.expiresAt, SyncDateCodec.parse("2026-11-06T11:00:00Z"))
+            pendingExpectation.fulfill()
+        }
+        wait(for: [pendingExpectation], timeout: 1)
+        XCTAssertEqual(pendingHTTP.requests.first?.method, "POST")
+        XCTAssertEqual(pendingHTTP.requests.first?.url.path, "/api/v1/me/export")
+        XCTAssertEqual(pendingHTTP.requests.first?.headers["Authorization"], "Bearer bearer")
+
+        let readyHTTP = StubHTTPClient(statusCode: 200) { _ in .success(ready) }
+        let readyClient = AccountAPIClient(
+            configuration: APIConfiguration(baseURL: URL(string: "https://example.com")!),
+            httpClient: readyHTTP
+        )
+        let readyExpectation = expectation(description: "ready task")
+        readyClient.fetchExport(id: "exp-1", token: "bearer") { result in
+            guard case .success(let task) = result else {
+                XCTFail("应成功：\(result)")
+                readyExpectation.fulfill()
+                return
+            }
+            XCTAssertEqual(task.status, .ready)
+            // 相对下载地址必须按 BASE_URL 解析成绝对地址，供无 Bearer 下载使用。
+            XCTAssertEqual(
+                task.downloadURL?.absoluteString,
+                "https://example.com/api/v1/me/export/exp-1/download?token=dl-1"
+            )
+            XCTAssertEqual(task.completedAt, SyncDateCodec.parse("2026-11-06T10:01:00Z"))
+            readyExpectation.fulfill()
+        }
+        wait(for: [readyExpectation], timeout: 1)
+        XCTAssertEqual(readyHTTP.requests.first?.method, "GET")
+        XCTAssertEqual(readyHTTP.requests.first?.url.path, "/api/v1/me/export/exp-1")
+    }
+
+    func testAccountAPIClient_mapsDownloadExpiredAndInvalid() {
+        let http = StubHTTPClient(statusCode: 410) { _ in .success(Data("{}".utf8)) }
+        let client = AccountAPIClient(
+            configuration: APIConfiguration(baseURL: URL(string: "https://example.com")!),
+            httpClient: http
+        )
+        let expired = expectation(description: "410")
+        client.downloadExport(url: URL(string: "https://example.com/download")!) { result in
+            XCTAssertEqual(result, .failure(.downloadExpired))
+            expired.fulfill()
+        }
+        wait(for: [expired], timeout: 1)
+
+        http.statusCode = 403
+        let invalid = expectation(description: "403")
+        client.downloadExport(url: URL(string: "https://example.com/download")!) { result in
+            XCTAssertEqual(result, .failure(.downloadInvalid))
+            invalid.fulfill()
+        }
+        wait(for: [invalid], timeout: 1)
     }
 
     // MARK: - Pairing service
@@ -320,92 +499,132 @@ final class AccountTests: XCTestCase {
 
     // MARK: - Export
 
-    func testAccountExportService_pagesThroughOpaqueCursorsAndWritesFile() throws {
+    func testAccountExportService_pollsWithBackoffThenDownloadsFile() throws {
         tokenStore.session = AnonymousSession(userID: "user-1", token: "token-1")
-        api.exportPages = [
-            .success(makeExportPage(userID: "user-1", readings: 2, hasMore: true, cursor: "opaque-1")),
-            .success(makeExportPage(userID: "user-1", readings: 3, hasMore: true, cursor: "opaque-2")),
-            .success(makeExportPage(userID: "user-1", readings: 1, hasMore: false, cursor: nil)),
+        let finalURL = URL(string: "https://example.com/api/v1/me/export/exp-1/download?token=dl-1")!
+        api.exportCreateResult = .success(FakeAccountAPI.makeTask(id: "exp-1", status: .pending))
+        api.exportFetchResults = [
+            .success(FakeAccountAPI.makeTask(id: "exp-1", status: .pending)),
+            .success(FakeAccountAPI.makeTask(id: "exp-1", status: .pending)),
+            .success(FakeAccountAPI.makeTask(id: "exp-1", status: .ready, downloadURL: finalURL)),
         ]
-        let directory = testDatabase.directory.appendingPathComponent("export", isDirectory: true)
-        let service = AccountExportService(api: api, tokenStore: tokenStore, directoryURL: directory)
+        api.downloadResults = [.success(Data(#"{"user":{"id":"user-1"},"readings":[]}"#.utf8))]
 
+        var delays: [TimeInterval] = []
+        let service = AccountExportService(
+            api: api,
+            tokenStore: tokenStore,
+            directoryURL: testDatabase.directory.appendingPathComponent("export", isDirectory: true),
+            scheduler: { delay, block in
+                delays.append(delay)
+                block()
+            }
+        )
         let expectation = expectation(description: "export")
-        var progressValues: [Int] = []
-        var fileURL: URL?
-        service.export(progress: { progressValues.append($0) }) { result in
-            if case .success(let url) = result { fileURL = url }
+        var phases: [AccountExportPhase] = []
+        var output: AccountExportResult?
+        service.export(progress: { phases.append($0) }) { result in
+            if case .success(let value) = result { output = value }
             if case .failure(let error) = result { XCTFail("导出失败：\(error)") }
+            expectation.fulfill()
+        }
+        wait(for: [expectation], timeout: 3)
+
+        let fileURL = try XCTUnwrap(output?.fileURL)
+        XCTAssertFalse(output?.refreshedDownloadToken ?? true)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fileURL.path))
+        XCTAssertEqual(try Data(contentsOf: fileURL), Data(#"{"user":{"id":"user-1"},"readings":[]}"#.utf8))
+        XCTAssertEqual(delays.count, 3)
+        XCTAssertEqual(delays[0], 2.5, accuracy: 0.001)
+        XCTAssertEqual(delays[1], 3.5, accuracy: 0.001)
+        XCTAssertEqual(delays[2], 4.9, accuracy: 0.001)
+        XCTAssertEqual(api.exportFetchIDs, ["exp-1", "exp-1", "exp-1"])
+        XCTAssertEqual(api.downloadURLs, [finalURL])
+        XCTAssertEqual(phases, [.creating, .pending(attempt: 1), .pending(attempt: 2), .pending(attempt: 3), .downloading])
+
+        service.removeAllExportedFiles()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fileURL.path))
+    }
+
+    func testAccountExportService_refreshesExpiredDownloadTokenOnce() throws {
+        tokenStore.session = AnonymousSession(userID: "user-1", token: "token-1")
+        let staleURL = URL(string: "https://example.com/api/v1/me/export/exp-1/download?token=old")!
+        let freshURL = URL(string: "https://example.com/api/v1/me/export/exp-1/download?token=new")!
+        api.exportCreateResult = .success(FakeAccountAPI.makeTask(id: "exp-1", status: .ready, downloadURL: staleURL))
+        api.exportFetchResults = [
+            .success(FakeAccountAPI.makeTask(id: "exp-1", status: .ready, downloadURL: freshURL)),
+        ]
+        api.downloadResults = [
+            .failure(.downloadExpired),
+            .success(Data(#"{"user":{"id":"user-1"}}"#.utf8)),
+        ]
+
+        let service = AccountExportService(
+            api: api,
+            tokenStore: tokenStore,
+            directoryURL: testDatabase.directory.appendingPathComponent("export", isDirectory: true),
+            scheduler: { _, block in block() }
+        )
+        let expectation = expectation(description: "refresh token")
+        var phases: [AccountExportPhase] = []
+        var output: AccountExportResult?
+        service.export(progress: { phases.append($0) }) { result in
+            if case .success(let value) = result { output = value }
+            if case .failure(let error) = result { XCTFail("应自动重试成功：\(error)") }
             expectation.fulfill()
         }
         wait(for: [expectation], timeout: 2)
 
-        XCTAssertEqual(progressValues, [2, 5, 6])
-        XCTAssertEqual(api.exportRequests.map(\.cursor), [nil, "opaque-1", "opaque-2"])
-        XCTAssertEqual(api.exportRequests.map(\.limit), [AccountExportService.pageLimit, AccountExportService.pageLimit, AccountExportService.pageLimit])
-
-        let url = try XCTUnwrap(fileURL)
-        XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
-        let object = try XCTUnwrap(
-            JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any]
-        )
-        let readings = try XCTUnwrap(object["readings"] as? [[String: Any]])
-        XCTAssertEqual(readings.count, 6)
-        let user = object["user"] as? [String: Any]
-        XCTAssertEqual(user?["id"] as? String, "user-1")
-
-        service.removeExportedFile(at: url)
-        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
+        XCTAssertEqual(output?.refreshedDownloadToken, true)
+        XCTAssertEqual(api.downloadURLs, [staleURL, freshURL])
+        XCTAssertEqual(phases, [.creating, .downloading, .refreshingDownload])
+        let fileURL = try XCTUnwrap(output?.fileURL)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fileURL.path))
     }
 
-    func testAccountExportService_rejectsRepeatedCursorAndEmptyExport() {
+    func testAccountExportService_reportsTaskFailedAndTimeout() {
         tokenStore.session = AnonymousSession(userID: "user-1", token: "token-1")
-        api.exportPages = [
-            .success(makeExportPage(userID: "user-1", readings: 1, hasMore: true, cursor: "same")),
-            .success(makeExportPage(userID: "user-1", readings: 1, hasMore: true, cursor: "same")),
-        ]
-        let service = AccountExportService(api: api, tokenStore: tokenStore, directoryURL: testDatabase.directory)
-        let repeatedExpectation = XCTestExpectation(description: "repeated cursor")
-        var captured: AccountExportError?
+        api.exportCreateResult = .success(FakeAccountAPI.makeTask(id: "exp-1", status: .failed))
+        let failed = expectation(description: "failed")
+        let service = AccountExportService(api: api, tokenStore: tokenStore, scheduler: { _, block in block() })
         service.export(progress: { _ in }) { result in
-            if case .failure(let error) = result { captured = error }
-            repeatedExpectation.fulfill()
+            XCTAssertEqual(result, .failure(.taskFailed))
+            failed.fulfill()
         }
-        wait(for: [repeatedExpectation], timeout: 2)
-        XCTAssertEqual(captured, .invalidCursor)
+        wait(for: [failed], timeout: 1)
 
-        api.exportPages = [.success(makeExportPage(
-            userID: "user-1",
-            readings: 0,
-            hasMore: false,
-            cursor: nil,
-            devices: 0
-        ))]
-        let emptyExpectation = expectation(description: "empty export")
-        var emptyError: AccountExportError?
-        service.export(progress: { _ in }) { result in
-            if case .failure(let error) = result { emptyError = error }
-            emptyExpectation.fulfill()
+        api.exportCreateResult = .success(FakeAccountAPI.makeTask(id: "exp-2", status: .pending))
+        api.exportFetchResults = [.success(FakeAccountAPI.makeTask(id: "exp-2", status: .pending))]
+        let timeoutService = AccountExportService(
+            api: api,
+            tokenStore: tokenStore,
+            maxPollAttempts: 2,
+            scheduler: { _, block in block() }
+        )
+        let timeout = expectation(description: "timeout")
+        timeoutService.export(progress: { _ in }) { result in
+            XCTAssertEqual(result, .failure(.timeout))
+            timeout.fulfill()
         }
-        wait(for: [emptyExpectation], timeout: 2)
-        XCTAssertEqual(emptyError, .noData)
+        wait(for: [timeout], timeout: 1)
     }
 
     func testAccountExportService_requiresSession() {
-        let service = AccountExportService(api: api, tokenStore: tokenStore)
+        let service = AccountExportService(api: api, tokenStore: tokenStore, scheduler: { _, block in block() })
         let expectation = expectation(description: "unauthorized")
         service.export(progress: { _ in }) { result in
             XCTAssertEqual(result, .failure(.unauthorized))
             expectation.fulfill()
         }
         wait(for: [expectation], timeout: 1)
-        XCTAssertTrue(api.exportRequests.isEmpty)
+        XCTAssertTrue(api.exportCreateTokens.isEmpty)
     }
 
     // MARK: - Deletion
 
-    func testAccountDeletionService_clearsTokenTablesAndMetadataInOrder() throws {
+    func testDeletion_tokenFlowClearsEveryLocalTableAndSurvivesRestart() throws {
         try seedAllBusinessTables()
+        XCTAssertNotNil(DeviceCatalogStore(database: testDatabase.database).load())
         tokenStore.session = AnonymousSession(userID: "user-1", token: "token-1")
         metadata.userID = "user-1"
         metadata.cursor = 10
@@ -414,42 +633,71 @@ final class AccountTests: XCTestCase {
         metadata.lastBackgroundPushAt = Date()
         let clientID = metadata.clientID
 
-        api.deleteResult = .success(())
+        var urlCacheCleared = false
+        var bluetoothDisconnected = false
+        var exportedFilesCleared = false
         let service = AccountDeletionService(
             api: api,
             tokenStore: tokenStore,
             database: testDatabase.database,
-            metadataStore: metadata
+            metadataStore: metadata,
+            clearURLCache: { urlCacheCleared = true },
+            disconnectBluetooth: { bluetoothDisconnected = true },
+            additionalCleanup: { exportedFilesCleared = true }
         )
-        let expectation = expectation(description: "delete")
-        var captured: Result<Void, AccountDeletionError>?
-        service.deleteAccount { result in
-            captured = result
-            expectation.fulfill()
-        }
-        wait(for: [expectation], timeout: 1)
 
-        XCTAssertEqual(api.deleteTokens, ["token-1"])
-        guard case .success = captured else {
-            XCTFail("注销应成功：\(String(describing: captured))")
-            return
+        let requestExpectation = expectation(description: "request token")
+        var challenge: DeletionChallenge?
+        service.requestDeletionToken { result in
+            if case .success(let value) = result { challenge = value }
+            if case .failure(let error) = result { XCTFail("申请令牌失败：\(error)") }
+            requestExpectation.fulfill()
         }
+        wait(for: [requestExpectation], timeout: 1)
+        XCTAssertEqual(api.deletionRequestTokens, ["token-1"])
+        XCTAssertEqual(try XCTUnwrap(challenge).token, "delete-token")
+
+        api.deleteResults = [.success(())]
+        let confirmExpectation = expectation(description: "confirm")
+        var outcome: AccountDeletionOutcome?
+        service.confirmDeletion(try XCTUnwrap(challenge)) { result in
+            if case .success(let value) = result { outcome = value }
+            if case .failure(let error) = result { XCTFail("删除失败：\(error)") }
+            confirmExpectation.fulfill()
+        }
+        wait(for: [confirmExpectation], timeout: 1)
+
+        XCTAssertEqual(outcome, .deleted)
+        XCTAssertEqual(api.deleteTokens, ["delete-token"])
         XCTAssertNil(tokenStore.session)
-        for table in ["readings", "saved_devices", "rules", "scan_logs", "recent_devices", "device_info_cache"] {
-            let rows = try testDatabase.database.query("SELECT COUNT(*) AS total FROM \(table);")
-            XCTAssertEqual(rows.first?.integer("total"), 0, "\(table) 应被清空")
+        XCTAssertTrue(urlCacheCleared)
+        XCTAssertTrue(bluetoothDisconnected)
+        XCTAssertTrue(exportedFilesCleared)
+        for table in businessTables {
+            XCTAssertEqual(try count(table), 0, "\(table) 应被清空")
         }
+        XCTAssertNil(DeviceCatalogStore(database: testDatabase.database).load())
         XCTAssertNil(metadata.userID)
         XCTAssertEqual(metadata.cursor, 0)
         XCTAssertNil(metadata.lastSyncAt)
         XCTAssertFalse(metadata.reloginRequired)
         XCTAssertNil(metadata.lastBackgroundPushAt)
         XCTAssertEqual(metadata.clientID, clientID)
+
+        // 重启后重新打开同一个 SQLite 文件，业务表必须仍为空，不能从缓存放回。
+        let reopened = try testDatabase.makeDatabaseHandle()
+        defer { reopened.close() }
+        for table in businessTables {
+            let rows = try reopened.query("SELECT COUNT(*) AS total FROM \(table);")
+            XCTAssertEqual(rows.first?.integer("total"), 0, "重启后 \(table) 不应复活")
+        }
     }
 
-    func testAccountDeletionService_unauthorizedAndNetworkKeepLocalData() throws {
+    func testDeletion_blockedThenSameTokenSucceedsAfterTransfer() throws {
         try seedAllBusinessTables()
+        let deviceCountBefore = try deviceStore.fetchAll().count
         tokenStore.session = AnonymousSession(userID: "user-1", token: "token-1")
+        api.deleteResults = [.failure(.deletionBlocked), .success(())]
         let service = AccountDeletionService(
             api: api,
             tokenStore: tokenStore,
@@ -457,36 +705,148 @@ final class AccountTests: XCTestCase {
             metadataStore: metadata
         )
 
-        api.deleteResult = .failure(.unauthorized)
-        let unauthorized = expectation(description: "401")
-        service.deleteAccount { result in
-            if case .failure(.unauthorized) = result {
-                // 预期：401 与网络错误分别处理。
-            } else {
-                XCTFail("应为未授权：\(result)")
-            }
-            unauthorized.fulfill()
+        let requestExpectation = expectation(description: "request")
+        var challenge: DeletionChallenge?
+        service.requestDeletionToken { result in
+            if case .success(let value) = result { challenge = value }
+            requestExpectation.fulfill()
         }
-        wait(for: [unauthorized], timeout: 1)
-        XCTAssertEqual(try deviceStore.fetchAll().count, 1)
-        XCTAssertEqual(tokenStore.session?.token, "token-1")
+        wait(for: [requestExpectation], timeout: 1)
+        let token = try XCTUnwrap(challenge)
 
-        api.deleteResult = .failure(.failure(.network("断网")))
-        let network = expectation(description: "network")
-        service.deleteAccount { result in
-            if case .failure(.network) = result {
-                // 预期：网络错误单独处理且保留本地数据。
-            } else {
-                XCTFail("应为网络错误：\(result)")
-            }
-            network.fulfill()
+        let blockedExpectation = expectation(description: "blocked")
+        service.confirmDeletion(token) { result in
+            XCTAssertEqual(result, .failure(.blocked))
+            blockedExpectation.fulfill()
         }
-        wait(for: [network], timeout: 1)
+        wait(for: [blockedExpectation], timeout: 1)
+        // 409 不做本地清理，令牌仍可用。
+        XCTAssertEqual(try deviceStore.fetchAll().count, deviceCountBefore)
+        XCTAssertNotNil(tokenStore.session)
+        XCTAssertNotNil(DeviceCatalogStore(database: testDatabase.database).load())
+
+        let successExpectation = expectation(description: "retry success")
+        service.confirmDeletion(token) { result in
+            XCTAssertEqual(result, .success(.deleted))
+            successExpectation.fulfill()
+        }
+        wait(for: [successExpectation], timeout: 1)
+        // 同一令牌重放：服务端成功删除，本地清空。
+        XCTAssertEqual(api.deleteTokens, [token.token, token.token])
+        XCTAssertNil(tokenStore.session)
+        for table in businessTables {
+            XCTAssertEqual(try count(table), 0, "\(table) 应被清空")
+        }
+    }
+
+    func testDeletion_tokenInvalidKeepsLocalUntilReapply() throws {
+        try seedAllBusinessTables()
+        tokenStore.session = AnonymousSession(userID: "user-1", token: "token-1")
+        api.deleteResults = [.failure(.deletionTokenInvalid)]
+        let service = AccountDeletionService(
+            api: api,
+            tokenStore: tokenStore,
+            database: testDatabase.database,
+            metadataStore: metadata
+        )
+        let invalidExpectation = expectation(description: "403")
+        service.confirmDeletion(DeletionChallenge(token: "expired", expiresAt: Date())) { result in
+            XCTAssertEqual(result, .failure(.tokenInvalid))
+            invalidExpectation.fulfill()
+        }
+        wait(for: [invalidExpectation], timeout: 1)
+        XCTAssertEqual(try deviceStore.fetchAll().count, 1)
+        XCTAssertNotNil(tokenStore.session)
+
+        // 重新申请后成功删除。
+        api.deleteResults = [.success(())]
+        let retry = expectation(description: "reapply")
+        service.confirmDeletion(DeletionChallenge(token: "fresh", expiresAt: Date())) { result in
+            XCTAssertEqual(result, .success(.deleted))
+            retry.fulfill()
+        }
+        wait(for: [retry], timeout: 1)
+        XCTAssertNil(tokenStore.session)
+        XCTAssertEqual(try count("saved_devices"), 0)
+    }
+
+    func testDeletion_404IsTreatedAsDeletedAndClearsLocal() throws {
+        try seedAllBusinessTables()
+        tokenStore.session = AnonymousSession(userID: "user-1", token: "token-1")
+        api.deleteResults = [.failure(.accountDeleted)]
+        let service = AccountDeletionService(
+            api: api,
+            tokenStore: tokenStore,
+            database: testDatabase.database,
+            metadataStore: metadata
+        )
+        let expectation = expectation(description: "404 replay")
+        service.confirmDeletion(DeletionChallenge(token: "replayed", expiresAt: Date())) { result in
+            XCTAssertEqual(result, .success(.alreadyDeleted))
+            expectation.fulfill()
+        }
+        wait(for: [expectation], timeout: 1)
+        XCTAssertNil(tokenStore.session)
+        for table in businessTables {
+            XCTAssertEqual(try count(table), 0, "\(table) 应被清空")
+        }
+    }
+
+    func testDeletion_networkFailureKeepsLocalAndRetryable() throws {
+        try seedAllBusinessTables()
+        tokenStore.session = AnonymousSession(userID: "user-1", token: "token-1")
+        api.deleteResults = [.failure(.failure(.network("断网")))]
+        let service = AccountDeletionService(
+            api: api,
+            tokenStore: tokenStore,
+            database: testDatabase.database,
+            metadataStore: metadata
+        )
+        let expectation = expectation(description: "offline")
+        service.confirmDeletion(DeletionChallenge(token: "pending", expiresAt: Date())) { result in
+            guard case .failure(.network(let error)) = result else {
+                XCTFail("应为网络错误：\(result)")
+                expectation.fulfill()
+                return
+            }
+            XCTAssertTrue(error.isRetryable)
+            expectation.fulfill()
+        }
+        wait(for: [expectation], timeout: 1)
+        XCTAssertEqual(try deviceStore.fetchAll().count, 1)
         XCTAssertEqual(try readingsStore.fetchPending().count, 1)
-        XCTAssertEqual(tokenStore.session?.token, "token-1")
+        XCTAssertNotNil(tokenStore.session)
+    }
+
+    func testDeletion_requestTokenRequiresSession() {
+        let service = AccountDeletionService(
+            api: api,
+            tokenStore: tokenStore,
+            database: testDatabase.database,
+            metadataStore: metadata
+        )
+        let expectation = expectation(description: "no session")
+        service.requestDeletionToken { result in
+            XCTAssertEqual(result, .failure(.unauthorized))
+            expectation.fulfill()
+        }
+        wait(for: [expectation], timeout: 1)
+        XCTAssertTrue(api.deletionRequestTokens.isEmpty)
     }
 
     // MARK: - Helpers
+
+    private var businessTables: [String] {
+        [
+            "readings", "saved_devices", "rules", "scan_logs", "recent_devices",
+            "device_info_cache", "feedback_drafts", "scenarios", "device_catalog_cache",
+        ]
+    }
+
+    private func count(_ table: String) throws -> Int {
+        let rows = try testDatabase.database.query("SELECT COUNT(*) AS total FROM \(table);")
+        return Int(rows.first?.integer("total") ?? 0)
+    }
 
     private func makePairingService() -> PairingService {
         PairingService(
@@ -499,22 +859,8 @@ final class AccountTests: XCTestCase {
         )
     }
 
-    private func makeExportPage(
-        userID: String,
-        readings: Int,
-        hasMore: Bool,
-        cursor: String?,
-        devices: Int = 1
-    ) -> Data {
-        var object: [String: Any] = [
-            "user": ["id": userID],
-            "devices": (0..<devices).map { ["id": "device-\($0)", "externalId": "ext-\($0)"] },
-            "readings": (0..<readings).map { ["id": "reading-\($0)", "value": $0] },
-            "exportedAt": "2026-11-05T00:00:00Z",
-            "hasMore": hasMore,
-        ]
-        if let cursor { object["nextCursor"] = cursor }
-        return try! JSONSerialization.data(withJSONObject: object)
+    private func makeSavedDevice(name: String) -> SavedDevice {
+        SavedDevice(peripheralID: UUID(), advertisedName: name)
     }
 
     private func seedAllBusinessTables() throws {
@@ -531,9 +877,21 @@ final class AccountTests: XCTestCase {
             rssi: -60,
             lastSeenAt: Date()
         )
-        try DeviceInfoCacheStore(database: testDatabase.database).save(
-            product: makeProduct(),
-            peripheralID: device.peripheralID,
+        try FeedbackStore(database: testDatabase.database).insert(
+            category: .other,
+            message: "待发反馈",
+            contact: ""
+        )
+        try ScenarioStore(database: testDatabase.database).upsert(
+            Scenario(name: "场景", actions: [.syncNow])
+        )
+        let catalog = DeviceTypeCatalog(version: 1, generatedAt: Date(), items: [])
+        let payload = Data(#"{"version":1,"generatedAt":"2026-11-06T10:00:00Z","items":[]}"#.utf8)
+        DeviceCatalogStore(database: testDatabase.database).save(
+            catalog: catalog,
+            rawPayload: payload,
+            etag: "\"catalog-v1\"",
+            lastModified: nil,
             fetchedAt: Date()
         )
     }

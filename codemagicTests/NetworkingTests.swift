@@ -411,16 +411,6 @@ final class NetworkingTests: XCTestCase {
         XCTAssertEqual(queryValue("limit", in: stub.requestedURLs.last!), "500")
     }
 
-    func testExportLimitIsClampedTo5000() {
-        let stub = StubHTTPClient(handler: { _ in .success(Data("{}".utf8)) })
-        let client = AccountAPIClient(
-            configuration: APIConfiguration(baseURL: baseURL),
-            httpClient: stub
-        )
-        client.fetchExportPage(cursor: nil, limit: 9_999, token: "token") { _ in }
-        XCTAssertEqual(queryValue("limit", in: stub.requestedURLs.last!), "5000")
-    }
-
     func testErrorCatalogMapsResyncTimeoutAndUnauthorized() {
         let resync = AppError.api(code: "RESYNC_REQUIRED", statusCode: 410, message: "gone")
         XCTAssertTrue(resync.isResyncRequired)

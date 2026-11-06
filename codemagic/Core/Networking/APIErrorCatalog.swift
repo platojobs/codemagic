@@ -41,6 +41,15 @@ enum APIErrorCatalog {
         "NOT_IMPLEMENTED": Entry(handling: .terminal, message: L10n.t("error.notImplemented")),
         // 客户端内部状态：收到 304 却没有本地缓存，属于异常而非服务端错误。
         "CATALOG_CACHE_MISSING": Entry(handling: .terminal, message: L10n.t("catalog.cacheMissing")),
+        // 账号删除（v0.20.0，契约 0.15.0）：阻塞需先处理家庭，令牌问题需重新申请。
+        "ACCOUNT_DELETION_BLOCKED": Entry(handling: .terminal, message: L10n.t("account.delete.blocked")),
+        "DELETION_TOKEN_REQUIRED": Entry(handling: .terminal, message: L10n.t("account.delete.tokenInvalid")),
+        "DELETION_TOKEN_INVALID": Entry(handling: .terminal, message: L10n.t("account.delete.tokenInvalid")),
+        "DELETION_TOKEN_EXPIRED": Entry(handling: .terminal, message: L10n.t("account.delete.tokenExpired")),
+        // 异步导出：未就绪可重试；下载令牌无效 / 过期需重新获取链接。
+        "EXPORT_NOT_READY": Entry(handling: .retryWithBackoff, message: L10n.t("account.export.notReady")),
+        "EXPORT_DOWNLOAD_INVALID": Entry(handling: .terminal, message: L10n.t("account.export.downloadInvalid")),
+        "EXPORT_DOWNLOAD_EXPIRED": Entry(handling: .terminal, message: L10n.t("account.export.downloadExpired")),
     ]
 
     static func entry(for code: String) -> Entry {

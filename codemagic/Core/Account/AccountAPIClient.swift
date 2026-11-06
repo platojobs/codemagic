@@ -6,11 +6,46 @@ struct PairingCode: Equatable {
     let expiresAt: Date
 }
 
+/// `POST /me/deletion-request` 返回的删除二次确认令牌（10 分钟有效）。
+struct DeletionChallenge: Equatable {
+    let token: String
+    let expiresAt: Date
+
+    func isExpired(now: Date = Date()) -> Bool {
+        expiresAt <= now
+    }
+}
+
+/// `POST /me/export` 创建的异步导出任务；`ready` 时 `downloadURL` 由服务端签发一次性令牌。
+struct AccountExportTask: Equatable {
+    enum Status: String, Equatable {
+        case pending
+        case ready
+        case failed
+    }
+
+    let id: String
+    let status: Status
+    let createdAt: Date
+    let completedAt: Date?
+    let downloadURL: URL?
+    let downloadExpiresAt: Date?
+    let expiresAt: Date
+}
+
 /// 账号相关接口错误。404 统一为「码无效或已过期」，429 携带服务端 `Retry-After` 秒数。
 enum AccountAPIError: Error, Equatable {
     case invalidCode
     case unauthorized
     case rateLimited(retryAfterSeconds: Int?)
+    case deletionBlocked
+    case deletionTokenInvalid
+    case deletionTokenExpired
+    case accountDeleted
+    case exportNotFound
+    case exportNotReady
+    case downloadInvalid
+    case downloadExpired
     case failure(AppError)
     case decoding(String)
 
@@ -25,6 +60,22 @@ enum AccountAPIError: Error, Equatable {
                 return L10n.f("account.rateLimitedSeconds", String(describing: seconds))
             }
             return L10n.t("account.rateLimited")
+        case .deletionBlocked:
+            return L10n.t("account.delete.blocked")
+        case .deletionTokenInvalid:
+            return L10n.t("account.delete.tokenInvalid")
+        case .deletionTokenExpired:
+            return L10n.t("account.delete.tokenExpired")
+        case .accountDeleted:
+            return L10n.t("account.delete.alreadyDeleted")
+        case .exportNotFound:
+            return L10n.t("account.export.taskNotFound")
+        case .exportNotReady:
+            return L10n.t("account.export.notReady")
+        case .downloadInvalid:
+            return L10n.t("account.export.downloadInvalid")
+        case .downloadExpired:
+            return L10n.t("account.export.downloadExpired")
         case .failure(let error):
             return "\(error.code) \(error.message)"
         case .decoding:
@@ -43,20 +94,34 @@ enum AccountAPIError: Error, Equatable {
     }
 }
 
-/// 账号接口协议：配对码、数据导出、注销。返回分页原始 JSON，由导出服务按规范拼装。
+/// 账号接口协议：配对码、删除令牌、异步数据导出与注销。
 protocol AccountAPIServicing {
     func createPairingCode(token: String, completion: @escaping (Result<PairingCode, AccountAPIError>) -> Void)
     func claimPairingCode(_ code: String, completion: @escaping (Result<AnonymousSession, AccountAPIError>) -> Void)
-    func fetchExportPage(
-        cursor: String?,
-        limit: Int,
+    func createDeletionRequest(
         token: String,
+        completion: @escaping (Result<DeletionChallenge, AccountAPIError>) -> Void
+    )
+    func deleteAccount(
+        deletionToken: String,
+        completion: @escaping (Result<Void, AccountAPIError>) -> Void
+    )
+    func createExport(
+        token: String,
+        completion: @escaping (Result<AccountExportTask, AccountAPIError>) -> Void
+    )
+    func fetchExport(
+        id: String,
+        token: String,
+        completion: @escaping (Result<AccountExportTask, AccountAPIError>) -> Void
+    )
+    func downloadExport(
+        url: URL,
         completion: @escaping (Result<Data, AccountAPIError>) -> Void
     )
-    func deleteAccount(token: String, completion: @escaping (Result<Void, AccountAPIError>) -> Void)
 }
 
-/// `PJGoIoT/api/openapi.yaml` 0.6.0 账号端点的客户端实现。
+/// `PJGoIoT/api/openapi.yaml` 0.15.0 账号端点的客户端实现。
 final class AccountAPIClient: AccountAPIServicing {
     private let configuration: APIConfiguration
     private let httpClient: HTTPClient
@@ -160,38 +225,106 @@ final class AccountAPIClient: AccountAPIServicing {
         }
     }
 
-    // MARK: - Export / Delete
+    // MARK: - Deletion
 
-    func fetchExportPage(
-        cursor: String?,
-        limit: Int,
+    func createDeletionRequest(
         token: String,
-        completion: @escaping (Result<Data, AccountAPIError>) -> Void
+        completion: @escaping (Result<DeletionChallenge, AccountAPIError>) -> Void
     ) {
-        var components = URLComponents(
-            url: endpoint("api/v1/me/export"),
-            resolvingAgainstBaseURL: false
+        let request = HTTPRequest(
+            url: endpoint("api/v1/me/deletion-request"),
+            method: "POST",
+            headers: ["Authorization": "Bearer \(token)", "Content-Type": "application/json"],
+            body: Data("{}".utf8)
         )
-        // 服务端导出分页上限 5000；超限会被 400，客户端先收敛。
-        var queryItems = [
-            URLQueryItem(name: "limit", value: String(APILimits.clamp(limit, to: APILimits.export))),
-        ]
-        if let cursor, !cursor.isEmpty {
-            queryItems.append(URLQueryItem(name: "cursor", value: cursor))
+        httpClient.send(request) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .failure(let error):
+                self.deliver(.failure(.failure(error)), completion)
+            case .success(let response):
+                guard response.isSuccess else {
+                    self.deliver(.failure(self.accountError(response)), completion)
+                    return
+                }
+                do {
+                    let payload = try self.decoder.decode(DeletionChallengePayload.self, from: response.data)
+                    guard !payload.token.isEmpty,
+                          let expiresAt = SyncDateCodec.parse(payload.expiresAt)
+                    else {
+                        self.deliver(.failure(.decoding(L10n.t("account.delete.missingToken"))), completion)
+                        return
+                    }
+                    self.deliver(
+                        .success(DeletionChallenge(token: payload.token, expiresAt: expiresAt)),
+                        completion
+                    )
+                } catch {
+                    self.deliver(.failure(.decoding(error.localizedDescription)), completion)
+                }
+            }
         }
-        components?.queryItems = queryItems
-        guard let url = components?.url else {
-            deliver(.failure(.failure(.configuration(L10n.t("account.export.urlFailed")))), completion)
-            return
-        }
-        let request = HTTPRequest(url: url, headers: ["Authorization": "Bearer \(token)"])
-        sendData(request, completion: completion)
     }
 
-    func deleteAccount(token: String, completion: @escaping (Result<Void, AccountAPIError>) -> Void) {
+    func deleteAccount(
+        deletionToken: String,
+        completion: @escaping (Result<Void, AccountAPIError>) -> Void
+    ) {
+        // `DELETE /me` 只用二次确认令牌鉴权，刻意不带 Bearer。
         let request = HTTPRequest(
             url: endpoint("api/v1/me"),
             method: "DELETE",
+            headers: ["X-Deletion-Token": deletionToken]
+        )
+        httpClient.send(request) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .failure(let error):
+                self.deliver(.failure(.failure(error)), completion)
+            case .success(let response):
+                if response.isSuccess {
+                    self.deliver(.success(()), completion)
+                    return
+                }
+                self.deliver(.failure(Self.deletionError(response, decoder: self.decoder)), completion)
+            }
+        }
+    }
+
+    // MARK: - Async export
+
+    func createExport(
+        token: String,
+        completion: @escaping (Result<AccountExportTask, AccountAPIError>) -> Void
+    ) {
+        let request = HTTPRequest(
+            url: endpoint("api/v1/me/export"),
+            method: "POST",
+            headers: ["Authorization": "Bearer \(token)", "Content-Type": "application/json"],
+            body: Data("{}".utf8)
+        )
+        httpClient.send(request) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .failure(let error):
+                self.deliver(.failure(.failure(error)), completion)
+            case .success(let response):
+                guard response.isSuccess else {
+                    self.deliver(.failure(self.accountError(response)), completion)
+                    return
+                }
+                self.decodeTask(response.data, completion: completion)
+            }
+        }
+    }
+
+    func fetchExport(
+        id: String,
+        token: String,
+        completion: @escaping (Result<AccountExportTask, AccountAPIError>) -> Void
+    ) {
+        let request = HTTPRequest(
+            url: endpoint("api/v1/me/export/\(id)"),
             headers: ["Authorization": "Bearer \(token)"]
         )
         httpClient.send(request) { [weak self] result in
@@ -200,33 +333,92 @@ final class AccountAPIClient: AccountAPIServicing {
             case .failure(let error):
                 self.deliver(.failure(.failure(error)), completion)
             case .success(let response):
-                guard response.isSuccess else {
-                    self.deliver(.failure(self.accountError(response)), completion)
-                    return
+                switch response.statusCode {
+                case 404:
+                    self.deliver(.failure(.exportNotFound), completion)
+                case 409:
+                    self.deliver(.failure(.exportNotReady), completion)
+                default:
+                    guard response.isSuccess else {
+                        self.deliver(.failure(self.accountError(response)), completion)
+                        return
+                    }
+                    self.decodeTask(response.data, completion: completion)
                 }
-                self.deliver(.success(()), completion)
             }
         }
     }
 
-    // MARK: - Private
-
-    private func sendData(
-        _ request: HTTPRequest,
+    func downloadExport(
+        url: URL,
         completion: @escaping (Result<Data, AccountAPIError>) -> Void
     ) {
+        // 下载链接自带一次性 token，不再附加 Bearer。
+        let request = HTTPRequest(url: url)
         httpClient.send(request) { [weak self] result in
             guard let self else { return }
             switch result {
             case .failure(let error):
                 self.deliver(.failure(.failure(error)), completion)
             case .success(let response):
-                guard response.isSuccess else {
+                switch response.statusCode {
+                case 200..<300:
+                    self.deliver(.success(response.data), completion)
+                case 403:
+                    self.deliver(.failure(.downloadInvalid), completion)
+                case 404:
+                    self.deliver(.failure(.exportNotFound), completion)
+                case 410:
+                    self.deliver(.failure(.downloadExpired), completion)
+                default:
                     self.deliver(.failure(self.accountError(response)), completion)
+                }
+            }
+        }
+    }
+
+    // MARK: - Private
+
+    private func decodeTask(
+        _ data: Data,
+        completion: @escaping (Result<AccountExportTask, AccountAPIError>) -> Void
+    ) {
+        do {
+            let payload = try decoder.decode(ExportTaskPayload.self, from: data)
+            guard let status = AccountExportTask.Status(rawValue: payload.status),
+                  !payload.id.isEmpty,
+                  let createdAt = SyncDateCodec.parse(payload.createdAt),
+                  let expiresAt = SyncDateCodec.parse(payload.expiresAt)
+            else {
+                deliver(.failure(.decoding(L10n.t("account.responseMismatch"))), completion)
+                return
+            }
+            let downloadURL: URL?
+            if status == .ready {
+                guard let raw = payload.downloadUrl, !raw.isEmpty,
+                      let url = URL(string: raw, relativeTo: configuration.baseURL)?.absoluteURL
+                else {
+                    deliver(.failure(.decoding(L10n.t("account.export.missingDownloadUrl"))), completion)
                     return
                 }
-                self.deliver(.success(response.data), completion)
+                downloadURL = url
+            } else {
+                downloadURL = nil
             }
+            deliver(
+                .success(AccountExportTask(
+                    id: payload.id,
+                    status: status,
+                    createdAt: createdAt,
+                    completedAt: payload.completedAt.flatMap(SyncDateCodec.parse),
+                    downloadURL: downloadURL,
+                    downloadExpiresAt: payload.downloadExpiresAt.flatMap(SyncDateCodec.parse),
+                    expiresAt: expiresAt
+                )),
+                completion
+            )
+        } catch {
+            deliver(.failure(.decoding(error.localizedDescription)), completion)
         }
     }
 
@@ -255,6 +447,48 @@ final class AccountAPIClient: AccountAPIServicing {
         }
     }
 
+    private static func deletionError(_ response: HTTPResponse, decoder: JSONDecoder) -> AccountAPIError {
+        switch response.statusCode {
+        case 400:
+            return envelopeError(response, decoder: decoder, fallbackCode: "DELETION_TOKEN_REQUIRED")
+        case 401:
+            return .unauthorized
+        case 403:
+            if let envelope = try? decoder.decode(APIErrorEnvelope.self, from: response.data),
+               envelope.error.code == "DELETION_TOKEN_INVALID" {
+                return .deletionTokenInvalid
+            }
+            return envelopeError(response, decoder: decoder, fallbackCode: "DELETION_TOKEN_INVALID")
+        case 404:
+            return .accountDeleted
+        case 409:
+            return .deletionBlocked
+        case 410:
+            return .deletionTokenExpired
+        default:
+            return envelopeError(response, decoder: decoder, fallbackCode: "ACCOUNT_DELETION_FAILED")
+        }
+    }
+
+    private static func envelopeError(
+        _ response: HTTPResponse,
+        decoder: JSONDecoder,
+        fallbackCode: String
+    ) -> AccountAPIError {
+        if let envelope = try? decoder.decode(APIErrorEnvelope.self, from: response.data) {
+            return .failure(.api(
+                code: envelope.error.code,
+                statusCode: response.statusCode,
+                message: envelope.error.message
+            ))
+        }
+        return .failure(.api(
+            code: fallbackCode,
+            statusCode: response.statusCode,
+            message: L10n.f("error.httpStatus", String(describing: response.statusCode))
+        ))
+    }
+
     private static func retryAfterSeconds(_ response: HTTPResponse) -> Int? {
         guard let raw = response.header("Retry-After")?.trimmingCharacters(in: .whitespacesAndNewlines),
               let seconds = Int(raw)
@@ -281,6 +515,21 @@ final class AccountAPIClient: AccountAPIServicing {
         let expiresAt: String?
     }
 
+    private struct DeletionChallengePayload: Decodable {
+        let token: String
+        let expiresAt: String
+    }
+
+    private struct ExportTaskPayload: Decodable {
+        let id: String
+        let status: String
+        let createdAt: String
+        let completedAt: String?
+        let downloadUrl: String?
+        let downloadExpiresAt: String?
+        let expiresAt: String
+    }
+
     private struct APIErrorEnvelope: Decodable {
         let error: Body
 
@@ -303,16 +552,39 @@ final class UnavailableAccountAPI: AccountAPIServicing {
         completion(.failure(error))
     }
 
-    func fetchExportPage(
-        cursor: String?,
-        limit: Int,
+    func createDeletionRequest(
         token: String,
-        completion: @escaping (Result<Data, AccountAPIError>) -> Void
+        completion: @escaping (Result<DeletionChallenge, AccountAPIError>) -> Void
     ) {
         completion(.failure(error))
     }
 
-    func deleteAccount(token: String, completion: @escaping (Result<Void, AccountAPIError>) -> Void) {
+    func deleteAccount(
+        deletionToken: String,
+        completion: @escaping (Result<Void, AccountAPIError>) -> Void
+    ) {
+        completion(.failure(error))
+    }
+
+    func createExport(
+        token: String,
+        completion: @escaping (Result<AccountExportTask, AccountAPIError>) -> Void
+    ) {
+        completion(.failure(error))
+    }
+
+    func fetchExport(
+        id: String,
+        token: String,
+        completion: @escaping (Result<AccountExportTask, AccountAPIError>) -> Void
+    ) {
+        completion(.failure(error))
+    }
+
+    func downloadExport(
+        url: URL,
+        completion: @escaping (Result<Data, AccountAPIError>) -> Void
+    ) {
         completion(.failure(error))
     }
 }
