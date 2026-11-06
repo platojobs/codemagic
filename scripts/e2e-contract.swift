@@ -2148,7 +2148,7 @@ private func run() -> Int32 {
         "diagnostics": "e2e diagnostics",
         "context": [
             "platform": "ios",
-            "appVersion": "0.21.0",
+            "appVersion": "0.22.0",
             "buildType": "debug",
             "osVersion": "15.5",
             "deviceModel": "iPhone15,3",
@@ -2412,6 +2412,72 @@ private func run() -> Int32 {
         !text(sceneDeleteChange?["payload"] as? [String: Any] ?? [:], "deletedAt").isEmpty,
         "场景 tombstone 携带 deletedAt"
     )
+
+    // MARK: 会话生命周期（v0.22.0 / 契约 0.17.0）
+
+    if let sessionAccount = anonymousAccount("session-lifecycle") {
+        let sessionsResponse = client.request("GET", "sessions", token: sessionAccount.token)
+        let sessionItems = list(jsonObject(sessionsResponse.body)?["sessions"])
+        report.check(sessionsResponse.status == 200, "GET /sessions 返回 200", "status=\(sessionsResponse.status)")
+        report.check(
+            sessionItems.contains { ($0["current"] as? Bool) == true },
+            "GET /sessions 标出当前会话"
+        )
+
+        let refresh = client.request("POST", "auth/refresh", token: sessionAccount.token)
+        let refreshedObject = jsonObject(refresh.body) ?? [:]
+        let refreshedToken = text(refreshedObject, "token")
+        report.check(refresh.status == 200, "POST /auth/refresh 返回 200", "status=\(refresh.status)")
+        report.check(!refreshedToken.isEmpty, "刷新返回新 token")
+        report.check(
+            refreshedToken != sessionAccount.token,
+            "滚动刷新后 token 已更换"
+        )
+
+        let stale = client.request("GET", "sessions", token: sessionAccount.token)
+        report.check(stale.status == 401, "旧 token 立刻失效", "status=\(stale.status)")
+
+        let current = client.request("GET", "sessions", token: refreshedToken)
+        report.check(current.status == 200, "新 token 可访问 /sessions", "status=\(current.status)")
+
+        let missing = client.request("DELETE", "sessions/00000000-0000-0000-0000-000000000000", token: refreshedToken)
+        report.check(missing.status == 404, "吊销不存在会话返回 404", "status=\(missing.status)")
+
+        let logout = client.request("POST", "auth/logout", token: refreshedToken)
+        report.check(logout.status == 204, "POST /auth/logout 返回 204", "status=\(logout.status)")
+        let afterLogout = client.request("GET", "sessions", token: refreshedToken)
+        report.check(afterLogout.status == 401, "退出后 token 失效", "status=\(afterLogout.status)")
+    }
+
+    // MARK: 反馈详情与关闭（v0.22.0）
+
+    if !feedbackID.isEmpty {
+        let detail = client.request("GET", "feedback/\(feedbackID)", token: feedbackTokenA)
+        let detailObject = jsonObject(detail.body) ?? [:]
+        report.check(detail.status == 200, "GET /feedback/{id} 返回 200", "status=\(detail.status)")
+        report.check(
+            !text(detailObject, "statusMessage").isEmpty,
+            "反馈详情包含 statusMessage"
+        )
+
+        let close = client.request(
+            "PATCH",
+            "feedback/\(feedbackID)",
+            token: feedbackTokenA,
+            json: ["status": "closed"]
+        )
+        let closeObject = jsonObject(close.body) ?? [:]
+        report.check(close.status == 200, "PATCH /feedback/{id} 关闭返回 200", "status=\(close.status)")
+        report.check(text(closeObject, "status") == "closed", "关闭后状态为 closed")
+
+        let closeAgain = client.request(
+            "PATCH",
+            "feedback/\(feedbackID)",
+            token: feedbackTokenA,
+            json: ["status": "closed"]
+        )
+        report.check(closeAgain.status == 409, "已关闭再改返回 409", "status=\(closeAgain.status)")
+    }
 
     // MARK: 汇总
 

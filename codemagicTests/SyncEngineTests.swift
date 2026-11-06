@@ -1056,12 +1056,11 @@ final class SyncAPIClientTests: XCTestCase {
         guard case .failure(let error) = result else {
             return XCTFail("应失败")
         }
-        guard case .api(let code, let statusCode, let message) = error else {
-            return XCTFail("应映射为 api 错误")
+        guard case .rateLimited(let retryAfter) = error else {
+            return XCTFail("429 应映射为 rateLimited，而不是通用 api 错误")
         }
-        XCTAssertEqual(code, "RATE_LIMITED")
-        XCTAssertEqual(statusCode, 429)
-        XCTAssertEqual(message, "too many requests")
+        XCTAssertEqual(retryAfter, 30)
+        XCTAssertTrue(error.isRetryable)
         XCTAssertEqual(error.code, "NET-002")
     }
 

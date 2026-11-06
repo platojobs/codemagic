@@ -29,6 +29,9 @@ final class AppEnvironment {
     let tokenStore: TokenStoring
     let syncEngine: SyncEngine
     let accountAPI: AccountAPIServicing
+    /// 会话生命周期（刷新 / 退出 / 会话列表 / 吊销）。
+    let authAPI: AuthServicing
+    let sessionManager: SessionManager
     let pairingService: PairingServicing
     let accountExportService: AccountExportService
     let accountDeletionService: AccountDeletionService
@@ -87,33 +90,51 @@ final class AppEnvironment {
 
         if let configuration = try? APIConfiguration.fromBundle() {
             apiConfiguration = configuration
+            let baseHTTP = URLSessionHTTPClient()
             let sessionTokenStore = KeychainTokenStore()
             tokenStore = sessionTokenStore
+            let metadata = SyncMetadataStore()
+            syncMetadataStore = metadata
+            let authClient = AuthAPIClient(configuration: configuration, httpClient: baseHTTP)
+            authAPI = authClient
+            let refreshCoordinator = TokenRefreshCoordinator(
+                api: authClient,
+                tokenStore: sessionTokenStore,
+                metadataStore: metadata
+            )
+            // 所有带 Bearer 的请求共用同一个装饰器：401 → 单飞刷新 → 重放。
+            let authenticatedHTTP = AuthenticatedHTTPClient(
+                base: baseHTTP,
+                refreshCoordinator: refreshCoordinator
+            )
             feedbackCoordinator = FeedbackCoordinator(
                 store: feedbackStore,
                 client: FeedbackAPIClient(
                     configuration: configuration,
-                    httpClient: URLSessionHTTPClient(),
+                    httpClient: authenticatedHTTP,
                     tokenStore: sessionTokenStore
                 )
             )
             let catalogService = DeviceCatalogClient(
                 configuration: configuration,
-                httpClient: URLSessionHTTPClient(),
+                httpClient: authenticatedHTTP,
                 cache: DeviceCatalogStore(database: resolved.database)
             )
             deviceCatalogService = catalogService
             productService = ProductAPIClient(
                 configuration: configuration,
+                httpClient: authenticatedHTTP,
                 tokenStore: sessionTokenStore,
                 catalogService: catalogService
             )
             readingsStore = ReadingsStore(database: resolved.database)
-            readingsService = ReadingsAPIClient(configuration: configuration, tokenStore: sessionTokenStore)
-            accountAPI = AccountAPIClient(configuration: configuration)
-            let metadata = SyncMetadataStore()
-            syncMetadataStore = metadata
-            let householdClient = HouseholdAPIClient(configuration: configuration)
+            readingsService = ReadingsAPIClient(
+                configuration: configuration,
+                httpClient: authenticatedHTTP,
+                tokenStore: sessionTokenStore
+            )
+            accountAPI = AccountAPIClient(configuration: configuration, httpClient: authenticatedHTTP)
+            let householdClient = HouseholdAPIClient(configuration: configuration, httpClient: authenticatedHTTP)
             householdAPI = householdClient
             let coordinator = HouseholdService(
                 api: householdClient,
@@ -127,13 +148,13 @@ final class AppEnvironment {
             )
             householdService = coordinator
             let sceneSync = SceneSyncService(
-                api: SceneAPIClient(configuration: configuration),
+                api: SceneAPIClient(configuration: configuration, httpClient: authenticatedHTTP),
                 store: sceneStore,
                 logStore: scanLogStore
             )
             sceneSyncService = sceneSync
             syncEngine = SyncEngine(
-                api: SyncAPIClient(configuration: configuration),
+                api: SyncAPIClient(configuration: configuration, httpClient: authenticatedHTTP),
                 tokenStore: sessionTokenStore,
                 metadataStore: metadata,
                 deviceStore: savedDeviceStore,
@@ -153,6 +174,7 @@ final class AppEnvironment {
             readingsStore = ReadingsStore(database: resolved.database)
             readingsService = UnavailableReadingsAPI()
             accountAPI = UnavailableAccountAPI()
+            authAPI = UnavailableAuthAPI()
             let metadata = SyncMetadataStore()
             syncMetadataStore = metadata
             let sessionTokenStore = KeychainTokenStore()
@@ -261,6 +283,13 @@ final class AppEnvironment {
             )
         )
 
+        sessionManager = SessionManager(
+            api: authAPI,
+            tokenStore: tokenStore,
+            metadataStore: syncMetadataStore,
+            logStore: scanLogStore
+        )
+
         LaunchMetrics.mark("environment-init")
 
         sceneSyncService.onScenesChanged = { [weak self] in
@@ -322,6 +351,27 @@ final class UnavailableFeedbackService: FeedbackServicing {
         completion: @escaping (Result<FeedbackPage, AppError>) -> Void
     ) {
         completion(.failure(.configuration(L10n.t("app.env.baseUrlMissing"))))
+    }
+
+    func fetchDetail(
+        id: String,
+        completion: @escaping (Result<FeedbackDetailItem, AppError>) -> Void
+    ) {
+        completion(.failure(.configuration(L10n.t("app.env.baseUrlMissing"))))
+    }
+
+    func close(
+        id: String,
+        completion: @escaping (Result<FeedbackDetailItem, FeedbackSendFailure>) -> Void
+    ) {
+        completion(.failure(FeedbackSendFailure(
+            message: L10n.t("app.env.baseUrlMissing"),
+            isRateLimited: false,
+            retryAfter: nil,
+            isRetryable: false,
+            isConflict: false,
+            apiCode: nil
+        )))
     }
 }
 

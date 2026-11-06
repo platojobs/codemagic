@@ -113,7 +113,8 @@ final class MainTabBarController: UITabBarController {
                     baseURLText: environment.apiConfiguration?.displayString ?? L10n.t("tab.unconfigured"),
                     startupWarning: environment.startupWarning,
                     notifications: environment.notificationService,
-                    householdService: environment.householdService
+                    householdService: environment.householdService,
+                    sessionManager: environment.sessionManager
                 ),
                 scanLogStore: environment.scanLogStore,
                 roomStore: environment.roomStore,

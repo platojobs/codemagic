@@ -20,7 +20,7 @@ enum AccountExportError: Error, Equatable, LocalizedError {
     case network(AppError)
     case api(AppError)
     case decoding(String)
-    case taskFailed
+    case taskFailed(reason: String?)
     case taskNotFound
     case timeout
     case downloadInvalid
@@ -37,7 +37,11 @@ enum AccountExportError: Error, Equatable, LocalizedError {
             return L10n.f("account.export.failed", String(describing: error.code), String(describing: error.message))
         case .decoding(let detail):
             return L10n.f("account.export.parseFailed", String(describing: detail))
-        case .taskFailed:
+        case .taskFailed(let reason):
+            // 优先展示服务端原因（例如「导出任务因服务重启中断，请重新发起导出」）。
+            if let reason = reason?.trimmingCharacters(in: .whitespacesAndNewlines), !reason.isEmpty {
+                return reason
+            }
             return L10n.t("account.export.taskFailed")
         case .taskNotFound:
             return L10n.t("account.export.taskNotFound")
@@ -130,7 +134,7 @@ final class AccountExportService {
             case .success(let task):
                 switch task.status {
                 case .failed:
-                    self.deliver(.failure(.taskFailed), completion)
+                    self.deliver(.failure(.taskFailed(reason: task.failureReason)), completion)
                 case .ready:
                     guard let url = task.downloadURL else {
                         self.deliver(.failure(.decoding(L10n.t("account.export.missingDownloadUrl"))), completion)
@@ -228,7 +232,7 @@ final class AccountExportService {
                         completion: completion
                     )
                 case .failed:
-                    self.deliver(.failure(.taskFailed), completion)
+                    self.deliver(.failure(.taskFailed(reason: task.failureReason)), completion)
                 case .ready:
                     guard let url = task.downloadURL else {
                         self.deliver(.failure(.decoding(L10n.t("account.export.missingDownloadUrl"))), completion)

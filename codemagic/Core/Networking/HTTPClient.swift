@@ -26,6 +26,14 @@ struct HTTPResponse {
     func header(_ name: String) -> String? {
         headers.first { $0.key.caseInsensitiveCompare(name) == .orderedSame }?.value
     }
+
+    /// 429 响应上的 `Retry-After`（秒）。只接受整数秒，HTTP-date 形式忽略。
+    var retryAfterSeconds: Int? {
+        guard let raw = header("Retry-After")?.trimmingCharacters(in: .whitespacesAndNewlines),
+              let seconds = Int(raw), seconds >= 0
+        else { return nil }
+        return seconds
+    }
 }
 
 /// HTTP 客户端抽象，便于单元测试注入桩实现。

@@ -441,6 +441,27 @@ private final class StubFeedbackService: FeedbackServicing {
             ? .success(FeedbackPage(items: [], nextCursor: nil, hasMore: false))
             : fetchResults.removeFirst())
     }
+
+    func fetchDetail(
+        id: String,
+        completion: @escaping (Result<FeedbackDetailItem, AppError>) -> Void
+    ) {
+        completion(.failure(.network("stub")))
+    }
+
+    func close(
+        id: String,
+        completion: @escaping (Result<FeedbackDetailItem, FeedbackSendFailure>) -> Void
+    ) {
+        completion(.failure(FeedbackSendFailure(
+            message: "stub",
+            isRateLimited: false,
+            retryAfter: nil,
+            isRetryable: false,
+            isConflict: false,
+            apiCode: nil
+        )))
+    }
 }
 
 private final class MockHTTPClient: HTTPClient {

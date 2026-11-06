@@ -9,6 +9,7 @@ final class ProfileViewController: UIViewController {
         case sync
         case accountData
         case account
+        case sessions
         case alerts
         case appearance
         case settings
@@ -143,16 +144,57 @@ final class ProfileViewController: UIViewController {
         present(alert, animated: true)
     }
 
-    /// 重新登录必须由用户确认：会换新的匿名账号，旧账号云端数据不会自动合并。
+    /// 重新登录必须由用户确认，并给出两条路径：
+    /// 用配对码**关联回原账号**（保留设备 / 家庭 / 邀请关系），或以新匿名账号继续。
     private func confirmRelogin() {
         let alert = UIAlertController(
             title: L10n.t("profile.reloginTitle"),
             message: L10n.t("profile.reloginMessage"),
             preferredStyle: .alert
         )
-        alert.addAction(UIAlertAction(title: L10n.t("common.cancel"), style: .cancel))
-        alert.addAction(UIAlertAction(title: L10n.t("profile.relogin"), style: .destructive) { [weak self] _ in
+        alert.addAction(UIAlertAction(title: L10n.t("profile.reloginWithCode"), style: .default) { [weak self] _ in
+            self?.openPairingClaim()
+        })
+        alert.addAction(UIAlertAction(title: L10n.t("profile.reloginNewAnonymous"), style: .destructive) { [weak self] _ in
             self?.viewModel.relogin()
+        })
+        alert.addAction(UIAlertAction(title: L10n.t("common.cancel"), style: .cancel))
+        present(alert, animated: true)
+    }
+
+    private func openSessions() {
+        guard let sessionViewModel = viewModel.makeSessionListViewModel() else {
+            presentMessage(title: L10n.t("session.title"), message: L10n.t("session.none"))
+            return
+        }
+        let controller = SessionListViewController(viewModel: sessionViewModel)
+        navigationController?.pushViewController(controller, animated: true)
+    }
+
+    /// 「退出当前会话」：只吊销 token、清本机凭据，本地设备与读数一条不删。
+    private func confirmLogout() {
+        let alert = UIAlertController(
+            title: L10n.t("session.logoutCurrent"),
+            message: L10n.t("session.logoutConfirm"),
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: L10n.t("common.cancel"), style: .cancel))
+        alert.addAction(UIAlertAction(title: L10n.t("session.logoutCurrent"), style: .destructive) { [weak self] _ in
+            guard let self else { return }
+            self.viewModel.logoutCurrent { result in
+                switch result {
+                case .success:
+                    self.presentMessage(
+                        title: L10n.t("session.logoutDone"),
+                        message: L10n.t("session.logoutDoneMessage")
+                    )
+                case .failure(let error):
+                    self.presentMessage(
+                        title: L10n.t("session.logoutDone"),
+                        message: L10n.f("session.logoutNetworkNote", error.message)
+                    )
+                }
+            }
         })
         present(alert, animated: true)
     }
@@ -546,6 +588,7 @@ extension ProfileViewController: UITableViewDataSource {
         case .sync: return 5 + (viewModel.needsRelogin ? 1 : 0)
         case .accountData: return 2
         case .account: return 2
+        case .sessions: return viewModel.canManageSessions ? 2 : 0
         case .alerts: return 3
         case .appearance: return 1
         case .settings: return 3
@@ -563,6 +606,7 @@ extension ProfileViewController: UITableViewDataSource {
         case .sync: return L10n.t("profile.section.sync")
         case .accountData: return L10n.t("profile.section.account")
         case .account: return L10n.t("profile.section.transfer")
+        case .sessions: return L10n.t("session.title")
         case .alerts: return L10n.t("profile.section.alerts")
         case .appearance: return L10n.t("profile.appearance")
         case .settings: return L10n.t("profile.section.settings")
@@ -582,6 +626,8 @@ extension ProfileViewController: UITableViewDataSource {
             return L10n.t("profile.footnote.accountData")
         case .account:
             return L10n.t("profile.footnote.transfer")
+        case .sessions:
+            return viewModel.canManageSessions ? L10n.t("session.logoutNote") : nil
         case .alerts:
             return viewModel.notificationGuidance
         case .appearance:
@@ -668,6 +714,16 @@ extension ProfileViewController: UITableViewDataSource {
             default:
                 return makeValueCell(title: L10n.t("transfer.claim.title"), value: L10n.t("profile.enterTransferCode"), showsDisclosure: true)
             }
+
+        case .sessions:
+            if indexPath.row == 0 {
+                return makeValueCell(
+                    title: L10n.t("session.manage"),
+                    value: viewModel.sessionSummaryText,
+                    showsDisclosure: true
+                )
+            }
+            return makeActionCell(title: L10n.t("session.logoutCurrent"), color: AppTheme.Palette.promotion)
 
         case .alerts:
             if indexPath.row == 0 {
@@ -796,6 +852,10 @@ extension ProfileViewController: UITableViewDelegate {
             openPairingCode()
         case .account where indexPath.row == 1:
             openPairingClaim()
+        case .sessions where indexPath.row == 0:
+            openSessions()
+        case .sessions where indexPath.row == 1:
+            confirmLogout()
         case .alerts where indexPath.row == 1:
             presentThrottlePicker()
         case .alerts where indexPath.row == 2 && viewModel.needsNotificationSettings:

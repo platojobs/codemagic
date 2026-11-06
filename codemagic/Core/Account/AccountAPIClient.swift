@@ -31,6 +31,8 @@ struct AccountExportTask: Equatable {
     let downloadURL: URL?
     let downloadExpiresAt: Date?
     let expiresAt: Date
+    /// 失败原因（`failed` 时服务端返回）；用于展示「因服务重启中断」等具体原因。
+    let failureReason: String?
 }
 
 /// 账号相关接口错误。404 统一为「码无效或已过期」，429 携带服务端 `Retry-After` 秒数。
@@ -413,7 +415,8 @@ final class AccountAPIClient: AccountAPIServicing {
                     completedAt: payload.completedAt.flatMap(SyncDateCodec.parse),
                     downloadURL: downloadURL,
                     downloadExpiresAt: payload.downloadExpiresAt.flatMap(SyncDateCodec.parse),
-                    expiresAt: expiresAt
+                    expiresAt: expiresAt,
+                    failureReason: payload.failureReason
                 )),
                 completion
             )
@@ -528,6 +531,7 @@ final class AccountAPIClient: AccountAPIServicing {
         let downloadUrl: String?
         let downloadExpiresAt: String?
         let expiresAt: String
+        let failureReason: String?
     }
 
     private struct APIErrorEnvelope: Decodable {

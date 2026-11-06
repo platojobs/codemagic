@@ -12,7 +12,7 @@
 
 | 项 | 结果 |
 | --- | --- |
-| 版本 | **v0.21.0**（`MARKETING_VERSION 0.21.0`，`CURRENT_PROJECT_VERSION 29`，tag `v0.21.0`：场景接入服务端，支持 `GET /scenes` 基线、`POST` / `PUT`（5 字段级 LWW）/ `DELETE` 软删与 `change_log` 的 `scene` 实体；本地 `scenarios` 迁移 **v14** 增加 `kind` / `remote_id` / `version` / 5 个字段级时间戳 / `sync_state` / `deleted_at` / `device_missing`，旧手动场景原样保留；首次接入逐条上传并写回 `remoteId`，离线编辑 pending 补传；服务端场景由本地 `RuleEngine` / `SceneScheduler` 真实执行（离线、RSSI、指标连续条数、按 IANA 时区与 `daysOfWeek` 的定时通知，含 DST）；`deviceMissing` 列表标注「设备已移除」，执行时跳过并记失败日志；契约对齐 `PJGoIoT` v0.20.0 / openapi 0.16.0） |
+| 版本 | **v0.22.0**（`MARKETING_VERSION 0.22.0`，`CURRENT_PROJECT_VERSION 30`，tag `v0.22.0`：会话生命周期接通 —— 所有带 Bearer 的请求共用 401 → **单飞 `POST /auth/refresh`** → 原子替换 Keychain token → 重放原请求；刷新返回 401 才进入「需要重新登录」并保留本地设备 / 读数 / 家庭 / 场景，网络或 5xx 失败不清会话；「我的」新增登录会话管理（`GET /sessions` 标出当前会话、`DELETE /sessions/{id}` 单独吊销、`POST /auth/logout` 退出当前会话），退出登录与删除账号明确区分；映射 6 个 `SCENE_*` 错误码；4xx 一律终态、429 单独按 `Retry-After`；导出解析 `failureReason`；反馈详情 `GET /feedback/{id}` + 本人关闭 `PATCH /feedback/{id}`（409 明确文案）；单设备详情按平台路由（Android → `GET /my/devices/{mac}`）；契约对齐 `PJGoIoT` v0.22.0 / openapi 0.17.0） |
 | 五模块（首页 / 智能 / 产品 / 市场 / 我的） | 已实现，纯代码 UIKit，真实数据路径；设备管理并入首页，规则与场景集中在「智能」 |
 | CoreBluetooth 扫描 + 连接 | 已实现（`CBCentralManager`，真实 RSSI） |
 | BLE 读数采集 | 已实现：连接后订阅心率 `0x2A37`、电量 `0x2A19`、温度 `0x2A6E`、Nordic UART TX `6E400003-…`；各特征独立解析器，失败静默丢弃并写本地日志 |
@@ -27,11 +27,11 @@
 | 同步 | **已实现**：匿名登录、增量拉取、批量推送（设备 ≤100/批 + 读数 ≤200/批、幂等键含读数）、冲突提示、tombstone、Keychain token、前后台 / BGTask 触发、断网累积补传；后台唤醒仅做受限推送（不拉增量、不建号、≥15 分钟间隔）；**410 `RESYNC_REQUIRED` 自动全量重同步（pending 不丢）**，503 `TIMEOUT` 指数退避 |
 | 自绘 RSSI + 自绘折线图 + 代码组装空状态 | 已实现（读数图表纯 `draw(_:)`，无第三方图表库） |
 | 首启引导 | **已实现**：3 步（蓝牙 / 通知 / 后台采集），仅首次或未走完时出现，可跳过；步骤与完成标记持久化到 `UserDefaults` |
-| 单元测试 | **402 个用例，0 失败**（`** TEST SUCCEEDED **`，2026-11-06，Xcode 27.2 / iPhone 18 Pro · iOS 27.2 模拟器；新增 38 个：首次全量上传与写回 `remoteId`、孤儿内容签名认领、字段级 LWW（两端改不同字段都保留）、离线 pending 补传、软删同步与 `change_log` tombstone、基线缺失、`deviceMissing` 跳过 + 失败日志、RSSI / 指标连续条数 / 冷却、定时下一次触发含跨 DST、占位符渲染、SQLite v14 迁移与旧数据保留；既有 364 个用例全部保持） |
+| 单元测试 | **415 个用例，0 失败**（`** TEST SUCCEEDED **`，2026-11-06，Xcode 27.2 / iPhone 18 Pro · iOS 27.2 模拟器；新增 13 个：401 → 刷新成功 → 原请求重放、刷新失败进重新登录态且本地设备 / 读数数量不变、5 个并发 401 只发起 1 次刷新、刷新网络失败保留会话、旧 token 直接重放、退出会话保留本地数据、6 个 `SCENE_*` 映射、4xx 终态 / 5xx 与网络可重试 / 429 `Retry-After`、`GET /scenes` 的 `items` 包装解码、导出 `failureReason`、反馈详情与 409 关闭冲突、Android 设备走 `{mac}` 端点；既有 402 个用例全部保持） |
 | 模拟器构建 | **通过**（`xcodebuild ... build`，`** BUILD SUCCEEDED **`） |
 | CI | **GitHub Actions 已实际运行 success**：v0.21.0 tag run [42190873586](https://github.com/platojobs/codemagic/actions/runs/42190873586)（success，提交 `66e3e55`），并行 `Build & Test`（**402 单测**）与 `E2E contract`（**414 项，0 SKIP**，PJGoIoT 固定在 v0.20.0）；同 sha 的 `main` run [42190693581](https://github.com/platojobs/codemagic/actions/runs/42190693581) 被 tag 并发规则取消；证据回填后的 `main` run [42193176880](https://github.com/platojobs/codemagic/actions/runs/42193176880) success（提交 `9086554`）；v0.20.0 tag run [42179059627](https://github.com/platojobs/codemagic/actions/runs/42179059627)（364 单测 / 367 项 E2E）与证据回填后的 `main` run [42179940342](https://github.com/platojobs/codemagic/actions/runs/42179940342) 为上一基线；`codemagic.yaml` 作为可选替代保留但未验证 |
 | 真机 BLE / 签名 | **未验证**：本机无真机与 Apple 开发者账号；读数采集与图表需真机 / 可穿戴设备验证（见第 9 节） |
-| 真实后端同步 | **契约已联调**：`scripts/e2e-contract.sh` 对**干净 worktree 的 `PJGoIoT` v0.20.0**（`/tmp/pjgoiot-v020`，`STORE=fixture`）跑 **414 项断言，全部 PASS**（新增场景链路：`POST /scenes` 201、`GET /scenes` 列表、字段级 LWW `PUT`（旧补丁不应用、新补丁推进版本）、跨用户 404、缺失 `rssiThreshold` / 重复动作 400、设备删除后 `deviceMissing=true`、`DELETE /scenes/{id}` 204 与软删后 GET/PUT 404、`change_log` 的 `scene` upsert + delete tombstone 含 `deletedAt`）；`scripts/e2e-postgres.sh` 在同一套契约外，另在**真实 Postgres** 直接查库；输出见 [docs/e2e-postgres.md](docs/e2e-postgres.md)；通知权限、后台触发与真机 DST 仍需真机手动验证 |
+| 真实后端同步 | **契约已联调**：`scripts/e2e-contract.sh` 对**干净 worktree 的 `PJGoIoT` v0.22.0**（`/tmp/pjgoiot-v022`，`STORE=fixture`）跑 **430 项断言，全部 PASS**（v0.22.0 新增：`GET /sessions` 200 且标出 `current`、`POST /auth/refresh` 200 返回新 token、旧 token 立即 401、新 token 可访问、吊销不存在会话 404、`POST /auth/logout` 204 后 token 失效；`GET /feedback/{id}` 200 含 `statusMessage`、`PATCH /feedback/{id}` 200 关闭、再次 PATCH 409；`GET /my/devices/{mac}` 既有断言继续通过）；`scripts/e2e-postgres.sh` 在同一套契约外，另在**真实 Postgres** 直接查库；输出见 [docs/e2e-postgres.md](docs/e2e-postgres.md)；通知权限、后台触发与真机 DST 仍需真机手动验证 |
 | 上架材料 | **已补齐**：`docs/store-listing.md`、`docs/privacy-policy.md`、`docs/app-privacy.md` 与 `codemagic/Resources/PrivacyInfo.xcprivacy`（未使用能力不声明） |
 
 ---

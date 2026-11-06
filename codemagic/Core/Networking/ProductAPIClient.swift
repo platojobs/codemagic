@@ -18,6 +18,12 @@ protocol ProductServicing {
         peripheralID: UUID,
         completion: @escaping (Result<ProductModel, AppError>) -> Void
     )
+    /// 按设备平台选择单设备详情端点：Android 记录没有 iOS 外设标识，按 MAC 查询；
+    /// iOS 记录走 `ios/{externalId}`。默认实现退化为按 peripheralID 查询。
+    func fetchDeviceInfo(
+        device: SavedDevice,
+        completion: @escaping (Result<ProductModel, AppError>) -> Void
+    )
     /// 一次取回型号与市场条目；真实客户端保证只遍历一遍目录。
     func fetchCatalogSnapshot(
         completion: @escaping (Result<ProductCatalogSnapshot, AppError>) -> Void
@@ -28,6 +34,13 @@ protocol ProductServicing {
 
 extension ProductServicing {
     func cachedCatalogSnapshot() -> ProductCatalogSnapshot? { nil }
+
+    func fetchDeviceInfo(
+        device: SavedDevice,
+        completion: @escaping (Result<ProductModel, AppError>) -> Void
+    ) {
+        fetchDeviceInfo(peripheralID: device.peripheralID, completion: completion)
+    }
 
     /// 默认实现分两次取；真实客户端覆盖为单次遍历。
     /// 型号是兼容性查询的核心，型号失败才整体失败；配件/固件失败只降级为错误提示。
@@ -156,13 +169,41 @@ final class ProductAPIClient: ProductServicing {
         peripheralID: UUID,
         completion: @escaping (Result<ProductModel, AppError>) -> Void
     ) {
+        fetchDeviceInfo(
+            path: "api/v1/my/devices/ios/\(peripheralID.uuidString.uppercased())",
+            completion: completion
+        )
+    }
+
+    /// 单设备详情：Android 记录按契约用 `GET /my/devices/{mac}`（同用户同 MAC 取 updatedAt 最新一条）；
+    /// iOS 记录仍走平台 + externalId，避免退化成扫描全量列表。
+    func fetchDeviceInfo(
+        device: SavedDevice,
+        completion: @escaping (Result<ProductModel, AppError>) -> Void
+    ) {
+        let platform = device.platform.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if platform == "android", !device.externalID.isEmpty {
+            fetchDeviceInfo(path: "api/v1/my/devices/\(device.externalID)", completion: completion)
+        } else {
+            fetchDeviceInfo(
+                path: "api/v1/my/devices/ios/\(device.peripheralID.uuidString.uppercased())",
+                completion: completion
+            )
+        }
+    }
+
+    private func fetchDeviceInfo(
+        path: String,
+        completion: @escaping (Result<ProductModel, AppError>) -> Void
+    ) {
         guard let session = tokenStore?.load(), !session.token.isEmpty else {
             completion(.failure(.sync(L10n.t("product.noSession"))))
             return
         }
-        let externalID = peripheralID.uuidString.uppercased()
-        let url = endpoint("api/v1/my/devices/ios/\(externalID)")
-        let request = HTTPRequest(url: url, headers: ["Authorization": "Bearer \(session.token)"])
+        let request = HTTPRequest(
+            url: endpoint(path),
+            headers: ["Authorization": "Bearer \(session.token)"]
+        )
 
         send(request, as: UserDeviceInfo.self) { result in
             switch result {

@@ -8,6 +8,8 @@ enum AppError: Error, Equatable {
     case server(statusCode: Int)
     /// 服务端返回了结构化错误体 `{"error":{"code","message"}}`。
     case api(code: String, statusCode: Int, message: String)
+    /// 429 限流：按 `Retry-After` 秒数退避，不与其他 4xx 混为「请求内容有错」。
+    case rateLimited(retryAfterSeconds: Int?)
     /// 同步流程本身的前置条件不满足（如上一次同步尚未结束）。
     case sync(String)
     /// 响应无法解析为约定结构。
@@ -24,6 +26,7 @@ enum AppError: Error, Equatable {
         case .network: return "NET-001"
         case .server: return "NET-002"
         case .api: return "NET-002"
+        case .rateLimited: return "NET-002"
         case .decoding: return "NET-003"
         case .configuration: return "NET-004"
         case .database: return "DB-001"
@@ -41,6 +44,11 @@ enum AppError: Error, Equatable {
         case .api(let code, let statusCode, _):
             let entry = APIErrorCatalog.entry(for: code)
             return L10n.f("error.httpDetail", entry.message, String(statusCode), code)
+        case .rateLimited(let seconds):
+            if let seconds {
+                return L10n.f("error.rateLimitedSeconds", String(describing: seconds))
+            }
+            return L10n.t("error.rateLimited")
         case .sync(let detail):
             return detail
         case .decoding:
@@ -99,20 +107,30 @@ enum AppError: Error, Equatable {
         }
     }
 
-    /// 是否值得自动重试（网络抖动、5xx、限流）。410 属终态分支，不在此列。
+    /// 是否值得自动重试：网络抖动与 5xx 可重试；**所有 4xx 都是终态**，
+    /// 只有用户修改内容后才应重新提交。429 单独走 `retryAfterSeconds`。
     var isRetryable: Bool {
         switch self {
         case .network:
             return true
+        case .rateLimited:
+            return true
         case .server(let statusCode):
             return statusCode >= 500 && statusCode != 501
-        case .api(let code, let statusCode, _):
-            if statusCode == 410 { return false }
-            return APIErrorCatalog.entry(for: code).handling == .retryWithBackoff
+        case .api(_, let statusCode, _):
+            // 410 已由 isResyncRequired 单独处理；401 走重新登录；其余 4xx 终态。
+            return statusCode >= 500 && statusCode != 501
         default:
             return false
         }
     }
+
+    /// 429 的退避秒数；其他错误为 nil。
+    var retryAfterSeconds: Int? {
+        if case .rateLimited(let seconds) = self { return seconds }
+        return nil
+    }
+
 
     private static func serverMessage(statusCode: Int) -> String {
         switch statusCode {
@@ -122,6 +140,8 @@ enum AppError: Error, Equatable {
             return L10n.t("error.resyncRequired")
         case 503:
             return L10n.t("error.timeout")
+        case 429:
+            return L10n.t("error.rateLimited")
         default:
             return L10n.f("error.httpStatus", String(describing: statusCode))
         }

@@ -23,6 +23,7 @@ final class ProfileViewModel {
     private let accountExportService: AccountExportService
     private let accountDeletionService: AccountDeletionService
     private let householdService: HouseholdService?
+    private let sessionManager: SessionManager?
 
     init(
         bluetooth: BluetoothServicing,
@@ -35,7 +36,8 @@ final class ProfileViewModel {
         baseURLText: String,
         startupWarning: String?,
         notifications: LocalNotificationServing = UserNotificationService.shared,
-        householdService: HouseholdService? = nil
+        householdService: HouseholdService? = nil,
+        sessionManager: SessionManager? = nil
     ) {
         self.bluetooth = bluetooth
         self.scanLogStore = scanLogStore
@@ -46,6 +48,7 @@ final class ProfileViewModel {
         self.accountDeletionService = accountDeletionService
         self.notifications = notifications
         self.householdService = householdService
+        self.sessionManager = sessionManager
         self.baseURLText = baseURLText
         self.startupWarning = startupWarning
     }
@@ -252,6 +255,40 @@ final class ProfileViewModel {
 
     func makePairingClaimViewModel() -> PairingClaimViewModel {
         PairingClaimViewModel(service: pairingService)
+    }
+
+    // MARK: - Sessions
+
+    /// 「我的」页会话区是否可用：已持有 token 才谈得上管理会话。
+    var canManageSessions: Bool {
+        guard let sessionManager else { return false }
+        return sessionManager.hasSession
+    }
+
+    var sessionSummaryText: String {
+        canManageSessions ? L10n.t("session.manageSummary") : L10n.t("session.none")
+    }
+
+    func makeSessionListViewModel() -> SessionListViewModel? {
+        guard let sessionManager, sessionManager.hasSession else { return nil }
+        return SessionListViewModel(manager: sessionManager)
+    }
+
+    /// 退出当前会话：只清本机凭据，不删除本地设备 / 读数。
+    func logoutCurrent(completion: @escaping (Result<Void, AppError>) -> Void) {
+        guard let sessionManager else {
+            completion(.failure(.configuration(L10n.t("session.unavailable"))))
+            return
+        }
+        sessionManager.onChange = { [weak self] in
+            self?.syncEngine.refreshStatus()
+            self?.refresh()
+        }
+        sessionManager.logoutCurrent { [weak self] result in
+            self?.syncEngine.refreshStatus()
+            self?.refresh()
+            completion(result)
+        }
     }
 
     // MARK: - Household

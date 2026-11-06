@@ -1099,3 +1099,52 @@
 "scene.editor.info" = "信息";
 "scene.editor.warn" = "警告";
 
+// MARK: - 会话生命周期（v0.22.0）
+"error.rateLimitedSeconds" = "请求过于频繁，请在 %@ 秒后重试";
+"session.title" = "登录会话";
+"session.manage" = "管理登录会话";
+"session.manageSummary" = "查看并吊销其他会话";
+"session.none" = "当前没有可用会话，请重新登录后同步";
+"session.unavailable" = "当前构建不支持会话管理";
+"session.current" = "当前会话";
+"session.other" = "会话 %@";
+"session.meta" = "登录于 %@ · 到期 %@";
+"session.currentAccessibility" = "当前登录会话";
+"session.otherAccessibility" = "登录会话 %@";
+"session.revoke" = "吊销";
+"session.revokeAccessibility" = "吊销该会话";
+"session.revokeFailed" = "吊销会话失败";
+"session.revokeCurrentHint" = "当前会话请回到「我的」页使用「退出当前会话」。";
+"session.footnote" = "吊销后该设备会退出登录；本机本地数据不受影响。";
+"session.empty" = "没有其他会话。";
+"session.logoutCurrent" = "退出当前会话";
+"session.logoutConfirm" = "只会吊销本机的登录令牌，本地设备与读数都会保留；之后可用配对码关联回原账号。";
+"session.logoutNote" = "退出登录只清空本机令牌，不删除本地设备、读数、家庭与场景，与「删除账号」不同。";
+"session.logoutDone" = "已退出登录";
+"session.logoutDoneMessage" = "本机已退出登录，本地数据完整保留；可用配对码关联回原账号。";
+"session.logoutNetworkNote" = "已在本地退出登录，但暂时连不上服务端（%@）；该会话会在下次成功请求时吊销。";
+"session.revokedLog" = "已吊销其他登录会话。";
+"session.logoutLog" = "已退出当前会话。";
+"session.logoutLocalOnlyLog" = "本地已退出；服务端退出失败：%@";
+
+// MARK: - 场景错误码（v0.22.0）
+"scene.error.nameInvalid" = "场景名称不合法，请缩短后重试";
+"scene.error.triggerInvalid" = "场景条件不合法，请检查设备、时间与取值范围";
+"scene.error.cooldownOutOfRange" = "冷却时间超出允许范围，请重新选择";
+"scene.error.actionInvalid" = "场景动作不合法，请检查动作类型与内容";
+"scene.error.deviceNotFound" = "该场景使用的设备已不存在";
+"scene.error.metricNotSupported" = "该设备类型未声明此指标";
+
+// MARK: - 反馈详情（v0.22.0）
+"feedback.detail.title" = "反馈详情";
+"feedback.detail.close" = "关闭我的反馈";
+"feedback.detail.closed" = "已关闭";
+"feedback.detail.time" = "提交于 %@ · 更新于 %@";
+"feedback.detail.loadFailed" = "加载反馈详情失败";
+"feedback.detail.retryHint" = "请下拉刷新或重新进入";
+"feedback.close.alreadyClosed" = "该反馈已关闭，不能再次修改";
+
+// MARK: - 重新登录路径（v0.22.0）
+"profile.reloginWithCode" = "用配对码恢复原账号";
+"profile.reloginNewAnonymous" = "以新匿名账号继续";
+

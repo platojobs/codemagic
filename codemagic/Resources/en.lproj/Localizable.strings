@@ -1099,3 +1099,52 @@
 "scene.editor.info" = "Info";
 "scene.editor.warn" = "Warning";
 
+// MARK: - Session lifecycle (v0.22.0)
+"error.rateLimitedSeconds" = "Too many requests. Retry after %@ seconds.";
+"session.title" = "Sign-in sessions";
+"session.manage" = "Manage sign-in sessions";
+"session.manageSummary" = "View and revoke other sessions";
+"session.none" = "No active session. Sign in again to sync.";
+"session.unavailable" = "Session management is unavailable on this build.";
+"session.current" = "This session";
+"session.other" = "Session %@";
+"session.meta" = "Signed in %@ · expires %@";
+"session.currentAccessibility" = "Current sign-in session";
+"session.otherAccessibility" = "Sign-in session %@";
+"session.revoke" = "Revoke";
+"session.revokeAccessibility" = "Revoke this session";
+"session.revokeFailed" = "Could not revoke the session";
+"session.revokeCurrentHint" = "Use \"Sign out of this session\" in the Me tab to sign out here.";
+"session.footnote" = "Revoking a session signs that device out. Local data on this device is kept.";
+"session.empty" = "No other sessions.";
+"session.logoutCurrent" = "Sign out of this session";
+"session.logoutConfirm" = "This revokes the token for this device only. Local devices and readings are kept. You can restore the original account later with a pairing code.";
+"session.logoutNote" = "Signing out only clears the token on this device; it does not delete local devices, readings, households or scenes, and is different from \"Delete account\".";
+"session.logoutDone" = "Signed out";
+"session.logoutDoneMessage" = "This device is signed out. Local data is intact; use a pairing code to reconnect the original account.";
+"session.logoutNetworkNote" = "Signed out locally. The server could not be reached (%@); the session will be revoked on the next successful request.";
+"session.revokedLog" = "Revoked another sign-in session.";
+"session.logoutLog" = "Signed out of the current session.";
+"session.logoutLocalOnlyLog" = "Signed out locally; server logout failed: %@";
+
+// MARK: - Scene error codes (v0.22.0)
+"scene.error.nameInvalid" = "Scene name is invalid. Shorten it and try again.";
+"scene.error.triggerInvalid" = "The scene condition is invalid. Check the device, time and range.";
+"scene.error.cooldownOutOfRange" = "Cooldown is out of range. Choose a value the server accepts.";
+"scene.error.actionInvalid" = "One of the actions is invalid. Check the action type and content.";
+"scene.error.deviceNotFound" = "The device used by this scene no longer exists.";
+"scene.error.metricNotSupported" = "This device type does not expose the selected metric.";
+
+// MARK: - Feedback detail (v0.22.0)
+"feedback.detail.title" = "Feedback details";
+"feedback.detail.close" = "Close my feedback";
+"feedback.detail.closed" = "Closed";
+"feedback.detail.time" = "Submitted %@ · updated %@";
+"feedback.detail.loadFailed" = "Could not load the feedback.";
+"feedback.detail.retryHint" = "Pull to refresh or open it again.";
+"feedback.close.alreadyClosed" = "This feedback is already closed and cannot be changed again.";
+
+// MARK: - Re-login paths (v0.22.0)
+"profile.reloginWithCode" = "Restore with pairing code";
+"profile.reloginNewAnonymous" = "Continue as a new anonymous account";
+

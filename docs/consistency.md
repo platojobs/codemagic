@@ -564,16 +564,24 @@ iOS 用例固化在 `codemagicTests/ReadingsGoldenTests.swift`；新增特征或
 | `TIMEOUT` | 503 | `retryWithBackoff`：指数退避，不改游标、不重登 | 服务端繁忙，稍后重试 |
 | `UNAUTHORIZED` | 401 | `reloginRequired`：等用户确认重新登录 | 登录已失效，请在「我的」页重新登录 |
 | `IDEMPOTENCY_CONFLICT` | 409 | `terminal`：不自动重试 | 同步请求与已有幂等键冲突，请稍后重试 |
-| `RATE_LIMITED` / `UNAVAILABLE` / `INTERNAL` | 429 / 503 / 500 | `retryWithBackoff` | 请求过于频繁 / 服务暂时不可用 / 服务端内部错误 |
-| 其余（`BAD_REQUEST` / `NOT_FOUND` / `CONFLICT` 等） | 4xx | `terminal` | 按表内固定文案 |
+| `RATE_LIMITED` | 429 | `rateLimited`：按 `Retry-After` 秒数退避（头优先，缺失时用响应体 `retryAfter`） | 请求过于频繁，请在 N 秒后重试 |
+| `UNAVAILABLE` / `INTERNAL` | 503 / 500 | `retryWithBackoff` | 服务暂时不可用 / 服务端内部错误 |
+| 其余（`BAD_REQUEST` / `NOT_FOUND` / `CONFLICT` / `SCENE_*` 等） | 4xx | `terminal` | 按表内固定文案 |
 
 客户端 `SyncAPIClient` 统一解析为 `AppError.api`：
 
 - 客户端错误码仍为 `NET-002`，便于两端统一统计；
 - 展示与日志中同时保留服务端 `code` 与 `HTTP status`（如 `NET-002 服务端繁忙，稍后重试（HTTP 503 / TIMEOUT）`）；
 - 同一 `Idempotency-Key` 用于不同请求体时返回 409 `IDEMPOTENCY_CONFLICT`（不是 `IDEMPOTENCY_KEY_REUSED`），客户端不自动重试；
-- **401 `UNAUTHORIZED` 语义**：token 已失效，必须由用户重新登录（重新获取匿名会话）后重试。客户端**不得在 401 时静默调用 `auth/anonymous` 新建匿名账号**，以免设备归属漂移。
-- iOS 在 401 时保留待上传记录并展示「登录已失效」：「我的」页显示状态与「重新登录」入口，用户确认后才调用 `auth/anonymous` 换新匿名账号；**不做自动重登**。确认后同步游标重置为 0，本机活动设备重新上传到新账号；旧账号云端数据不自动合并。见 `KNOWN_ISSUES.md`。
+- **401 `UNAUTHORIZED` 语义（v0.22.0 起）**：401 先交给 `AuthenticatedHTTPClient` 做**单飞刷新 + 重放**，不直接进入重新登录态：
+  - 请求携带的 token ≠ 本地当前 token（刷新刚完成）→ 直接用新 token 重放，不再发第二次刷新；
+  - token 相同 → 发起 `POST /auth/refresh`，并发的 401 全部挂同一次刷新；成功后 `SecItemUpdate` 原子替换 Keychain token，再唤醒等待方重放原请求；
+  - 刷新返回 401 → 才进入「需要重新登录」：**只清失效 token，保留本地设备 / 读数 / 家庭 / 场景**，不静默调用 `auth/anonymous`；
+  - 刷新遇到网络 / 5xx → **不清会话、不重登**，按可重试处理。
+  - 重新登录提供两种路径：用配对码**关联回原账号**（推荐），或以新匿名账号继续（旧账号云端数据不合并）。
+- **退出当前会话 ≠ 删除账号**：`POST /auth/logout` 只吊销本机 token 并清本地凭据，本地数据一条不删；之后进入「需要重新登录」。删除账号仍走两步删除令牌。
+- **4xx 一律终态**：`AppError.isRetryable` 只认网络错误与 5xx；4xx 不自动重试，等待用户修改内容后重新提交；429 是唯一例外，按 `retryAfterSeconds` 单独退避。
+- **场景错误码**：`SCENE_NAME_INVALID` / `SCENE_TRIGGER_INVALID` / `SCENE_COOLDOWN_OUT_OF_RANGE` / `SCENE_ACTION_INVALID` / `SCENE_DEVICE_NOT_FOUND` / `SCENE_METRIC_NOT_SUPPORTED` 均映射为独立可读文案且为终态。契约 0.17.0 没有单独的「场景不存在 / 版本冲突」错误码，这两类情况分别由 `NOT_FOUND` 与字段级 LWW（200 + 合并结果）表达。
 - **410 与 503 不可混用**：`AppError.isResyncRequired` 只认 410 / `RESYNC_REQUIRED`；`isServerBusy` 只认 503 / `TIMEOUT` / `UNAVAILABLE`；两者都有单测锁定。
 
 ---

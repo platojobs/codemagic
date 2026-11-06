@@ -201,7 +201,13 @@ final class SyncAPIClient: SyncAPIServicing {
     }
 
     private func mapError(_ response: HTTPResponse) -> AppError {
-        if let envelope = try? decoder.decode(APIErrorEnvelope.self, from: response.data) {
+        let envelope = try? decoder.decode(APIErrorEnvelope.self, from: response.data)
+        if response.statusCode == 429 {
+            return .rateLimited(
+                retryAfterSeconds: response.retryAfterSeconds ?? envelope?.error.retryAfter
+            )
+        }
+        if let envelope {
             return .api(
                 code: envelope.error.code,
                 statusCode: response.statusCode,
@@ -236,16 +242,19 @@ final class SyncAPIClient: SyncAPIServicing {
         struct Body: Decodable {
             let code: String
             let message: String
+            let retryAfter: Int?
 
             private enum CodingKeys: String, CodingKey {
                 case code
                 case message
+                case retryAfter
             }
 
             init(from decoder: Decoder) throws {
                 let container = try decoder.container(keyedBy: CodingKeys.self)
                 code = (try? container.decodeIfPresent(String.self, forKey: .code)) ?? "UNKNOWN"
                 message = (try? container.decodeIfPresent(String.self, forKey: .message)) ?? ""
+                retryAfter = try? container.decodeIfPresent(Int.self, forKey: .retryAfter)
             }
         }
     }

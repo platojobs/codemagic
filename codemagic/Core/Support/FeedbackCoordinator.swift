@@ -170,6 +170,22 @@ final class FeedbackCoordinator {
         client.fetchMine(cursor: cursor, limit: limit, completion: completion)
     }
 
+    /// 单条反馈详情（含服务端状态说明）。
+    func fetchDetail(
+        id: String,
+        completion: @escaping (Result<FeedbackDetailItem, AppError>) -> Void
+    ) {
+        client.fetchDetail(id: id, completion: completion)
+    }
+
+    /// 关闭本人反馈；已关闭再改会得到 409 对应的明确文案。
+    func close(
+        id: String,
+        completion: @escaping (Result<FeedbackDetailItem, FeedbackSendFailure>) -> Void
+    ) {
+        client.close(id: id, completion: completion)
+    }
+
     // MARK: - Private
 
     private func drain(ids: [String], completion: (() -> Void)?) {

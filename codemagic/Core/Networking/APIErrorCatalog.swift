@@ -13,6 +13,8 @@ enum APIErrorCatalog {
         case reloginRequired
         /// 503 / 429 / 网络类：服务端繁忙，稍后按指数退避重试。
         case retryWithBackoff
+        /// 429：按响应头 `Retry-After` 退避（与其他 4xx 终态不同）。
+        case rateLimited
         /// 请求本身有问题（400 / 404 / 409 等），重试无意义。
         case terminal
     }
@@ -27,8 +29,8 @@ enum APIErrorCatalog {
         "TIMEOUT": Entry(handling: .retryWithBackoff, message: L10n.t("error.timeout")),
         "UNAUTHORIZED": Entry(handling: .reloginRequired, message: L10n.t("error.unauthorized")),
         "IDEMPOTENCY_CONFLICT": Entry(handling: .terminal, message: L10n.t("error.idempotencyConflict")),
-        "FEEDBACK_RATE_LIMITED": Entry(handling: .retryWithBackoff, message: L10n.t("error.feedbackRateLimited")),
-        "RATE_LIMITED": Entry(handling: .retryWithBackoff, message: L10n.t("error.rateLimited")),
+        "FEEDBACK_RATE_LIMITED": Entry(handling: .rateLimited, message: L10n.t("error.feedbackRateLimited")),
+        "RATE_LIMITED": Entry(handling: .rateLimited, message: L10n.t("error.rateLimited")),
         "UNAVAILABLE": Entry(handling: .retryWithBackoff, message: L10n.t("error.serviceUnavailable")),
         "INTERNAL": Entry(handling: .retryWithBackoff, message: L10n.t("error.serverError")),
         "BAD_REQUEST": Entry(handling: .terminal, message: L10n.t("error.badRequest")),
@@ -50,6 +52,13 @@ enum APIErrorCatalog {
         "EXPORT_NOT_READY": Entry(handling: .retryWithBackoff, message: L10n.t("account.export.notReady")),
         "EXPORT_DOWNLOAD_INVALID": Entry(handling: .terminal, message: L10n.t("account.export.downloadInvalid")),
         "EXPORT_DOWNLOAD_EXPIRED": Entry(handling: .terminal, message: L10n.t("account.export.downloadExpired")),
+        // 服务端场景（v0.22.0，契约 0.17.0）：6 个场景错误码全部终态，users 需改内容后重新提交。
+        "SCENE_NAME_INVALID": Entry(handling: .terminal, message: L10n.t("scene.error.nameInvalid")),
+        "SCENE_TRIGGER_INVALID": Entry(handling: .terminal, message: L10n.t("scene.error.triggerInvalid")),
+        "SCENE_COOLDOWN_OUT_OF_RANGE": Entry(handling: .terminal, message: L10n.t("scene.error.cooldownOutOfRange")),
+        "SCENE_ACTION_INVALID": Entry(handling: .terminal, message: L10n.t("scene.error.actionInvalid")),
+        "SCENE_DEVICE_NOT_FOUND": Entry(handling: .terminal, message: L10n.t("scene.error.deviceNotFound")),
+        "SCENE_METRIC_NOT_SUPPORTED": Entry(handling: .terminal, message: L10n.t("scene.error.metricNotSupported")),
     ]
 
     static func entry(for code: String) -> Entry {

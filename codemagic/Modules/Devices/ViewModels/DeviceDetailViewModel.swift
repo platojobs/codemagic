@@ -121,6 +121,8 @@ final class DeviceDetailViewModel {
 
         guard device.isConnectable else {
             notice = device.connectUnavailableText
+            // Android 等不可直连设备仍要展示服务端单设备详情，避免只看到本地缓存。
+            fetchInfo()
             return
         }
 
@@ -157,6 +159,8 @@ final class DeviceDetailViewModel {
         notice = nil
         guard device.isConnectable else {
             notice = device.connectUnavailableText
+            // Android 等不可直连设备仍要展示服务端单设备详情，避免只看到本地缓存。
+            fetchInfo()
             return
         }
         guard bluetooth.state == .poweredOn else {
@@ -195,7 +199,7 @@ final class DeviceDetailViewModel {
 
     private func fetchInfo() {
         state = .loadingInfo
-        productService.fetchDeviceInfo(peripheralID: device.peripheralID) { [weak self] result in
+        productService.fetchDeviceInfo(device: device) { [weak self] result in
             guard let self else { return }
             switch result {
             case .success(let product):

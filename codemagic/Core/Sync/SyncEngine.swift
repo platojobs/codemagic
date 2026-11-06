@@ -837,9 +837,10 @@ final class SyncEngine {
                 status.lastOutcomeMessage = L10n.f("sync.failureWithLocal", String(describing: prefix), String(describing: error.code), String(describing: error.message))
                 recordLog(L10n.f("sync.resyncError", String(describing: error.code), String(describing: error.message)), level: .warning)
             } else if error.isRetryable {
-                // 503 TIMEOUT / 网络 / 5xx：指数退避，绝对不是 410。
+                // 网络 / 5xx 指数退避；429 完全按服务端 `Retry-After`，绝不按 410 处理。
                 retryFailureCount += 1
-                let delay = Self.retryDelay(failureCount: retryFailureCount)
+                let delay = error.retryAfterSeconds.map(TimeInterval.init)
+                    ?? Self.retryDelay(failureCount: retryFailureCount)
                 nextAutomaticRetryAt = now().addingTimeInterval(delay)
                 let prefix = didFullResync ? L10n.t("sync.resyncThenFail") : L10n.t("sync.failedPrefix")
                 status.lastOutcomeMessage = L10n.f("sync.failureRetry", String(describing: prefix), String(describing: error.code), String(describing: error.message), String(describing: Int(delay)))

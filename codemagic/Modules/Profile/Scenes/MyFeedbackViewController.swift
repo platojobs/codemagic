@@ -145,7 +145,7 @@ extension MyFeedbackViewController: UITableViewDataSource {
         configuration.secondaryTextProperties.font = AppText.caption.font()
         configuration.secondaryTextProperties.color = Palette.textSecondary
         cell.contentConfiguration = configuration
-        cell.selectionStyle = .none
+        cell.selectionStyle = .default
         cell.backgroundColor = Palette.surface
         cell.accessibilityLabel = [
             item.body,
@@ -164,6 +164,16 @@ extension MyFeedbackViewController: UITableViewDataSource {
 }
 
 extension MyFeedbackViewController: UITableViewDelegate {
+    func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+        tableView.deselectRow(at: indexPath, animated: true)
+        guard items.indices.contains(indexPath.row) else { return }
+        let detail = FeedbackDetailViewController(
+            coordinator: coordinator,
+            feedbackID: items[indexPath.row].feedbackID
+        )
+        navigationController?.pushViewController(detail, animated: true)
+    }
+
     func tableView(_ tableView: UITableView, willDisplay cell: UITableViewCell, forRowAt indexPath: IndexPath) {
         guard hasMore, !isLoading, indexPath.row >= items.count - 2 else { return }
         reload(reset: false)

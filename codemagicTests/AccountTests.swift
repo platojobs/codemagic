@@ -91,7 +91,8 @@ final class FakeAccountAPI: AccountAPIServicing {
             completedAt: status == .pending ? nil : Date(timeIntervalSince1970: 1_010),
             downloadURL: downloadURL,
             downloadExpiresAt: downloadURL == nil ? nil : Date(timeIntervalSince1970: 2_000),
-            expiresAt: Date(timeIntervalSince1970: 100_000)
+            expiresAt: Date(timeIntervalSince1970: 100_000),
+            failureReason: nil
         )
     }
 
@@ -588,7 +589,7 @@ final class AccountTests: XCTestCase {
         let failed = expectation(description: "failed")
         let service = AccountExportService(api: api, tokenStore: tokenStore, scheduler: { _, block in block() })
         service.export(progress: { _ in }) { result in
-            XCTAssertEqual(result, .failure(.taskFailed))
+            XCTAssertEqual(result, .failure(.taskFailed(reason: nil)))
             failed.fulfill()
         }
         wait(for: [failed], timeout: 1)

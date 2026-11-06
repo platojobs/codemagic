@@ -55,6 +55,18 @@ struct FeedbackPage: Equatable {
     let hasMore: Bool
 }
 
+/// 单条反馈详情（`GET /feedback/{id}`）：比列表多 `statusMessage` 与 `updatedAt`。
+struct FeedbackDetailItem: Equatable {
+    let feedbackID: String
+    let kind: FeedbackCategory
+    let body: String
+    let status: FeedbackRemoteStatus
+    /// 服务端给用户看的中文状态说明，原样展示。
+    let statusMessage: String
+    let createdAt: Date?
+    let updatedAt: Date?
+}
+
 struct FeedbackReceipt: Equatable {
     let feedbackID: String
     let createdAt: Date?
@@ -83,6 +95,18 @@ protocol FeedbackServicing {
         cursor: String?,
         limit: Int,
         completion: @escaping (Result<FeedbackPage, AppError>) -> Void
+    )
+
+    /// `GET /feedback/{id}`：本人单条详情，含服务端状态说明。
+    func fetchDetail(
+        id: String,
+        completion: @escaping (Result<FeedbackDetailItem, AppError>) -> Void
+    )
+
+    /// `PATCH /feedback/{id}`：关闭本人反馈；已关闭再改返回 409。
+    func close(
+        id: String,
+        completion: @escaping (Result<FeedbackDetailItem, FeedbackSendFailure>) -> Void
     )
 }
 
@@ -257,7 +281,132 @@ final class FeedbackAPIClient: FeedbackServicing {
         }
     }
 
+    func fetchDetail(
+        id: String,
+        completion: @escaping (Result<FeedbackDetailItem, AppError>) -> Void
+    ) {
+        guard let session = tokenStore?.load(), !session.token.isEmpty else {
+            deliver(.failure(.sync(L10n.t("feedback.error.loginRequired"))), completion)
+            return
+        }
+        let request = HTTPRequest(
+            url: configuration.baseURL.appendingPathComponent("api/v1/feedback/\(id)"),
+            headers: ["Authorization": "Bearer \(session.token)"]
+        )
+        httpClient.send(request) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .failure(let error):
+                self.deliver(.failure(error), completion)
+            case .success(let response):
+                guard response.isSuccess else {
+                    self.deliver(.failure(self.mapError(response)), completion)
+                    return
+                }
+                do {
+                    let decoded = try self.decoder.decode(FeedbackDetailPayload.self, from: response.data)
+                    self.deliver(.success(decoded.makeItem()), completion)
+                } catch {
+                    self.deliver(.failure(.decoding(error.localizedDescription)), completion)
+                }
+            }
+        }
+    }
+
+    func close(
+        id: String,
+        completion: @escaping (Result<FeedbackDetailItem, FeedbackSendFailure>) -> Void
+    ) {
+        guard let session = tokenStore?.load(), !session.token.isEmpty else {
+            deliver(.failure(FeedbackSendFailure(
+                message: L10n.t("feedback.error.loginRequired"),
+                isRateLimited: false,
+                retryAfter: nil,
+                isRetryable: false,
+                isConflict: false,
+                apiCode: nil
+            )), completion)
+            return
+        }
+        let body = Data(#"{"status":"closed"}"#.utf8)
+        let request = HTTPRequest(
+            url: configuration.baseURL.appendingPathComponent("api/v1/feedback/\(id)"),
+            method: "PATCH",
+            headers: [
+                "Authorization": "Bearer \(session.token)",
+                "Content-Type": "application/json",
+            ],
+            body: body
+        )
+        httpClient.send(request) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .failure(let error):
+                self.deliver(.failure(FeedbackSendFailure(
+                    message: error.message,
+                    isRateLimited: false,
+                    retryAfter: nil,
+                    isRetryable: error.isRetryable,
+                    isConflict: false,
+                    apiCode: error.apiCode
+                )), completion)
+            case .success(let response):
+                guard response.isSuccess else {
+                    self.deliver(.failure(self.makeCloseFailure(response)), completion)
+                    return
+                }
+                do {
+                    let decoded = try self.decoder.decode(FeedbackDetailPayload.self, from: response.data)
+                    self.deliver(.success(decoded.makeItem()), completion)
+                } catch {
+                    self.deliver(.failure(FeedbackSendFailure(
+                        message: L10n.t("feedback.error.missingReceipt"),
+                        isRateLimited: false,
+                        retryAfter: nil,
+                        isRetryable: true,
+                        isConflict: false,
+                        apiCode: nil
+                    )), completion)
+                }
+            }
+        }
+    }
+
     // MARK: - Private
+
+    private func makeCloseFailure(_ response: HTTPResponse) -> FeedbackSendFailure {
+        let envelope = try? decoder.decode(APIErrorEnvelope.self, from: response.data)
+        let code = envelope?.error.code
+        if response.statusCode == 409 || code == "FEEDBACK_INVALID_TRANSITION" || code == "CONFLICT" {
+            return FeedbackSendFailure(
+                message: L10n.t("feedback.close.alreadyClosed"),
+                isRateLimited: false,
+                retryAfter: nil,
+                isRetryable: false,
+                isConflict: true,
+                apiCode: code ?? "FEEDBACK_INVALID_TRANSITION"
+            )
+        }
+        if response.statusCode == 429 {
+            return FeedbackSendFailure(
+                message: L10n.t("error.rateLimited"),
+                isRateLimited: true,
+                retryAfter: FeedbackAPIClient.parseRetryAfter(response.header("Retry-After")),
+                isRetryable: true,
+                isConflict: false,
+                apiCode: code
+            )
+        }
+        let error = mapError(response)
+        return FeedbackSendFailure(
+            message: error.apiCode.map { APIErrorCatalog.entry(for: $0).message } ?? error.message,
+            isRateLimited: false,
+            retryAfter: nil,
+            isRetryable: error.isRetryable,
+            isConflict: false,
+            apiCode: error.apiCode
+        )
+    }
 
     private func makeFailure(_ response: HTTPResponse) -> FeedbackSendFailure {
         let envelope = try? decoder.decode(APIErrorEnvelope.self, from: response.data)
@@ -419,6 +568,28 @@ final class FeedbackAPIClient: FeedbackServicing {
         let items: [Item]
         let nextCursor: String?
         let hasMore: Bool
+    }
+
+    private struct FeedbackDetailPayload: Decodable {
+        let feedbackId: String
+        let kind: String
+        let body: String
+        let status: String
+        let statusMessage: String
+        let createdAt: String
+        let updatedAt: String?
+
+        func makeItem() -> FeedbackDetailItem {
+            FeedbackDetailItem(
+                feedbackID: feedbackId,
+                kind: FeedbackCategory(storedValue: kind),
+                body: body,
+                status: FeedbackRemoteStatus(rawValue: status),
+                statusMessage: statusMessage,
+                createdAt: SyncDateCodec.parse(createdAt),
+                updatedAt: updatedAt.flatMap(SyncDateCodec.parse)
+            )
+        }
     }
 
     private struct APIErrorEnvelope: Decodable {

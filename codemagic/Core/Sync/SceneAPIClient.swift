@@ -43,8 +43,9 @@ final class SceneAPIClient: SceneAPIServicing {
                     return
                 }
                 do {
-                    let scenes = try self.decoder.decode([RemoteScene].self, from: response.data)
-                    self.deliver(.success(scenes), completion)
+                    // 契约 0.17.0：GET /scenes 返回 {"items":[...]}，无分页。
+                    let payload = try self.decoder.decode(SceneListBody.self, from: response.data)
+                    self.deliver(.success(payload.items), completion)
                 } catch {
                     self.deliver(.failure(.decoding(error.localizedDescription)), completion)
                 }
@@ -161,6 +162,9 @@ final class SceneAPIClient: SceneAPIServicing {
     }
 
     private func mapError(_ response: HTTPResponse) -> AppError {
+        if response.statusCode == 429 {
+            return .rateLimited(retryAfterSeconds: response.retryAfterSeconds)
+        }
         if let envelope = try? decoder.decode(SceneAPIErrorEnvelope.self, from: response.data) {
             return .api(
                 code: envelope.error.code,
@@ -169,6 +173,10 @@ final class SceneAPIClient: SceneAPIServicing {
             )
         }
         return .server(statusCode: response.statusCode)
+    }
+
+    private struct SceneListBody: Decodable {
+        let items: [RemoteScene]
     }
 
     private struct SceneAPIErrorEnvelope: Decodable {

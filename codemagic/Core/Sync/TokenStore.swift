@@ -34,17 +34,27 @@ final class KeychainTokenStore: TokenStoring {
     }
 
     func save(_ session: AnonymousSession) throws {
-        clear()
         let payload = try JSONEncoder().encode(
             StoredSession(userID: session.userID, token: session.token)
         )
-        let attributes: [String: Any] = [
+        let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
-            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock,
-            kSecValueData as String: payload,
         ]
+        // 先原地更新，失败再新增：刷新替换 token 时不会出现「先删后加」的空窗，
+        // 并发读取要么看到旧 token、要么看到新 token。
+        let updateStatus = SecItemUpdate(
+            query as CFDictionary,
+            [kSecValueData as String: payload] as CFDictionary
+        )
+        if updateStatus == errSecSuccess { return }
+        guard updateStatus == errSecItemNotFound else {
+            throw AppError.sync(L10n.f("sync.keychain.failed", String(describing: updateStatus)))
+        }
+        var attributes = query
+        attributes[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+        attributes[kSecValueData as String] = payload
         let status = SecItemAdd(attributes as CFDictionary, nil)
         guard status == errSecSuccess else {
             throw AppError.sync(L10n.f("sync.keychain.failed", String(describing: status)))

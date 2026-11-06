@@ -162,7 +162,12 @@ final class DeviceDetailViewModelTests: XCTestCase {
         viewModel.start()
 
         XCTAssertTrue(bluetooth.connectedPeripheralIDs.isEmpty)
-        XCTAssertEqual(viewModel.state, .idle)
+        // 不可直连设备仍会请求服务端单设备详情；stub 返回网络错误，因此状态为失败。
+        if case .failed = viewModel.state {
+            // 期望失败态
+        } else {
+            XCTFail("不可直连设备也应按服务端详情更新状态")
+        }
         XCTAssertEqual(viewModel.notice, "来自 Android，本机不可连接")
         XCTAssertEqual(device.isConnectable, false)
         XCTAssertNil(makeSavedDevice().connectUnavailableText)
