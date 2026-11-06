@@ -99,7 +99,7 @@ enum SceneTrigger: Equatable {
         case .rssiBelow(_, let threshold):
             return L10n.f("scene.trigger.rssi", String(threshold))
         case .metricThreshold(_, _, let metric, let comparator, let threshold, let consecutive):
-            let name = ReadingMetric(rawValue: metric)?.displayName ?? metric
+            let name = SceneTrigger.displayMetricName(metric)
             return L10n.f(
                 "scene.trigger.metric",
                 name,
@@ -113,6 +113,27 @@ enum SceneTrigger: Equatable {
             }
             return L10n.f("scene.trigger.scheduleWeekly", timeOfDay, SceneWeekday.text(days: days), timezone)
         }
+    }
+
+    /// 服务端目录使用 `temperature_celsius` 这类指标键，本机 ReadingMetric 使用 `temperature`；
+    /// 展示时做一层别名映射，避免把服务端原始键直接显示给用户。
+    static func displayMetricName(_ metric: String) -> String {
+        if let known = ReadingMetric(rawValue: metric) {
+            return known.displayName
+        }
+        let aliases: [String: ReadingMetric] = [
+            "temperature_celsius": .temperature,
+            "relative_humidity": .humidity,
+            "humidity_percent": .humidity,
+            "pressure_hpa": .pressure,
+            "heart_rate_bpm": .heartRate,
+            "battery_percent": .battery,
+            "co2_ppm": .co2,
+        ]
+        if let alias = aliases[metric.lowercased()] {
+            return alias.displayName
+        }
+        return metric
     }
 }
 

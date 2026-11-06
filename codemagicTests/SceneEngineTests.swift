@@ -278,6 +278,15 @@ final class SceneTemplateTests: XCTestCase {
         let context = SceneTriggerContext(deviceName: "床头灯")
         XCTAssertEqual(SceneTemplate.render("{foo} {device}", context: context), "{foo} 床头灯")
     }
+
+    /// 服务端目录用 `temperature_celsius` 这类键，展示时应映射到本地指标名。
+    func testMetricDisplayNameMapsCatalogKeys() {
+        XCTAssertEqual(SceneTrigger.displayMetricName("temperature_celsius"), ReadingMetric.temperature.displayName)
+        XCTAssertEqual(SceneTrigger.displayMetricName("relative_humidity"), ReadingMetric.humidity.displayName)
+        XCTAssertEqual(SceneTrigger.displayMetricName("heart_rate_bpm"), ReadingMetric.heartRate.displayName)
+        XCTAssertEqual(SceneTrigger.displayMetricName("temperature"), ReadingMetric.temperature.displayName)
+        XCTAssertEqual(SceneTrigger.displayMetricName("custom_metric"), "custom_metric")
+    }
 }
 
 // MARK: - Fake notifications
