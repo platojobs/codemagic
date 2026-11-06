@@ -18,6 +18,8 @@ final class AppEnvironment {
     let notificationService: LocalNotificationServing
     let ruleAlertCoordinator: RuleAlertCoordinator
     let productService: ProductServicing
+    /// 服务端设备类型目录：数据库缓存 + 条件请求；配置缺失时为 nil。
+    let deviceCatalogService: DeviceCatalogServicing?
     let apiConfiguration: APIConfiguration?
     let bluetooth: BluetoothServicing
     let readingsStore: ReadingsStore
@@ -89,7 +91,17 @@ final class AppEnvironment {
                     tokenStore: sessionTokenStore
                 )
             )
-            productService = ProductAPIClient(configuration: configuration, tokenStore: sessionTokenStore)
+            let catalogService = DeviceCatalogClient(
+                configuration: configuration,
+                httpClient: URLSessionHTTPClient(),
+                cache: DeviceCatalogStore(database: resolved.database)
+            )
+            deviceCatalogService = catalogService
+            productService = ProductAPIClient(
+                configuration: configuration,
+                tokenStore: sessionTokenStore,
+                catalogService: catalogService
+            )
             readingsStore = ReadingsStore(database: resolved.database)
             readingsService = ReadingsAPIClient(configuration: configuration, tokenStore: sessionTokenStore)
             accountAPI = AccountAPIClient(configuration: configuration)
@@ -119,6 +131,7 @@ final class AppEnvironment {
             )
         } else {
             apiConfiguration = nil
+            deviceCatalogService = nil
             feedbackCoordinator = FeedbackCoordinator(
                 store: feedbackStore,
                 client: UnavailableFeedbackService()

@@ -23,6 +23,10 @@ final class MarketViewModel {
     private(set) var showSampleItems = false
     private(set) var selectedVendor: String?
     private(set) var selectedCompatibility: String?
+    /// 目录来源与更新时间，用于「目录更新时间 / 离线缓存」标注。
+    private(set) var catalogInfo: DeviceCatalogSnapshot?
+    /// 已有缓存内容时刷新失败不切空白页，只记录错误供界面提示。
+    private(set) var refreshError: AppError?
 
     var onChange: (() -> Void)?
 
@@ -36,36 +40,52 @@ final class MarketViewModel {
     func loadIfNeeded() {
         guard !hasLoaded else { return }
         hasLoaded = true
+        // 先渲染本地缓存，网络刷新在后台进行，不阻塞首屏。
+        if let cached = productService.cachedCatalogSnapshot() {
+            apply(cached)
+        }
         reload()
     }
 
     func reload() {
-        state = .loading
+        if profiles.isEmpty {
+            state = .loading
+        }
         productService.fetchCatalogSnapshot { [weak self] result in
             guard let self else { return }
             switch result {
             case .success(let snapshot):
-                self.profiles = MarketInsights.profiles(from: snapshot.products)
-                self.sampleItems = snapshot.marketItems
-                self.marketItemsError = snapshot.marketItemsError
-                if let selected = self.selectedTypeID,
-                   !self.profiles.contains(where: { $0.id == selected }) {
-                    self.selectedTypeID = nil
-                }
-                if self.selectedTypeID == nil {
-                    self.selectedTypeID = self.profiles.first?.id
-                }
-                self.dropInvalidFilters()
-                self.state = .loaded
-
+                self.refreshError = nil
+                self.apply(snapshot)
             case .failure(let error):
-                self.profiles = []
-                self.sampleItems = []
-                self.marketItemsError = nil
-                self.selectedTypeID = nil
-                self.state = .failed(error)
+                if self.profiles.isEmpty {
+                    self.catalogInfo = nil
+                    self.sampleItems = []
+                    self.marketItemsError = nil
+                    self.selectedTypeID = nil
+                    self.state = .failed(error)
+                } else {
+                    self.refreshError = error
+                    self.onChange?()
+                }
             }
         }
+    }
+
+    private func apply(_ snapshot: ProductCatalogSnapshot) {
+        catalogInfo = snapshot.catalogInfo
+        profiles = MarketInsights.profiles(from: snapshot.products)
+        sampleItems = snapshot.marketItems
+        marketItemsError = snapshot.marketItemsError
+        if let selected = selectedTypeID,
+           !profiles.contains(where: { $0.id == selected }) {
+            selectedTypeID = nil
+        }
+        if selectedTypeID == nil {
+            selectedTypeID = profiles.first?.id
+        }
+        dropInvalidFilters()
+        state = .loaded
     }
 
     // MARK: - 兼容性查询

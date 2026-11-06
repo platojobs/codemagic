@@ -206,7 +206,14 @@ extension MarketViewController: UITableViewDataSource {
         guard let sectionKind = Section(rawValue: section) else { return nil }
         switch sectionKind {
         case .typePicker where !viewModel.profiles.isEmpty:
-            return L10n.t("market.compatibility.hint")
+            var parts = [L10n.t("market.compatibility.hint")]
+            if let info = viewModel.catalogInfo {
+                parts.append(info.statusText)
+            }
+            if let error = viewModel.refreshError {
+                parts.append(L10n.f("catalog.refreshFailed", error.message))
+            }
+            return parts.joined(separator: "\n")
         case .sample:
             if let error = viewModel.marketItemsError {
                 return L10n.f(
@@ -288,9 +295,9 @@ extension MarketViewController: UITableViewDataSource {
         parts.append(
             L10n.f(
                 "market.compatibility.limitations",
-                profile.limitations.isEmpty
+                profile.declaredLimitations == nil && profile.limitations.isEmpty
                     ? L10n.t("common.none")
-                    : profile.limitations.map(\.detail).joined(separator: L10n.t("common.listSeparator"))
+                    : profile.limitationsText
             )
         )
         cell.configure(title: profile.displayName, body: parts.joined(separator: "\n"))

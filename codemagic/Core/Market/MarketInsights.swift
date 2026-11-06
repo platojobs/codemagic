@@ -57,6 +57,10 @@ struct DeviceCompatibilityProfile: Equatable {
     let metrics: [ReadingCharacteristic]
     let category: DeviceCapabilityCategory
     let limitations: [MarketLimitation]
+    /// 服务端目录声明的指标；nil 表示没有目录数据（仅本地推导），空数组表示目录声明为透传。
+    let declaredMetrics: [CatalogMetric]?
+    /// 服务端目录声明的限制；nil 表示没有目录数据。
+    let declaredLimitations: [String]?
 
     var displayName: String {
         deviceType.isEmpty ? L10n.t("product.cell.unnamed") : deviceType
@@ -72,10 +76,29 @@ struct DeviceCompatibilityProfile: Equatable {
             : firmwareVersion
     }
 
+    /// 指标文案以服务端目录为准：能解析的写名称与单位，解析不了的明确标注。
     var metricsText: String {
-        metrics.isEmpty
+        if let declaredMetrics {
+            if declaredMetrics.isEmpty {
+                return L10n.t("catalog.metricsPassthrough")
+            }
+            return declaredMetrics.map(\.displayText).joined(separator: L10n.t("common.listSeparator"))
+        }
+        return metrics.isEmpty
             ? L10n.t("market.compatibility.noMetrics")
             : metrics.map(\.title).joined(separator: L10n.t("common.listSeparator"))
+    }
+
+    /// 限制文案：目录有声明时原样展示，没有才退回本地解析器的已知约束。
+    var limitationsText: String {
+        if let declaredLimitations {
+            return declaredLimitations.isEmpty
+                ? L10n.t("market.compatibility.noLimitations")
+                : declaredLimitations.joined(separator: L10n.t("common.listSeparator"))
+        }
+        return limitations.isEmpty
+            ? L10n.t("market.compatibility.noLimitations")
+            : limitations.map(\.detail).joined(separator: L10n.t("common.listSeparator"))
     }
 
     var servicesText: String {
@@ -149,7 +172,11 @@ enum MarketInsights {
     }
 
     static func profile(from product: ProductModel) -> DeviceCompatibilityProfile {
-        let metrics = supportedMetrics(in: product.gattServices)
+        let declared = product.typeIdentifier.isEmpty ? nil : product.catalogMetrics
+        let declaredLimitations = product.typeIdentifier.isEmpty ? nil : product.catalogLimitations
+        let metrics = declared.map {
+            locallySupportedMetrics(from: $0, services: product.gattServices)
+        } ?? supportedMetrics(in: product.gattServices)
         return DeviceCompatibilityProfile(
             id: product.id,
             deviceType: product.deviceType,
@@ -162,8 +189,24 @@ enum MarketInsights {
                 metrics: metrics,
                 services: product.gattServices,
                 firmwareVersion: product.firmwareVersion
-            )
+            ),
+            declaredMetrics: declared,
+            declaredLimitations: declaredLimitations
         )
+    }
+
+    /// 目录声明的指标里，本机阅读器真正能解析的那部分。
+    /// 判定依据是目录的 `characteristicUuid` 是否命中本地订阅表，而不是 key 名称相似。
+    static func locallySupportedMetrics(
+        from declared: [CatalogMetric],
+        services: [GATTService]
+    ) -> [ReadingCharacteristic] {
+        var supported = Set(declared.compactMap(\.localCharacteristic))
+        // 目录对 Nordic UART 声明空 metrics 表示透传，此时指标由客户端逐行解析。
+        if declared.isEmpty, supportedMetrics(in: services).contains(.nordicUART) {
+            supported.insert(.nordicUART)
+        }
+        return ReadingCharacteristic.allCases.filter { supported.contains($0) }
     }
 
     /// 服务 UUID 或特征 UUID 命中阅读器真值表即视为支持该指标。

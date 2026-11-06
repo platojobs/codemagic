@@ -9,6 +9,8 @@ final class ProductsViewController: UIViewController {
     private lazy var skeletonController = SkeletonController(host: view)
     private let categoryBar = ProductCategoryBar()
     private let categoryBarContainer = UIView()
+    private let statusFooterView = UIView()
+    private let statusLabel = AppTheme.makeLabel(style: .caption1, color: Palette.textTertiary)
 
     private let viewModel: ProductsViewModel
     private let savedDeviceStore: SavedDeviceStore?
@@ -30,6 +32,7 @@ final class ProductsViewController: UIViewController {
         view.backgroundColor = AppTheme.Palette.background
         configureCategoryBar()
         configureTableView()
+        configureStatusFooter()
         navigationItem.rightBarButtonItem = UIBarButtonItem(
             title: L10n.t("market.refresh"),
             style: .plain,
@@ -76,6 +79,19 @@ final class ProductsViewController: UIViewController {
             tableView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             tableView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             tableView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+        ])
+    }
+
+    private func configureStatusFooter() {
+        statusFooterView.backgroundColor = .clear
+        statusLabel.translatesAutoresizingMaskIntoConstraints = false
+        statusLabel.numberOfLines = 0
+        statusFooterView.addSubview(statusLabel)
+        NSLayoutConstraint.activate([
+            statusLabel.topAnchor.constraint(equalTo: statusFooterView.topAnchor, constant: Layout.space8),
+            statusLabel.leadingAnchor.constraint(equalTo: statusFooterView.leadingAnchor, constant: Layout.pageMargin),
+            statusLabel.trailingAnchor.constraint(equalTo: statusFooterView.trailingAnchor, constant: -Layout.pageMargin),
+            statusLabel.bottomAnchor.constraint(equalTo: statusFooterView.bottomAnchor, constant: -Layout.space16),
         ])
     }
 
@@ -136,6 +152,35 @@ final class ProductsViewController: UIViewController {
 
         tableView.separatorStyle = viewModel.products.isEmpty ? .none : .singleLine
         tableView.reloadData()
+        updateStatusFooter()
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        updateStatusFooter()
+    }
+
+    /// 目录更新时间标注放在列表尾部；断网兜底时同一行追加「离线缓存」。
+    private func updateStatusFooter() {
+        guard let info = viewModel.catalogInfo, !viewModel.products.isEmpty else {
+            if tableView.tableFooterView != nil {
+                tableView.tableFooterView = nil
+            }
+            return
+        }
+        statusLabel.text = info.statusText
+        statusLabel.accessibilityLabel = info.statusText
+        let width = tableView.bounds.width
+        guard width > 0 else { return }
+        let size = statusFooterView.systemLayoutSizeFitting(
+            CGSize(width: width, height: UIView.layoutFittingCompressedSize.height),
+            withHorizontalFittingPriority: .required,
+            verticalFittingPriority: .fittingSizeLevel
+        )
+        statusFooterView.frame = CGRect(x: 0, y: 0, width: width, height: size.height)
+        if tableView.tableFooterView !== statusFooterView {
+            tableView.tableFooterView = statusFooterView
+        }
     }
 
     private func showCategoryBar() {

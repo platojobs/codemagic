@@ -111,7 +111,8 @@ final class SQLiteDatabase {
                 "rooms",
                 "households",
                 "device_assignment_pending",
-                "feedback_drafts"
+                "feedback_drafts",
+                "device_catalog_cache"
             ]
             try performExecute("BEGIN IMMEDIATE;", [])
             do {
@@ -165,6 +166,9 @@ final class SQLiteDatabase {
         }
         if version < 12 {
             try migrateToVersion12()
+        }
+        if version < 13 {
+            try migrateToVersion13()
         }
     }
 
@@ -536,6 +540,54 @@ final class SQLiteDatabase {
             script += "ALTER TABLE feedback_drafts ADD COLUMN next_retry_at REAL;\n"
         }
         script += "PRAGMA user_version = 12;"
+        try executeScript(script)
+    }
+
+    /// v13：服务端设备类型目录缓存。
+    ///
+    /// 单行表：`id` 固定为 `device_types`，`payload` 存原始响应 JSON，
+    /// `etag / last_modified` 用于下次条件请求，`fetched_at / last_used_at` 区分
+    /// 「最近一次成功同步」与「最近一次使用（含 304）」。
+    /// 可重复执行：先 `PRAGMA table_info` 判列，缺列才补建，半迁移库也能补齐。
+    private func migrateToVersion13() throws {
+        let columns = Set(try performQuery("PRAGMA table_info(device_catalog_cache);", [])
+            .compactMap { $0.text("name") })
+        var script = """
+        CREATE TABLE IF NOT EXISTS device_catalog_cache (
+            id TEXT PRIMARY KEY NOT NULL,
+            version INTEGER NOT NULL DEFAULT 0,
+            generated_at REAL NOT NULL DEFAULT 0,
+            etag TEXT,
+            last_modified TEXT,
+            payload TEXT NOT NULL DEFAULT '',
+            fetched_at REAL NOT NULL DEFAULT 0,
+            last_used_at REAL NOT NULL DEFAULT 0
+        );
+        """
+        if !columns.isEmpty {
+            if !columns.contains("version") {
+                script += "ALTER TABLE device_catalog_cache ADD COLUMN version INTEGER NOT NULL DEFAULT 0;\n"
+            }
+            if !columns.contains("generated_at") {
+                script += "ALTER TABLE device_catalog_cache ADD COLUMN generated_at REAL NOT NULL DEFAULT 0;\n"
+            }
+            if !columns.contains("etag") {
+                script += "ALTER TABLE device_catalog_cache ADD COLUMN etag TEXT;\n"
+            }
+            if !columns.contains("last_modified") {
+                script += "ALTER TABLE device_catalog_cache ADD COLUMN last_modified TEXT;\n"
+            }
+            if !columns.contains("payload") {
+                script += "ALTER TABLE device_catalog_cache ADD COLUMN payload TEXT NOT NULL DEFAULT '';\n"
+            }
+            if !columns.contains("fetched_at") {
+                script += "ALTER TABLE device_catalog_cache ADD COLUMN fetched_at REAL NOT NULL DEFAULT 0;\n"
+            }
+            if !columns.contains("last_used_at") {
+                script += "ALTER TABLE device_catalog_cache ADD COLUMN last_used_at REAL NOT NULL DEFAULT 0;\n"
+            }
+        }
+        script += "PRAGMA user_version = 13;"
         try executeScript(script)
     }
     /// 迁移脚本包含多条语句，必须用 sqlite3_exec 一次性执行；

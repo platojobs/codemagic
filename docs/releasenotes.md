@@ -4,6 +4,7 @@
 
 | Tag | MARKETING_VERSION | Build | 日期 | 对齐后端 |
 | --- | --- | --- | --- | --- |
+| `v0.19.0` | 0.19.0 | 27 | 2026-11-06 | PJGoIoT v0.18.0（openapi 0.14.0；`GET /catalog/device-types` 成为设备类型目录唯一事实源，条件请求 / 304 / 离线缓存） |
 | `v0.18.0` | 0.18.0 | 26 | 2026-11-06 | PJGoIoT v0.16.0（openapi 0.12.0；`POST /feedback` / `GET /feedback/mine` 真链路、幂等与限流） |
 | `v0.17.0` | 0.17.0 | 25 | 2026-11-06 | PJGoIoT v0.15.0（openapi 0.11.0；无契约变更，市场 / 产品 / 我的为纯客户端能力） |
 | `v0.16.0` | 0.16.0 | 24 | 2026-11-05 | PJGoIoT v0.15.0（openapi 0.11.0；所有权转让 / `isSelf` / `household`·`room` 结构变更进 change_log） |
@@ -29,6 +30,21 @@
 | `v0.3.0` | 0.3.0 | 4 | 2026-11-05 | 0.3.0 |
 | `v0.2.0` | 0.2.0 | 3 | 2026-11-05 | 0.2.0 |
 | `v0.1.0` | — | 1 | 2026-11-05 | — |
+
+---
+
+## v0.19.0（build 27）
+
+**主题：设备类型目录改由服务端提供 —— 单一行事实源、条件请求与离线兜底**
+
+- **契约（PJGoIoT v0.18.0 / openapi 0.14.0）**：`GET /catalog/device-types` 公开只读、匿名可读，返回 `{version, generatedAt, items[]}`；每项含 `type` / `displayName` / `description` / `gattServices` / `metrics`（`key` / `unit` / `characteristicUuid`）/ `limitations` / `compatibility` / `updatedAt`。支持 `If-None-Match` 与 `If-Modified-Since`，命中返回 `304`，并带 `ETag`（由目录版本派生）、`Last-Modified`、`Cache-Control`。
+- **替换本地目录**：产品与市场的类型清单、展示名、GATT 服务、指标、限制、兼容性全部来自该接口；删除本地逐型号的 `GET /device-types` 清单调用，不再保留第二份常量表。逐型号 `GET /device-types/{type}/catalog` 仅补充固件与配件，不参与目录字段判定；厂商字段目录未提供时保持未知，不编造。
+- **缓存策略（SQLite 单行）**：迁移 **v13** 新建 `device_catalog_cache`（`id` 固定 `device_types`，存原始响应 `payload`、`version` / `generated_at`、`etag` / `last_modified`、`fetched_at` / `last_used_at`），`PRAGMA table_info` 判列、可重复执行。选 SQLite 是因为已有迁移链路、注销时与业务数据一起清空、条件头与使用时间可原子更新，无需额外缓存文件格式。缓存存原始 JSON，加载时再解码，避免缓存层重新序列化造成失真。
+- **条件请求**：优先 `If-None-Match`，无 `ETag` 时退化为 `If-Modified-Since`；`304` 直接复用本地缓存并刷新 `last_used_at`，`fetched_at` 保持不变；`ETag` 变化返回 `200` 时覆盖缓存。
+- **离线与失败回退**：有缓存时断网仍展示缓存内容，并在列表尾部标注「目录更新时间」与「离线缓存」；无缓存且请求失败时展示可读错误与重试入口，绝不把写死的旧清单冒充服务端数据。异常 `304`（本地无缓存）给出独立错误 `CATALOG_CACHE_MISSING`。
+- **首屏关系**：目录请求不在 App 启动路径上，也不阻塞首页；产品 / 市场打开时先同步读 SQLite 缓存渲染已有内容，再异步刷新，刷新完成后就地替换，不切空白页。首次安装无缓存时才显示页内加载态。
+- **能力对齐**：本地解析器按目录的 `characteristicUuid` 判断能否解析（16 位与 128 位 UUID 都归一化比较），不再用 key 名称猜测。能解析的展示「指标 · 单位」；解析不了的如实标注「当前版本不支持」；目录对 NUS 声明空 `metrics` 时按透传设备处理，保留客户端逐行解析能力。限制文案优先使用目录 `limitations`。
+- 单测 **356 个，0 失败**（新增 12 个：`200` 首次落库、`304` 命中缓存并刷新使用时间、`ETag` 变化触发更新、断网有缓存回退、断网无缓存错误、`304` 无缓存异常、SQLite 缓存往返、`v12→v13` 迁移（`PRAGMA table_info` 判列）、目录新增类型界面表现、指标与解析能力不一致标注、NUS 透传）。E2E fixture **337 项全 PASS**（新增目录匿名 200、字段完整性、UUID 归一化、NUS 空指标、`ETag` / `Last-Modified` / `Cache-Control` 与两种条件请求 `304`；条件请求绕过 `URLCache` 以免掩盖服务端行为）。
 
 ---
 

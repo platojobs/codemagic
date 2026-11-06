@@ -88,15 +88,19 @@ final class NetworkingTests: XCTestCase {
 
     // MARK: - Client
 
-    /// 模拟 0.3.2 后端：型号列表 + catalog（固件 / 配件均带 vendor 与 compatibility）。
+    /// 模拟契约 0.14.0 后端：目录接口 + 逐型号 catalog（固件 / 配件）。
     private func makeCatalogStub() -> StubHTTPClient {
         StubHTTPClient { url in
             switch url.path {
-            case "/api/v1/device-types":
+            case "/api/v1/catalog/device-types":
                 let json = """
-                {"items":[{"type":"tracker","name":"BLE Tracker","vendor":"Nordic Semiconductor",
-                  "description":"支持 BLE 5.0","gattServices":[{"uuid":"180F","name":"Battery"}],
-                  "compatibility":{"platforms":["ios","android"],"protocol":"ble-gatt"}}]}
+                {"version":3,"generatedAt":"2026-10-01T00:00:00Z","items":[
+                  {"type":"tracker","displayName":"BLE Tracker","description":"支持 BLE 5.0",
+                   "gattServices":[{"uuid":"180F","name":"Battery"}],
+                   "metrics":[{"key":"battery","unit":"%","characteristicUuid":"2A19"}],
+                   "limitations":["仅支持单连接"],
+                   "compatibility":{"platforms":["ios","android"],"protocol":"ble-gatt"},
+                   "updatedAt":"2026-10-01T00:00:00Z"}]}
                 """
                 return .success(Data(json.utf8))
             case "/api/v1/device-types/tracker/catalog":
@@ -136,9 +140,13 @@ final class NetworkingTests: XCTestCase {
         XCTAssertEqual(products.first?.gattServices.first?.uuid, "180F")
         XCTAssertEqual(products.first?.compatibility, ["平台：ios、android", "协议：ble-gatt"])
         XCTAssertEqual(products.first?.id, "tracker")
+        XCTAssertEqual(products.first?.typeIdentifier, "tracker")
+        XCTAssertEqual(products.first?.catalogMetrics.first?.key, "battery")
+        XCTAssertEqual(products.first?.catalogLimitations, ["仅支持单连接"])
         XCTAssertTrue(products.first?.note.contains("支持 BLE 5.0") == true)
-        XCTAssertTrue(client.requestedURLs.contains { $0.path == "/api/v1/device-types" })
+        XCTAssertTrue(client.requestedURLs.contains { $0.path == "/api/v1/catalog/device-types" })
         XCTAssertTrue(client.requestedURLs.contains { $0.path.hasSuffix("/catalog") })
+        XCTAssertFalse(client.requestedURLs.contains { $0.path == "/api/v1/device-types" })
         XCTAssertFalse(client.requestedURLs.contains { $0.path.contains("/api/products") })
     }
 

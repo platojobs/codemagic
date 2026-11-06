@@ -19,6 +19,10 @@ final class ProductsViewModel {
         didSet { onChange?() }
     }
     private(set) var selectedCategory: ProductCategoryFilter = .all
+    /// 目录来源与更新时间，用于「目录更新时间 / 离线缓存」标注。
+    private(set) var catalogInfo: DeviceCatalogSnapshot?
+    /// 已有缓存内容时刷新失败不切空白页，只记录错误供界面提示。
+    private(set) var refreshError: AppError?
 
     var onChange: (() -> Void)?
 
@@ -32,20 +36,38 @@ final class ProductsViewModel {
     func loadIfNeeded() {
         guard !hasLoaded else { return }
         hasLoaded = true
+        // 先渲染本地缓存，网络刷新在后台进行，不阻塞首屏。
+        if let cached = productService.cachedCatalogSnapshot() {
+            apply(cached)
+        }
         reload()
     }
 
     func reload() {
-        state = .loading
-        productService.fetchProducts { [weak self] result in
+        if allProducts.isEmpty {
+            state = .loading
+        }
+        productService.fetchCatalogSnapshot { [weak self] result in
             guard let self else { return }
             switch result {
-            case .success(let products):
-                self.state = .loaded(products)
+            case .success(let snapshot):
+                self.refreshError = nil
+                self.apply(snapshot)
             case .failure(let error):
-                self.state = .failed(error)
+                if self.allProducts.isEmpty {
+                    self.catalogInfo = nil
+                    self.state = .failed(error)
+                } else {
+                    self.refreshError = error
+                    self.onChange?()
+                }
             }
         }
+    }
+
+    private func apply(_ snapshot: ProductCatalogSnapshot) {
+        catalogInfo = snapshot.catalogInfo
+        state = .loaded(snapshot.products)
     }
 
     func selectCategory(_ filter: ProductCategoryFilter) {
@@ -81,7 +103,7 @@ final class ProductsViewModel {
     }
 
     static func category(of product: ProductModel) -> DeviceCapabilityCategory {
-        MarketInsights.category(for: MarketInsights.supportedMetrics(in: product.gattServices))
+        MarketInsights.profile(from: product).category
     }
 }
 

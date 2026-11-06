@@ -12,25 +12,26 @@
 
 | 项 | 结果 |
 | --- | --- |
-| 版本 | **v0.18.0**（`MARKETING_VERSION 0.18.0`，`CURRENT_PROJECT_VERSION 26`，tag `v0.18.0`：意见反馈接真实 `POST /feedback` 与 `GET /feedback/mine`，本地队列有状态 / 幂等键 / 有界退避 / 429 处理；契约对齐 `PJGoIoT` v0.16.0 / openapi 0.12.0） |
+| 版本 | **v0.19.0**（`MARKETING_VERSION 0.19.0`，`CURRENT_PROJECT_VERSION 27`，tag `v0.19.0`：设备类型目录改由服务端 `GET /catalog/device-types` 提供，本地只保留 SQLite 缓存与断网兜底；`ETag` / `Last-Modified` 条件请求、304 复用、离线标注、解析能力对齐；契约对齐 `PJGoIoT` v0.18.0 / openapi 0.14.0） |
 | 五模块（首页 / 智能 / 产品 / 市场 / 我的） | 已实现，纯代码 UIKit，真实数据路径；设备管理并入首页，规则与场景集中在「智能」 |
 | CoreBluetooth 扫描 + 连接 | 已实现（`CBCentralManager`，真实 RSSI） |
 | BLE 读数采集 | 已实现：连接后订阅心率 `0x2A37`、电量 `0x2A19`、温度 `0x2A6E`、Nordic UART TX `6E400003-…`；各特征独立解析器，失败静默丢弃并写本地日志 |
+| 设备类型目录（v0.19.0） | **服务端为唯一事实源**：类型清单、展示名、GATT 服务、指标（`key` / `unit` / `characteristicUuid`）、限制与兼容性均来自 `GET /catalog/device-types`；本地只保留 SQLite 单行缓存（原始 JSON + `ETag` / `Last-Modified`），无第二份常量清单。下次请求带条件头，304 复用缓存并刷新 `last_used_at`；断网有缓存时展示缓存并标注「目录更新时间 / 离线缓存」，无缓存才给错误与重试。目录声明的指标按特征 UUID 与本地解析器对齐，解析不了的标注「当前版本不支持」；目录对 NUS 声明空指标时按透传处理 |
 | 长周期读数图表 | 已实现：1 小时 / 24 小时 / 7 天 / 30 天区间切换（映射 `1m` / `1h` / `1h` / `1d`），X 轴按桶 `start` 真实时间比例定位，缺口断线，`avg` 折线 + `min`–`max` 区间带，Y 轴自适应并带单位；**v0.11.0 支持点选 / 长按桶查看 start–end、min/max/avg/last 与条数（本地时区），点空白取消，Y 轴不变，并给出无障碍摘要** |
-| 本地持久化 | 已实现（SQLite3，含同步字段；迁移 **v12** 为 `feedback_drafts` 增加 `status` / `last_error` / `remote_id` / `next_retry_at`（`PRAGMA table_info` 判列可重复执行，旧行保留并默认 `pending`）；迁移 **v11** 新增 `feedback_drafts`；迁移 **v10** 为 `households` 增加 `room_count`（服务端真实房间数，不本地计数）；v9 新增 `households`（`id` / `remote_id` / `name` / `is_personal` / `role` / `member_count` / `device_count`）与 `device_assignment_pending`（设备归属上报队列），为 `rooms` 启用 `remote_id` 并增加 `household_id` / `sync_state` / `deleted`，为 `saved_devices` 增加 `household_id` / `remote_room_id` / `remote_household_id`；v8 新增 `rooms` 表与可空 `room_id`，v7 为 `rules` 加指标阈值字段，v6 新增仅本机的 `scenarios` 表；v5 新增 `readings` 表，本地保留 7 天；v4 区分 `advertised_name` 与用户别名并记录三态 patch） |
+| 本地持久化 | 已实现（SQLite3，含同步字段；迁移 **v13** 新增 `device_catalog_cache`（单行原始 JSON + `etag` / `last_modified` / `fetched_at` / `last_used_at`，`PRAGMA table_info` 判列可重复执行）；迁移 **v12** 为 `feedback_drafts` 增加 `status` / `last_error` / `remote_id` / `next_retry_at`（`PRAGMA table_info` 判列可重复执行，旧行保留并默认 `pending`）；迁移 **v11** 新增 `feedback_drafts`；迁移 **v10** 为 `households` 增加 `room_count`（服务端真实房间数，不本地计数）；v9 新增 `households`（`id` / `remote_id` / `name` / `is_personal` / `role` / `member_count` / `device_count`）与 `device_assignment_pending`（设备归属上报队列），为 `rooms` 启用 `remote_id` 并增加 `household_id` / `sync_state` / `deleted`，为 `saved_devices` 增加 `household_id` / `remote_room_id` / `remote_household_id`；v8 新增 `rooms` 表与可空 `room_id`，v7 为 `rules` 加指标阈值字段，v6 新增仅本机的 `scenarios` 表；v5 新增 `readings` 表，本地保留 7 天；v4 区分 `advertised_name` 与用户别名并记录三态 patch） |
 | 家庭（v0.15.0） | **已接入后端**：`GET /households` 的 `memberCount` / `deviceCount` / `roomCount` 全部使用服务端真实数字；「我的 → 家庭管理」按角色裁剪入口：owner 可签发 / 撤销邀请码、移除成员、改家庭名、退出家庭，member 只能查看与退出。成员支持左滑 / 点击移除（二次确认并说明对方设备回其个人家庭）；owner 还有其他成员时退出前置提示「请先转让所有权或移除其他成员」，服务端 409 同一文案。邀请码列表只展示哈希前缀 / 状态 / 过期时间并可撤销，绝无明文。房间支持拖拽与上下移动排序，整段提交 `PUT /rooms/order`；409（`ROOM_SET_MISMATCH` 或 v0.13.0 的 `CONFLICT`）自动重新 GET 并提示「房间列表已变化，已刷新」。设备归属仍走独立 `PATCH /my/devices/{platform}/{externalId}`；退出 / 被移除后本地设备回落个人家庭、房间脱钩保留并标注未同步 |
 | 本地化（v0.12.0） | **已实现**：全部界面文案走 `L10n.t` / `L10n.f`，资源为 `Resources/zh-Hans.lproj/Localizable.strings` 与 `en.lproj/Localizable.strings`；工程 `knownRegions` 含 `zh-Hans`，`CFBundleLocalizations = [en, zh-Hans]`，设置跟随系统语言；术语双语见第 11 节；单测强制扫描 View / ViewModel 源码不得硬编码中文，并校验两语言 key 集合与占位符一致 |
 | 动态字体（v0.12.0） | **已实现**：字号统一走 `AppText`（`UIFontMetrics` 缩放）+ `applyFont(_:)`（`adjustsFontForContentSizeCategory = true`）；表格行高自适应；图表 Y 轴左侧留白随字号测量增长，超大字号缩为 3 个刻度且不与绘图区重叠 |
 | 设计系统（v0.8.0） | **已落地**：`Palette` 36 个语义色（浅/深 `UIColor(dynamicProvider:)`）、`Layout` 4pt 阶梯 / 16 页边距 / 56·72·88 行高 / 12 圆角 / 1dp 描边、`AppText` 10 级字号与等宽数字；代码内无硬编码色值与字号（单测强制扫描） |
-| 网络层 | 已实现（URLSession + Codable；反馈 `POST /feedback` / `GET /feedback/mine` 对齐 `PJGoIoT` v0.16.0 openapi 0.12.0，使用 `Idempotency-Key`（草稿本地 ID）、`Retry-After` 与 `Idempotent-Replayed`；家庭 / 邀请码 / 房间 / 设备归属对齐 openapi 0.9.0；设备/型号/同步/账号对齐 openapi 0.7.0 起的既有契约；读数查询 / summary / series / metrics 对齐 v0.5.1 起；详情页远端刷新 800ms 去抖动 + 失败指数退避 ≤5 分钟，不可见/后台不请求；分页上限 changes 500 / readings 500 / export 5000 / feedback 50） |
+| 网络层 | 已实现（URLSession + Codable；设备类型目录 `GET /catalog/device-types` 对齐 `PJGoIoT` v0.18.0 openapi 0.14.0，带 `If-None-Match` / `If-Modified-Since` 条件请求并处理 304；反馈 `POST /feedback` / `GET /feedback/mine` 对齐 openapi 0.12.0，使用 `Idempotency-Key`（草稿本地 ID）、`Retry-After` 与 `Idempotent-Replayed`；家庭 / 邀请码 / 房间 / 设备归属对齐 openapi 0.9.0；设备/型号/同步/账号对齐 openapi 0.7.0 起的既有契约；读数查询 / summary / series / metrics 对齐 v0.5.1 起；详情页远端刷新 800ms 去抖动 + 失败指数退避 ≤5 分钟，不可见/后台不请求；分页上限 changes 500 / readings 500 / export 5000 / feedback 50） |
 | 同步 | **已实现**：匿名登录、增量拉取、批量推送（设备 ≤100/批 + 读数 ≤200/批、幂等键含读数）、冲突提示、tombstone、Keychain token、前后台 / BGTask 触发、断网累积补传；后台唤醒仅做受限推送（不拉增量、不建号、≥15 分钟间隔）；**410 `RESYNC_REQUIRED` 自动全量重同步（pending 不丢）**，503 `TIMEOUT` 指数退避 |
 | 自绘 RSSI + 自绘折线图 + 代码组装空状态 | 已实现（读数图表纯 `draw(_:)`，无第三方图表库） |
 | 首启引导 | **已实现**：3 步（蓝牙 / 通知 / 后台采集），仅首次或未走完时出现，可跳过；步骤与完成标记持久化到 `UserDefaults` |
-| 单元测试 | **344 个用例，0 失败**（`** TEST SUCCEEDED **`，2026-11-06，Xcode 27.2 / iPhone 18 Pro · iOS 27.2 模拟器；新增反馈状态机 pending→sending→sent、仅 2xx+feedbackId 判成功、幂等键复用、429 Retry-After、有界指数退避与自动上限后保留草稿、`POST /feedback` DTO 字段 / 可选字段省略、列表 DTO 不含 contact / diagnostics、`feedback_drafts` v11→v12 迁移旧数据保留；既有 328 个用例全部保持） |
+| 单元测试 | **356 个用例，0 失败**（`** TEST SUCCEEDED **`，2026-11-06，Xcode 27.2 / iPhone 18 Pro · iOS 27.2 模拟器；新增目录 200 首次落库、304 命中缓存并刷新使用时间、ETag 变化触发更新、断网有缓存回退 / 无缓存错误、`CATALOG_CACHE_MISSING` 异常分支、目录新增类型界面表现、指标与本地解析能力不一致标注、NUS 透传、`device_catalog_cache` v12→v13 迁移；既有 344 个用例全部保持） |
 | 模拟器构建 | **通过**（`xcodebuild ... build`，`** BUILD SUCCEEDED **`） |
 | CI | **GitHub Actions 已实际运行 success**：v0.18.0 tag run [42165913126](https://github.com/platojobs/codemagic/actions/runs/42165913126)（success，提交 `f7e90cf`），并行 `Build & Test`（**344 单测**）与 `E2E contract`（**314 项，0 SKIP**，PJGoIoT 固定在 v0.16.0）；同 sha 的 `main` run 被 tag 并发规则取消后，本回填提交会触发新的 `main` 运行；v0.17.0 tag run [42162067590](https://github.com/platojobs/codemagic/actions/runs/42162067590) 与 `main` run [42162055310](https://github.com/platojobs/codemagic/actions/runs/42162055310) 为上一基线；`codemagic.yaml` 作为可选替代保留但未验证 |
 | 真机 BLE / 签名 | **未验证**：本机无真机与 Apple 开发者账号；读数采集与图表需真机 / 可穿戴设备验证（见第 9 节） |
-| 真实后端同步 | **契约已联调**：`scripts/e2e-contract.sh` 对本地 `PJGoIoT` **v0.16.0**（`STORE=fixture`）跑 **314 项断言，全部 PASS**（新增反馈 POST 201、同 key 同内容重放 200 + `Idempotent-Replayed: true` + 同 ID、同 key 不同内容 409 `IDEMPOTENCY_CONFLICT`、`GET /feedback/mine` 状态 / 时间 / 游标字段且不含 contact / diagnostics、其他账号不可见）；`scripts/e2e-postgres.sh` 在同一套契约外，另在**真实 Postgres** 直接查库确认邀请码只存 64 位哈希、移除成员后成员行删除、退出后清理，输出见 [docs/e2e-postgres.md](docs/e2e-postgres.md)；App 内反馈 UI 与同步 UI 仍需真机手动验证 |
+| 真实后端同步 | **契约已联调**：`scripts/e2e-contract.sh` 对**干净 worktree 的 `PJGoIoT` v0.18.0**（`/tmp/pjgoiot-v018`，`STORE=fixture`）跑 **337 项断言，全部 PASS**（新增 `GET /catalog/device-types` 匿名 200、版本 / `generatedAt` / 5 个类型、GATT / 指标 / 限制 / 兼容性 / `updatedAt` 字段、完整 UUID 归一化到 `2A6E` / `2A37` / `2A9D`、NUS 空指标、`ETag` / `Last-Modified` / `Cache-Control`、`If-None-Match` 与 `If-Modified-Since` 命中 304）；`scripts/e2e-postgres.sh` 在同一套契约外，另在**真实 Postgres** 直接查库确认邀请码只存 64 位哈希、移除成员后成员行删除、退出后清理，输出见 [docs/e2e-postgres.md](docs/e2e-postgres.md)；App 内目录离线 UI 与同步 UI 仍需真机手动验证 |
 | 上架材料 | **已补齐**：`docs/store-listing.md`、`docs/privacy-policy.md`、`docs/app-privacy.md` 与 `codemagic/Resources/PrivacyInfo.xcprivacy`（未使用能力不声明） |
 
 ---
@@ -84,11 +85,11 @@
 
 ### 产品 Products（`Modules/Products`）
 - 型号库：厂商、型号、固件版本、GATT 服务与特征表。
-- 数据来自 `GET /api/v1/device-types` 型号列表 + 逐个 `GET /api/v1/device-types/{type}/catalog`（取固件与配件）；单个 catalog 失败降级为型号信息，全部失败显示错误空状态 + 重试。
+- 数据来自 `GET /api/v1/catalog/device-types`（类型 / GATT / 指标 / 限制 / 兼容性）+ 逐个 `GET /api/v1/device-types/{type}/catalog`（仅取固件与配件）；目录有本地缓存时先渲染缓存再异步刷新，单个 catalog 失败降级为型号信息，全部失败显示错误空状态 + 重试。
 - 详情页 GATT / 特征由代码动态组装；兼容性来自 catalog 的 `compatibility` 对象（0.3.2），按「平台 / 协议 / 特性 / 最低 App / 型号」摊平展示。
 
 ### 市场 Market（`Modules/Market`）
-- 配件与固件信息列表 + 兼容性说明，由各型号 `GET /api/v1/device-types/{type}/catalog` 聚合 firmware + accessories。
+- 兼容性查询 / 选购指南 / 服务入口：机型画像来自目录的 `gattServices` / `metrics` / `limitations` / `compatibility`，指标按 `characteristicUuid` 与本地解析器对齐并标注「当前版本不支持」；配件与固件仍由各型号 `GET /api/v1/device-types/{type}/catalog` 聚合。
 - **筛选**：顶部「厂商：全部/xx」与「兼容性：全部/xx」两个入口，取值直接来自服务端真实字段（`vendor`、`compatibility` 展开的平台 / 协议 / 特性 / 型号），不造假分类；可叠加、可一键清除，无结果显示「没有符合筛选条件的条目」。
 - 页脚明确声明：**不提供下单、订单或支付**。
 
@@ -112,7 +113,7 @@
 - 家庭与归属（v0.14.0）：每次同步先 `GET /households` 合并家庭、选择当前家庭、拉取房间并补报本地房间 / 设备归属，再走原有 pull → push；设备归属**不塞进 push**，用 `PATCH /my/devices/{platform}/{externalId}` 单独上报，失败进 `device_assignment_pending` 队列，下次同步重试；401 交给同步流程，403 / 404 为终态（移出队列并记可读文案）。
 - 触发：回到前台（节流 120s）、进入后台（`BGAppRefreshTask`）、手动按钮。
 - 后台唤醒（v0.7.0）：仅推送、不拉增量、不创建匿名账号；单次 ≤100 设备 / ≤200 读数，最小间隔 15 分钟（失败同样节流）。`bluetooth-central` 后台模式下连接设备继续接收 notify 并入库，7 天保留清理只删 `synced`，pending 受保护。
-- 契约联调：`scripts/e2e-contract.sh` 直连本地 Go 服务，覆盖双平台推送、device-types/catalog（含 vendor/compatibility）、复合键详情、UserDevice 新字段与 null 降级、别名/广播名分离、group 三态、幂等重放、LWW 冲突、401/404；**v0.14.0 起新增家庭链路**（创建家庭 → 邀请码 → 第二账号领取 → 成员可见设备 → member 改房间 403 → 跨家庭 404 → 设备归属三态 → 删除家庭级联）；已纳入 GitHub Actions `e2e-contract` job（见 4.2）。
+- 契约联调：`scripts/e2e-contract.sh` 直连本地 Go 服务，覆盖双平台推送、`catalog/device-types`（匿名 200 / `ETag` / 条件请求 304）与 `{type}/catalog`（含 vendor/compatibility）、复合键详情、UserDevice 新字段与 null 降级、别名/广播名分离、group 三态、幂等重放、LWW 冲突、401/404；**v0.14.0 起新增家庭链路**（创建家庭 → 邀请码 → 第二账号领取 → 成员可见设备 → member 改房间 403 → 跨家庭 404 → 设备归属三态 → 删除家庭级联）；已纳入 GitHub Actions `e2e-contract` job（见 4.2）。
 
 ---
 
@@ -215,7 +216,7 @@ xcodebuild -project codemagic.xcodeproj \
 - mock 由 Quickmock.dev 提供，任意路径返回同一份组合 JSON，**预计 2026-12-04 到期**；到期后产品 / 市场会显示错误空状态与重试，不会崩溃。
 - 正式域名确定后只改 `Release.xcconfig`，不需要改源码。
 - 临时联调可覆盖：`xcodebuild ... BASE_URL='https://...' build`。
-- 本地 Go 服务需 **0.3.3**（`git pull` 后运行），提供 `/api/v1/device-types`、`/api/v1/device-types/{type}/catalog`、`/api/v1/my/devices/{platform}/{externalId}`，并在 `UserDevice` / catalog 固件与配件上提供 `advertisedName` / `deviceType` / `vendor` / `firmwareVersion` / `compatibility`；iOS 已全部切换，不再请求 `api/products` / `api/market` / `api/device/{uuid}`；见 `docs/consistency.md` 第 3.4 节。
+- 本地 Go 服务需 **v0.18.0**（openapi 0.14.0），提供 `/api/v1/catalog/device-types`（目录唯一来源，支持 `ETag` / 304）、`/api/v1/device-types/{type}/catalog`（固件 / 配件）、`/api/v1/my/devices/{platform}/{externalId}`，并在 `UserDevice` / catalog 固件与配件上提供 `advertisedName` / `deviceType` / `vendor` / `firmwareVersion` / `compatibility`；iOS 已全部切换，不再请求 `api/products` / `api/market` / `api/device/{uuid}`；见 `docs/consistency.md` 第 3.4 节。
 
 ### 4.2 端到端契约联调（CI 并行 job + 本地手动运行）
 
@@ -234,24 +235,27 @@ cd /path/to/codemagic
 - CI 中 `build-test` 与 `e2e-contract` 并行，按 `github.sha` 去重（同一次提交的 main push 与 tag 只跑一轮）。
 - 读数断言（第 7 节）采用**能力门控**：探针 `GET .../readings/summary` 返回 404（后端尚未发布 readings）时输出 `[SKIP]` 且不计通过；后端上线后自动执行真实断言。本地 agent 以 `RATE_LIMIT_PER_MINUTE=0` 启动 fixture 服务，避免 ~100 次请求触发 429。
 
-本机 2026-11-05 实际运行（后端 `PJGoIoT` v0.7.0，端口 8080）：
+本机 2026-11-06 实际运行（后端 `PJGoIoT` v0.18.0 干净 worktree，端口 8080）：
 
 ```
 [e2e] health 200
-[1. 匿名登录] 3/3 PASS
-[2. 双平台推送（ios + android 同一台设备）] 7/7 PASS
-[3. changes 拉回校验 platform / externalId] 12/12 PASS
-[3.5 device-types/catalog 与 my/devices/{platform}/{externalId}] 14/14 PASS
-[3.6 UserDevice deviceType/vendor/compatibility 与 null 降级] 12/12 PASS
-[3.7 advertisedName / alias 隔离与 group 三态] 16/16 PASS
-[4. 同 Idempotency-Key 重放] 5/5 PASS
-[5. LWW 冲突：旧版本不静默覆盖新版本] 9/9 PASS
-[6. 无 token 401 / 跨用户 404] 9/9 PASS（含复合键越权）
-[7. 设备读数 readings（推送 / 倒序 / summary / 重复 id / NaN / series / metrics）] 36/36 PASS
-[8. 账号：接管码 / 数据导出 / 注销] 28/28 PASS
+[1. 匿名登录]
+[2. 双平台推送（ios + android 同一台设备）]
+[3. changes 拉回校验 platform / externalId]
+[3.4 设备类型目录 /catalog/device-types（公开只读 + ETag/304）]
+[3.5 device-types/catalog 与 my/devices/{platform}/{externalId}]
+[3.6 UserDevice deviceType/vendor/compatibility 与 null 降级]
+[3.7 advertisedName / alias 隔离与 group 三态]
+[4. 同 Idempotency-Key 重放]
+[5. LWW 冲突：旧版本不静默覆盖新版本]
+[6. 无 token 401 / 跨用户 404]
+[7. 设备读数 readings（推送 / 倒序 / summary / 重复 id / NaN）]
+[8. 账号：配对码接管 / 数据导出 / 注销]
+[9. 家庭：创建 / 邀请码 / 成员可见设备 / 403 与跨家庭 404]
+[10. 反馈：提交 / 幂等重放 / 冲突 / 我的列表]
 
 === E2E 合同联调结果 ===
-通过：151 项，跳过：0 项，失败：0 项
+通过：337 项，跳过：0 项，失败：0 项
 结论：PASS
 ```
 

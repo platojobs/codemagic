@@ -35,16 +35,22 @@ private final class E2EClient {
         _ path: String,
         token: String? = nil,
         idempotencyKey: String? = nil,
+        headers: [String: String] = [:],
         json: Any? = nil,
         rawJSON: String? = nil
     ) -> HTTPResult {
         var request = URLRequest(url: url(for: path))
         request.httpMethod = method
+        // 条件请求必须绕过 URLCache，否则本地缓存会直接返回 200，掩盖服务端 304 行为。
+        request.cachePolicy = .reloadIgnoringLocalCacheData
         if let token {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
         if let idempotencyKey {
             request.setValue(idempotencyKey, forHTTPHeaderField: "Idempotency-Key")
+        }
+        for (name, value) in headers {
+            request.setValue(value, forHTTPHeaderField: name)
         }
         if let rawJSON {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -124,6 +130,21 @@ private func list(_ value: Any?) -> [[String: Any]] {
     (value as? [[String: Any]]) ?? []
 }
 
+private func stringList(_ value: Any?) -> [String] {
+    (value as? [String]) ?? []
+}
+
+/// 服务端目录使用完整 128 位 UUID；比较时归一化为 16 位短 UUID。
+private func shortUUID(_ value: String) -> String {
+    let lower = value.lowercased()
+    guard lower.count > 8,
+          lower.hasPrefix("0000"),
+          lower.contains("-0000-1000-8000-00805f9b34fb") else {
+        return lower
+    }
+    return String(lower.dropFirst(4).prefix(4)).uppercased()
+}
+
 private func text(_ object: [String: Any], _ key: String) -> String {
     (object[key] as? String) ?? ""
 }
@@ -142,6 +163,17 @@ private func errorMessage(_ data: Data) -> String {
 
 private func bodyText(_ data: Data) -> String {
     String(data: data, encoding: .utf8) ?? "<非 UTF-8 响应>"
+}
+
+/// HTTP 头大小写不敏感；`allHeaderFields` 的键不保证统一大小写。
+private func header(_ result: HTTPResult, _ name: String) -> String {
+    for (key, value) in result.headers {
+        guard let key = key as? String, key.caseInsensitiveCompare(name) == .orderedSame else {
+            continue
+        }
+        return (value as? String) ?? ""
+    }
+    return ""
 }
 
 private func rfc3339(_ date: Date) -> String {
@@ -339,6 +371,117 @@ private func run() -> Int32 {
     }
     let upsertOps = changes.filter { text($0, "op") == "upsert" }
     report.check(upsertOps.count >= 2, "变更操作为 upsert", "ops=\(changes.map { text($0, "op") })")
+
+    // MARK: 3.4 设备类型目录（公开只读 + 条件请求）
+
+    report.section("3.4 设备类型目录 /catalog/device-types（公开只读 + ETag/304）")
+    let catalogResponse = client.request("GET", "catalog/device-types")
+    report.check(
+        catalogResponse.status == 200,
+        "目录匿名可读且返回 200",
+        "status=\(catalogResponse.status) body=\(bodyText(catalogResponse.body))"
+    )
+    let catalogObject = jsonObject(catalogResponse.body) ?? [:]
+    let catalogItems = list(catalogObject["items"])
+    let catalogVersion = (catalogObject["version"] as? NSNumber)?.intValue ?? 0
+    report.check(catalogVersion > 0, "目录包含递增版本号", "version=\(catalogVersion)")
+    report.check(!text(catalogObject, "generatedAt").isEmpty, "目录包含 generatedAt")
+    report.check(catalogItems.count >= 5, "目录至少 5 个设备类型", "count=\(catalogItems.count)")
+
+    let requiredTypes = Set([
+        "cycling_speed_cadence", "environmental_sensor", "heart_rate_monitor",
+        "nordic_uart", "smart_scale",
+    ])
+    let actualTypes = Set(catalogItems.map { text($0, "type") })
+    report.check(
+        requiredTypes.isSubset(of: actualTypes),
+        "目录覆盖固定类型集合",
+        "missing=\(requiredTypes.subtracting(actualTypes))"
+    )
+
+    let catalogByType = Dictionary(uniqueKeysWithValues: catalogItems.map { (text($0, "type"), $0) })
+    if let env = catalogByType["environmental_sensor"] {
+        report.check(!text(env, "displayName").isEmpty, "环境传感器有 displayName")
+        report.check(!text(env, "description").isEmpty, "环境传感器有 description")
+        report.check(list(env["gattServices"]).count >= 2, "环境传感器声明 GATT 服务")
+        let envMetrics = list(env["metrics"])
+        report.check(envMetrics.count == 3, "环境传感器声明 3 个指标", "count=\(envMetrics.count)")
+        let temperature = envMetrics.first { text($0, "key") == "temperature_celsius" }
+        report.check(temperature != nil, "环境传感器包含 temperature_celsius")
+        report.check(
+            shortUUID(text(temperature ?? [:], "characteristicUuid")) == "2A6E",
+            "温度来源特征为 2A6E"
+        )
+        report.check(stringList(env["limitations"]).count >= 2, "环境传感器有目录限制说明")
+        let compatibility = env["compatibility"] as? [String: Any] ?? [:]
+        report.check(
+            (compatibility["platforms"] as? [String] ?? []).contains("ios"),
+            "环境传感器兼容性包含 ios"
+        )
+        report.check(!text(env, "updatedAt").isEmpty, "目录项包含 updatedAt")
+    } else {
+        report.check(false, "目录缺少 environmental_sensor")
+    }
+
+    if let heart = catalogByType["heart_rate_monitor"] {
+        let heartMetrics = list(heart["metrics"])
+        report.check(
+            heartMetrics.contains {
+                text($0, "key") == "heart_rate" && shortUUID(text($0, "characteristicUuid")) == "2A37"
+            },
+            "心率目录项指向 2A37"
+        )
+    }
+    if let scale = catalogByType["smart_scale"] {
+        let scaleMetrics = list(scale["metrics"])
+        report.check(
+            scaleMetrics.contains {
+                text($0, "key") == "weight_kg" && shortUUID(text($0, "characteristicUuid")) == "2A9D"
+            },
+            "体脂秤目录项指向 2A9D"
+        )
+    }
+    if let uart = catalogByType["nordic_uart"] {
+        report.check(list(uart["metrics"]).isEmpty, "NUS 透传设备不声明指标")
+    }
+
+    let catalogETag = header(catalogResponse, "ETag")
+    let catalogLastModified = header(catalogResponse, "Last-Modified")
+    report.check(!catalogETag.isEmpty, "目录响应包含 ETag", "etag=\(catalogETag)")
+    report.check(!catalogLastModified.isEmpty, "目录响应包含 Last-Modified")
+    report.check(
+        !header(catalogResponse, "Cache-Control").isEmpty,
+        "目录响应包含 Cache-Control"
+    )
+
+    if !catalogETag.isEmpty {
+        let notModified = client.request(
+            "GET",
+            "catalog/device-types",
+            headers: ["If-None-Match": catalogETag]
+        )
+        report.check(
+            notModified.status == 304,
+            "If-None-Match 命中返回 304",
+            "status=\(notModified.status) body=\(bodyText(notModified.body))"
+        )
+        report.check(
+            header(notModified, "ETag") == catalogETag,
+            "304 响应的 ETag 与首次一致"
+        )
+    }
+    if !catalogLastModified.isEmpty {
+        let notModified = client.request(
+            "GET",
+            "catalog/device-types",
+            headers: ["If-Modified-Since": catalogLastModified]
+        )
+        report.check(
+            notModified.status == 304,
+            "If-Modified-Since 命中返回 304",
+            "status=\(notModified.status)"
+        )
+    }
 
     // MARK: 3.5 型号 catalog 与复合键详情
 
@@ -1813,7 +1956,7 @@ private func run() -> Int32 {
         "diagnostics": "e2e diagnostics",
         "context": [
             "platform": "ios",
-            "appVersion": "0.18.0",
+            "appVersion": "0.19.0",
             "buildType": "debug",
             "osVersion": "15.5",
             "deviceModel": "iPhone15,3",

@@ -118,7 +118,7 @@ CoreBluetoothService.readingHandler
 
 - `APIConfiguration` 从 `Info.plist` 读取 `BASE_URL`（由 xcconfig 注入），校验 scheme 与 host，源码不含地址。
 - `URLSessionHTTPClient`：15s 超时、`ephemeral` 配置、`reloadIgnoringLocalCacheData`；非 2xx → `AppError.server`。
-- `ProductAPIClient`：`GET /api/v1/device-types` + `GET /api/v1/device-types/{type}/catalog`（产品 / 市场）、`GET /api/v1/my/devices/ios/{externalId}`（设备详情，Bearer token）；Codable 宽松解码，兼容 `{items}` 包裹与裸数组。0.3.2 起解析 `UserDevice` 的 `deviceType` / `vendor` / `firmwareVersion` / `compatibility` 与 catalog 固件 / 配件的 `vendor` / `compatibility`，`null` / 缺失 / 空串统一归一为 `nil`；0.3.3 起解析 `advertisedName`，可选字段缺省时按 absent 处理。
+- `ProductAPIClient`：`GET /api/v1/catalog/device-types`（设备类型目录，类型 / GATT / 指标 / 限制 / 兼容性）+ `GET /api/v1/device-types/{type}/catalog`（仅固件 / 配件）、`GET /api/v1/my/devices/ios/{externalId}`（设备详情，Bearer token）；`DeviceCatalogClient` 负责 `If-None-Match` / `If-Modified-Since` 条件请求、304 复用与 SQLite 缓存兜底。Codable 宽松解码，兼容缺失字段。0.3.2 起解析 `UserDevice` 的 `deviceType` / `vendor` / `firmwareVersion` / `compatibility` 与 catalog 固件 / 配件的 `vendor` / `compatibility`，`null` / 缺失 / 空串统一归一为 `nil`；0.3.3 起解析 `advertisedName`，可选字段缺省时按 absent 处理。
 - `CompatibilityInfo`（`Core/Models/DeviceCatalog.swift`）：动态 key 解码，`displayItems` 供展示、`filterTags` 供市场筛选（`deviceTypes` 显示为「型号」）。
 - `ReadingsAPIClient`（v0.4.0）：`GET .../readings`（`ReadingsPage`）与 `GET .../readings/summary`（`ReadingSummary`）；设备详情优先展示云端 24h 汇总，失败回退本地计算并标注「离线：本地数据」。折线与记录列表始终读本地 SQLite（7 天内）。
 - `AppError` 统一错误码：`NET-001` / `NET-002` / `NET-003` / `NET-004` / `DB-001` / `BT-004` / `SYNC-001`。
@@ -149,8 +149,8 @@ SyncEngine
 - 同步状态通过 `SyncEngine.onChange` 推给「我的」页，失败时保留 pending 并展示错误码与降级说明。
 - 401：`AppError.isUnauthorized` → `metadata.reloginRequired = true`，「我的」页展示「登录已失效」与「重新登录」；用户确认后才换号（旧账号数据不合并），否则前后台自动同步直接失败，不会静默建号。
 - 后台任务标识 `com.platojobs.codemagic.sync` 已在 `Info.plist` 的 `BGTaskSchedulerPermittedIdentifiers` 声明。
-- 契约联调：`scripts/e2e-contract.sh` 启动本地 `PJGoIoT`（`STORE=fixture`）并运行独立 Swift runner，真实网络覆盖匿名登录、双平台推送、device-types/catalog（含 `vendor` / `compatibility`）、复合键详情、`UserDevice` 新字段与 null 降级、别名/广播名分离、group 三态、幂等重放、LWW 冲突与 401/404；已接入 GitHub Actions `e2e-contract` job。
-- 产品 / 市场 / 详情：`ProductAPIClient` 使用 `device-types` + `{type}/catalog`（一次拿固件与配件），设备详情使用 `my/devices/ios/{externalId}` 复合键，不依赖 MAC。
+- 契约联调：`scripts/e2e-contract.sh` 启动本地 `PJGoIoT`（`STORE=fixture`）并运行独立 Swift runner，真实网络覆盖匿名登录、双平台推送、`catalog/device-types`（200 + `ETag` + 304）与 `{type}/catalog`（含 `vendor` / `compatibility`）、复合键详情、`UserDevice` 新字段与 null 降级、别名/广播名分离、group 三态、幂等重放、LWW 冲突与 401/404；已接入 GitHub Actions `e2e-contract` job。
+- 产品 / 市场 / 详情：`ProductAPIClient` 以 `catalog/device-types` 为目录唯一事实源，`{type}/catalog` 只补充固件与配件，设备详情使用 `my/devices/ios/{externalId}` 复合键，不依赖 MAC。
 - 市场筛选：`MarketViewModel` 维护 `allItems` + `selectedVendor` / `selectedCompatibility`，选项由 `item.vendor` 与 `item.compatibilityTags` 去重排序得到；`dropInvalidFilters` 在刷新后清除已失效的筛选值。
 - 跨平台设备：`SavedDevice.isConnectable` 仅在 `platform == "ios"` 时为真；Android 设备在列表标注不可连接并禁用入口。
 

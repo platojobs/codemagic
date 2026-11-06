@@ -43,6 +43,12 @@ struct ProductModel: Identifiable, Codable, Equatable {
     let gattServices: [GATTService]
     let compatibility: [String]
     let note: String
+    /// 服务端目录的稳定类型标识；为空表示该型号不是由 `/catalog/device-types` 构建。
+    let typeIdentifier: String
+    /// 服务端目录声明的指标；本地不再维护第二份。空数组表示透传设备。
+    let catalogMetrics: [CatalogMetric]
+    /// 服务端目录声明的限制，原样展示。
+    let catalogLimitations: [String]
 
     /// 产品库唯一键：优先服务端 id，其次 mac，最后退化为厂商 + 型号，保证列表可用。
     var id: String {
@@ -61,7 +67,10 @@ struct ProductModel: Identifiable, Codable, Equatable {
         gattServices: [GATTService],
         compatibility: [String],
         note: String = "",
-        apiIdentifier: String = ""
+        apiIdentifier: String = "",
+        typeIdentifier: String = "",
+        catalogMetrics: [CatalogMetric] = [],
+        catalogLimitations: [String] = []
     ) {
         self.mac = mac
         self.vendor = vendor
@@ -71,6 +80,9 @@ struct ProductModel: Identifiable, Codable, Equatable {
         self.compatibility = compatibility
         self.note = note
         self.apiIdentifier = apiIdentifier
+        self.typeIdentifier = typeIdentifier
+        self.catalogMetrics = catalogMetrics
+        self.catalogLimitations = catalogLimitations
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -84,6 +96,9 @@ struct ProductModel: Identifiable, Codable, Equatable {
         case services
         case compatibility
         case note
+        case typeIdentifier
+        case catalogMetrics
+        case catalogLimitations
     }
 
     /// 宽松解析：忽略未知字段；缺失字段给默认值；列表字段同时接受契约名与 Android 别名。
@@ -94,6 +109,9 @@ struct ProductModel: Identifiable, Codable, Equatable {
         vendor = (try? container.decode(String.self, forKey: .vendor)) ?? ""
         firmwareVersion = (try? container.decode(String.self, forKey: .firmwareVersion)) ?? ""
         note = (try? container.decode(String.self, forKey: .note)) ?? ""
+        typeIdentifier = (try? container.decode(String.self, forKey: .typeIdentifier)) ?? ""
+        catalogMetrics = (try? container.decode([CatalogMetric].self, forKey: .catalogMetrics)) ?? []
+        catalogLimitations = (try? container.decode([String].self, forKey: .catalogLimitations)) ?? []
 
         let deviceTypeAlias = (try? container.decode(String.self, forKey: .deviceType))
             ?? (try? container.decode(String.self, forKey: .model))
@@ -118,6 +136,9 @@ struct ProductModel: Identifiable, Codable, Equatable {
         try container.encode(gattServices, forKey: .gattServices)
         try container.encode(compatibility, forKey: .compatibility)
         try container.encode(note, forKey: .note)
+        try container.encode(typeIdentifier, forKey: .typeIdentifier)
+        try container.encode(catalogMetrics, forKey: .catalogMetrics)
+        try container.encode(catalogLimitations, forKey: .catalogLimitations)
     }
 
     private static func decodeCompatibility(

@@ -77,9 +77,9 @@ final class ProductDetailViewController: UIViewController {
                 Row(title: L10n.t("product.detail.metrics"), value: profile.metricsText),
                 Row(
                     title: L10n.t("product.detail.limitations"),
-                    value: profile.limitations.isEmpty
+                    value: profile.declaredLimitations == nil && profile.limitations.isEmpty
                         ? L10n.t("common.none")
-                        : profile.limitations.map(\.detail).joined(separator: L10n.t("common.listSeparator"))
+                        : profile.limitationsText
                 ),
             ],
             footer: L10n.t("product.detail.capabilityFooter")

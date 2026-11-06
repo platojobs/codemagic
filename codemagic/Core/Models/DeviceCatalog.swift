@@ -269,3 +269,172 @@ extension DeviceTypeInfo {
         compatibility: nil
     )
 }
+
+/// `GET /catalog/device-types` 中的单个指标（openapi 0.3.4 / 契约 0.14.0）。
+/// `characteristicUuid` 是特征 UUID，不是服务 UUID；客户端据此定位订阅目标。
+struct CatalogMetric: Codable, Equatable {
+    let key: String
+    let unit: String
+    let characteristicUUID: String
+
+    private enum CodingKeys: String, CodingKey {
+        case key
+        case unit
+        case characteristicUuid
+    }
+
+    init(key: String, unit: String, characteristicUUID: String) {
+        self.key = key
+        self.unit = unit
+        self.characteristicUUID = characteristicUUID
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        key = (try? container.decodeIfPresent(String.self, forKey: .key)) ?? ""
+        unit = (try? container.decodeIfPresent(String.self, forKey: .unit)) ?? ""
+        characteristicUUID = (try? container.decodeIfPresent(String.self, forKey: .characteristicUuid)) ?? ""
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(key, forKey: .key)
+        try container.encode(unit, forKey: .unit)
+        try container.encode(characteristicUUID, forKey: .characteristicUuid)
+    }
+}
+
+/// `GET /catalog/device-types` 的目录项：服务端维护的设备类型事实。
+/// 本地不再维护同名常量；这里只负责解码与展示，不复制一份能力表。
+struct DeviceTypeCatalogItem: Decodable, Equatable {
+    let type: String
+    let displayName: String
+    let descriptionText: String
+    let gattServices: [GATTService]
+    let metrics: [CatalogMetric]
+    let limitations: [String]
+    let compatibility: CompatibilityInfo?
+    let updatedAt: Date
+
+    private enum CodingKeys: String, CodingKey {
+        case type
+        case displayName
+        case description
+        case gattServices
+        case metrics
+        case limitations
+        case compatibility
+        case updatedAt
+    }
+
+    init(
+        type: String,
+        displayName: String,
+        descriptionText: String = "",
+        gattServices: [GATTService] = [],
+        metrics: [CatalogMetric] = [],
+        limitations: [String] = [],
+        compatibility: CompatibilityInfo? = nil,
+        updatedAt: Date = Date(timeIntervalSince1970: 0)
+    ) {
+        self.type = type
+        self.displayName = displayName
+        self.descriptionText = descriptionText
+        self.gattServices = gattServices
+        self.metrics = metrics
+        self.limitations = limitations
+        self.compatibility = compatibility
+        self.updatedAt = updatedAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        type = (try? container.decodeIfPresent(String.self, forKey: .type)) ?? ""
+        displayName = (try? container.decodeIfPresent(String.self, forKey: .displayName)) ?? ""
+        descriptionText = (try? container.decodeIfPresent(String.self, forKey: .description)) ?? ""
+        gattServices = (try? container.decodeIfPresent([GATTService].self, forKey: .gattServices)) ?? []
+        metrics = (try? container.decodeIfPresent([CatalogMetric].self, forKey: .metrics)) ?? []
+        limitations = (try? container.decodeIfPresent([String].self, forKey: .limitations)) ?? []
+        compatibility = try? container.decodeIfPresent(CompatibilityInfo.self, forKey: .compatibility)
+        updatedAt = SyncDateCodec.parse(
+            (try? container.decodeIfPresent(String.self, forKey: .updatedAt)) ?? ""
+        ) ?? Date(timeIntervalSince1970: 0)
+    }
+
+    /// 展示名缺失时退回稳定 type，避免空标题；两者都为空才使用占位文案。
+    var resolvedDisplayName: String {
+        if !displayName.isEmpty { return displayName }
+        return type
+    }
+}
+
+/// `GET /catalog/device-types` 的完整快照。
+struct DeviceTypeCatalog: Decodable, Equatable {
+    let version: Int64
+    let generatedAt: Date
+    let items: [DeviceTypeCatalogItem]
+
+    private enum CodingKeys: String, CodingKey {
+        case version
+        case generatedAt
+        case items
+    }
+
+    init(
+        version: Int64,
+        generatedAt: Date,
+        items: [DeviceTypeCatalogItem]
+    ) {
+        self.version = version
+        self.generatedAt = generatedAt
+        self.items = items
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        version = (try? container.decodeIfPresent(Int64.self, forKey: .version)) ?? 0
+        generatedAt = SyncDateCodec.parse(
+            (try? container.decodeIfPresent(String.self, forKey: .generatedAt)) ?? ""
+        ) ?? Date(timeIntervalSince1970: 0)
+        items = (try? container.decodeIfPresent([DeviceTypeCatalogItem].self, forKey: .items)) ?? []
+    }
+}
+
+extension CatalogMetric {
+    /// 目录里指标 key 与本地 `ReadingMetric` 的别名映射。
+    /// 只用于展示名称与归类，不代表本地能解析；能否解析由特征 UUID 判定。
+    var localMetric: ReadingMetric? {
+        switch key.lowercased() {
+        case "temperature", "temperature_celsius": return .temperature
+        case "humidity", "relative_humidity": return .humidity
+        case "pressure", "pressure_hpa": return .pressure
+        case "heart_rate": return .heartRate
+        case "battery": return .battery
+        case "co2": return .co2
+        default: return nil
+        }
+    }
+
+    /// 本地阅读器订阅的特征是否与目录声明的来源特征一致。
+    var localCharacteristic: ReadingCharacteristic? {
+        guard !characteristicUUID.isEmpty else { return nil }
+        return ReadingCharacteristic.allCases.first {
+            MarketInsights.matches($0.rawValue, characteristicUUID)
+        }
+    }
+
+    var isSupportedLocally: Bool { localCharacteristic != nil }
+
+    /// 指标展示名：已知 key 用本地指标文案，未知 key 原样展示，不编造中文名。
+    var displayName: String {
+        localMetric?.displayName ?? (key.isEmpty ? L10n.t("common.unknown") : key)
+    }
+
+    var displayText: String {
+        let unitText = unit.isEmpty ? "" : " · \(unit)"
+        if isSupportedLocally {
+            return "\(displayName)\(unitText)"
+        }
+        return L10n.f("catalog.metricUnsupported", "\(displayName)\(unitText)")
+    }
+}

@@ -33,7 +33,7 @@ iOS 设备详情页独立于底部导航：`Modules/Devices/Scenes/DeviceDetailV
 | --- | --- | --- | --- |
 | 首页 | CoreBluetooth / BLE 真实扫描 + 本地最近设备 + 本地已保存设备 + 本地场景 | `BluetoothLeScanner` + `ScanCallback` → Room | `CBCentralManager` → `CoreBluetoothService`；卡片读 `SavedDeviceStore` / `ReadingsStore` / `RecentDeviceStore`，告警数读 `ScanLogStore`，场景读 `ScenarioStore` |
 | 智能 | 本地规则 + 本地触发日志 + 本地场景 | Room `rules` / `scan_logs` | SQLite `rules` / `scan_logs` / `scenarios`（场景仅本机） |
-| 产品 | 网络型号库 | Retrofit `GET api/products` | `GET /api/v1/device-types` + `GET /api/v1/device-types/{type}/catalog` |
+| 产品 | 网络型号库 | Retrofit `GET api/products` | `GET /api/v1/catalog/device-types`（类型 / GATT / 指标 / 限制 / 兼容性）+ `GET /api/v1/device-types/{type}/catalog`（仅固件 / 配件）；本地 SQLite 仅缓存与断网兜底 |
 | 市场 | 网络配件与固件信息 | Retrofit `GET api/market` | `GET /api/v1/device-types/{type}/catalog` 聚合 firmware + accessories |
 | 我的 | 系统权限状态 + 本地扫描日志 + 版本信息 + 同步状态 | 系统 API + Room `scan_logs` + 同步引擎 | `CBManager.authorization` + SQLite `scan_logs` + `SyncEngine` 状态 |
 | 设备详情 | 连接蓝牙后拉取设备信息，失败降级本地缓存；读数来自本地采集 + 云端汇总 | Retrofit `GET /api/v1/devices/{mac}` + Room 缓存 | `GET /api/v1/my/devices/ios/{externalId}`（复合键）优先；云端字段缺失或断网时降级 SQLite `device_info_cache` / `saved_devices`；读数折线/最近记录读 SQLite `readings`，24h 汇总优先 `.../readings/summary`，失败回退本地计算并标注「离线：本地数据」 |
@@ -52,10 +52,11 @@ iOS 设备详情页独立于底部导航：`Modules/Devices/Scenes/DeviceDetailV
 | 用途 | Android | iOS | 说明 |
 | --- | --- | --- | --- |
 | 匿名登录 | `POST /api/v1/auth/anonymous` | `POST /api/v1/auth/anonymous` | 返回 `{userId, token, expiresAt}`；token 存 Keychain，到期日只读展示 |
-| 产品列表 | `GET api/products` | `GET /api/v1/device-types` + `.../{type}/catalog` | 见 3.4 |
-| 市场列表 | `GET api/market` | `GET /api/v1/device-types/{type}/catalog` | 聚合 firmware + accessories |
+| 产品 / 市场类型目录 | — | `GET /api/v1/catalog/device-types` | 唯一事实源：`{version, generatedAt, items[]}`，支持 `If-None-Match` / `If-Modified-Since` → 304；匿名可读 |
+| 产品列表 | `GET api/products` | `GET /api/v1/catalog/device-types` + `.../{type}/catalog` | 见 3.4 |
+| 市场列表 | `GET api/market` | `GET /api/v1/device-types/{type}/catalog` | 仅聚合 firmware + accessories |
 | 设备信息 | `GET /api/v1/devices/{mac}` | `GET /api/v1/my/devices/ios/{externalId}` | iOS 用复合键，不依赖 MAC |
-| 型号元数据 | `GET /api/v1/device-types/{type}` | `GET /api/v1/device-types/{type}` | iOS 型号列表与 catalog |
+| 型号元数据 | `GET /api/v1/device-types/{type}` | `GET /api/v1/device-types/{type}` | Android 使用；iOS 目录字段改由 `catalog/device-types` 提供 |
 | 增量拉取 | `GET /api/v1/sync/changes?cursor=&limit=` | 同左 | 返回 `{changes[], nextCursor, hasMore}`；cursor 失效返回 410，客户端以 0 全量重拉 |
 | 批量推送 | `POST /api/v1/sync/push` | 同左 | 批量 + `Idempotency-Key` |
 | 型号 catalog | `GET /api/v1/device-types/{type}/catalog` | 同左 | 一次返回 `deviceType` + `firmwares` + `accessories`；产品 / 市场的数据源 |
@@ -158,7 +159,7 @@ gattServices: [{ uuid, name, characteristics? }]
 | `summary` | `description` | Android `MarketItemDto` |
 | `note` | — | Android `ProductDto.note`（可选展示） |
 
-`GET /api/v1/device-types` 的包裹为 `{"items":[...]}`，客户端同时兼容裸数组；`catalog` 直接返回对象，无包裹层。旧 `{"products":[...]}` / `{"marketItems":[...]}` 客户端已不再请求（历史别名解析仍保留在 `ProductModel` / `MarketItem` 中以兼容本地缓存）。
+`GET /api/v1/catalog/device-types` 返回 `{version, generatedAt, items[]}`（无包裹层）；`catalog` 直接返回对象。目录是类型 / GATT / 指标 / 限制 / 兼容性的唯一事实源；逐型号 `{type}/catalog` 仅补充固件与配件。旧 `{"products":[...]}` / `{"marketItems":[...]}` 客户端已不再请求（历史别名解析仍保留在 `ProductModel` / `MarketItem` 中以兼容本地缓存）。
 
 ### 3.3 设备标识符（与 openapi 一致）
 
@@ -168,7 +169,7 @@ gattServices: [{ uuid, name, characteristics? }]
 - 服务端只做大小写规范化，不改写格式：iOS 的 `externalId` 必须是 UUID，Android 的必须是 6 字节 MAC，否则 400 `INVALID_MAC` / `BAD_REQUEST`。
 - 设备表同时保留本机 `peripheral_id`（CoreBluetooth 标识）与服务端键 `platform + external_id`；迁移 v2 由 `peripheral_id` 回填 `external_id`。
 - 迁移 **v4** 新增 `advertised_name`，并从历史 `name` 列回填广播名；`name` 列为 v4 前的遗留列，与 `advertised_name` 同值写入以兼容降级版本。同版本新增 `alias_patch` / `advertised_name_patch` / `group_patch` 记录待上报三态，`markSynced` 成功后归零。
-- iOS 的型号元数据与固件 / 配件使用 `GET /api/v1/device-types/{type}/catalog`；单台设备详情使用 `GET /api/v1/my/devices/ios/{externalId}`，均不依赖 MAC。
+- iOS 的型号目录字段来自 `GET /api/v1/catalog/device-types`，固件 / 配件来自 `GET /api/v1/device-types/{type}/catalog`；单台设备详情使用 `GET /api/v1/my/devices/ios/{externalId}`，均不依赖 MAC。
 - `PushDevice` / `UserDevice` **不再缺型号字段**（openapi 0.3.2）：`UserDevice` 已含 `deviceType` / `vendor` / `firmwareVersion` / `compatibility`；`PushDevice.deviceType` 为**可选**字段。
 - openapi 0.3.3 起 `UserDevice` 新增 `advertisedName`：扫描只写广播名，用户编辑只写别名，二者互不覆盖；本地展示名回落顺序为 alias → advertisedName → deviceType。
 - iOS 推送 `deviceType` 的真实来源：设备详情从 `GET /my/devices/ios/{externalId}` 或 catalog 匹配拿到型号后写回 `saved_devices.device_type`，下次推送带上；无法推导时**保持 NULL 不传**，不填假值。`vendor` / `firmwareVersion` 仍为展示用元数据，不参与同类设备归类。
@@ -177,7 +178,7 @@ gattServices: [{ uuid, name, characteristics? }]
 
 ### 3.4 与 `openapi.yaml` 的对齐状态
 
-`PJGoIoT/api/openapi.yaml`（v0.15.0 起标注 0.9.0，后端 v0.13.0；设备 / 同步等既有端点为 0.7.0 起）提供 `POST /auth/anonymous`、`GET /sync/changes`、`POST /sync/push`、`GET /device-types/{type}/catalog`、`GET /my/devices/{platform}/{externalId}`、`/households*`、`/households/{id}/rooms*`、`/households/{id}/members/{userId}`、`/households/{id}/leave`、`/households/{id}/invitations*`、`/households/{id}/rooms/order`、`PATCH /my/devices/{platform}/{externalId}` 等。逐项核对结果：
+`PJGoIoT/api/openapi.yaml`（后端 v0.18.0，契约 0.14.0）提供 `POST /auth/anonymous`、`GET /sync/changes`、`POST /sync/push`、`GET /catalog/device-types`、`GET /device-types/{type}/catalog`、`GET /my/devices/{platform}/{externalId}`、`/households*`、`/households/{id}/rooms*`、`/households/{id}/members/{userId}`、`/households/{id}/leave`、`/households/{id}/invitations*`、`/households/{id}/rooms/order`、`PATCH /my/devices/{platform}/{externalId}` 等。逐项核对结果：
 
 | 项 | 状态 |
 | --- | --- |
@@ -188,8 +189,8 @@ gattServices: [{ uuid, name, characteristics? }]
 | 冲突 `conflicts[].reason`（`server_newer` / `clock_clamped` / `key_taken`） | **已对齐**：服务端获胜并提示「另一台设备改过这条」；冲突响应中缺省的可选字段按 `absent` 解析（保留本地值）；E2E 校验旧版本 push 返回 `server_newer` 且服务端数据未被覆盖 |
 | `deleted` / `deletedAt` tombstone | **已对齐**：软删除上传 `deleted: true`，拉取删除写本地 tombstone |
 | 错误体 `{"error":{"code","message"}}` | **已对齐**：客户端解析为 `AppError.api`，保留服务端 code；错误码枚举见第 4 节 |
-| `GET /api/v1/device-types` | **已对齐**：产品列表数据源；兼容 `{items}` 与裸数组 |
-| `GET /api/v1/device-types/{type}/catalog` | **已对齐**：产品型号元数据、市场固件 + 配件、型号 GATT 均来自该端点；E2E 校验结构 |
+| `GET /api/v1/catalog/device-types`（0.14.0） | **已对齐**：类型列表 / GATT / 指标 / 限制 / 兼容性唯一来源；匿名 200；`ETag` / `Last-Modified` / `Cache-Control`；`If-None-Match` / `If-Modified-Since` 命中 304；SQLite 迁移 v13 缓存原始 JSON |
+| `GET /api/v1/device-types/{type}/catalog` | **已对齐**：仅补充固件 + 配件与型号厂商；不再提供类型 / GATT / 指标 / 限制 / 兼容性判定；E2E 校验结构 |
 | `GET /api/v1/my/devices/ios/{externalId}` | **已对齐**：iOS 设备详情主数据源，携带 Bearer token；E2E 校验 200 与跨用户 404 |
 | `UserDevice.deviceType` / `vendor` / `firmwareVersion` / `compatibility`（0.3.2） | **已对齐**：四个字段均可 null；`ProductModel` 解析后参与详情页展示，`deviceType` 同时写回本地供推送；E2E 校验已注册型号（`nordic_uart` → `vendor=Nordic Semiconductor`、`compatibility.platforms` 含 `ios`）与未注册型号（三字段均为 `null`，`alias` / `group` 仍返回） |
 | catalog `firmwares[]` / `accessories[]` 的 `vendor` / `compatibility`（0.3.2） | **已对齐**：固件与配件均解析 `vendor` 与兼容性对象；市场条目展示真实厂商与兼容性，筛选维度直接取自这些字段；E2E 校验固件全部带 `vendor` 与 `compatibility.platforms`、配件全部带 `compatibility` |
@@ -199,7 +200,7 @@ gattServices: [{ uuid, name, characteristics? }]
 | `GET /api/v1/my/devices` / `GET /api/v1/my/devices/{mac}` | **v0.14.0 起使用**：`GET my/devices` 用于成员可见设备的契约校验；iOS 设备详情仍走复合键；E2E 校验鉴权与越权 |
 | `households` / `invitations` / `rooms` / `PATCH my/devices`（0.8.0） | **已对齐**：家庭落库与当前家庭持久化；邀请码 201 + `expiresAt`；房间以服务端为准（local / pending / synced）；设备归属独立 PATCH，三态（缺失 / 空串 / 非空）；member 403 `FORBIDDEN`、跨家庭 404、个人家庭不可删；E2E 第 9 节覆盖完整链路 |
 | 成员移除 / 退出 / 邀请码管理 / 房间整段排序（0.9.0，v0.15.0） | **已对齐**：`DELETE /households/{id}/members/{userId}` 与 `POST /households/{id}/leave` 均 204；owner 带成员退出 409 `CONFLICT`，客户端按 HTTP 状态 + 端点上下文机读判定并映射为「请先转让所有权或移除其他成员」，不解析 message；`GET /invitations` 只取 `codeHashPrefix` / `status` / `attempts` / `expiresAt`（模型无 `code`），撤销 204 且撤销后 claim 404；`PUT /rooms/order` 整段提交，缺项 / 多项 / 重复 409 后自动重新 GET 并提示「房间列表已变化，已刷新」；`GET /households` 计数直接用服务端值；E2E 第 9 节与真 Postgres 脚本均覆盖 |
-| 产品 / 市场 / 设备详情（iOS） | **已切到新端点**，不再请求 `api/products` / `api/market` / `api/device/{peripheralUUID}` |
+| 产品 / 市场 / 设备详情（iOS） | **已切到目录端点**：类型 / GATT / 指标 / 限制 / 兼容性读 `catalog/device-types`，固件 / 配件读逐型号 catalog；不再请求 `api/products` / `api/market` / `api/device/{peripheralUUID}` |
 | `GET /api/v1/devices/{mac}` | **仍可用，但仅 Android 使用**；iOS 本机设备没有 MAC，不再调用该端点 |
 
 iOS 端不再存在“历史端点”调用；唯一保留的旧路径 `/api/v1/devices/{mac}` 由 Android 使用，iOS 不涉及。
@@ -211,7 +212,8 @@ iOS 端不再存在“历史端点”调用；唯一保留的旧路径 `/api/v1/
 - 匿名登录取得 `token`；
 - 同一台实体设备分别以 `platform=ios`（`externalId` 大写 UUID）与 `platform=android`（`externalId` 大写 MAC）推送，两条记录共享 `mac` / `alias` / `group`；
 - `changes` 拉回 `platform` / `externalId` / `mac` 形状；
-- `GET /device-types` 与 `GET /device-types/{type}/catalog` 返回型号、固件、配件；
+- `GET /catalog/device-types` 匿名 200，版本 / `generatedAt` / 5 个类型 / GATT / 指标 / 限制 / 兼容性 / `updatedAt` 字段齐全；完整 UUID 归一化到 `2A6E` / `2A37` / `2A9D`；NUS 声明空指标；`ETag` / `Last-Modified` / `Cache-Control` 存在，`If-None-Match` 与 `If-Modified-Since` 均命中 304（请求绕过 `URLCache`）；
+- `GET /device-types/{type}/catalog` 返回固件与配件，不再作为目录字段判定来源；
 - catalog 的固件全部带 `vendor` 与 `compatibility.platforms`，配件全部带 `compatibility` 对象，且至少 1 个配件带 `vendor`；
 - `GET /my/devices/ios/{externalId}` 返回 `platform=ios` 与大写 UUID；
 - 推送已注册型号（`deviceType = nordic_uart`）后拉回：`deviceType`、`vendor`、`compatibility` 均补全；推送未注册型号后拉回：三者均为 `null`，且 `alias` / `group` 仍在；

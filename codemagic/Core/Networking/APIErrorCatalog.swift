@@ -39,6 +39,8 @@ enum APIErrorCatalog {
         "CONFLICT": Entry(handling: .terminal, message: L10n.t("error.conflict")),
         "PAYLOAD_TOO_LARGE": Entry(handling: .terminal, message: L10n.t("error.payloadTooLarge")),
         "NOT_IMPLEMENTED": Entry(handling: .terminal, message: L10n.t("error.notImplemented")),
+        // 客户端内部状态：收到 304 却没有本地缓存，属于异常而非服务端错误。
+        "CATALOG_CACHE_MISSING": Entry(handling: .terminal, message: L10n.t("catalog.cacheMissing")),
     ]
 
     static func entry(for code: String) -> Entry {

@@ -846,6 +846,14 @@
 "market.compatibility.limitations" = "已知限制：%@";
 "market.compatibility.noMetrics" = "没有识别到可解析指标";
 "market.compatibility.noServices" = "未登记 GATT 服务";
+"market.compatibility.noLimitations" = "未声明已知限制";
+"catalog.updatedAt" = "目录更新时间：%@";
+"catalog.offlineCache" = "离线缓存，未能连接服务端";
+"catalog.metricUnsupported" = "%@ · 当前版本不支持";
+"catalog.metricsPassthrough" = "透传设备：目录未声明指标，由客户端解析后上报";
+"catalog.cacheMissing" = "本地缺少目录缓存，无法使用 304 响应";
+"catalog.decodeFailed" = "设备类型目录解析失败";
+"catalog.refreshFailed" = "目录刷新失败：%@";
 "market.guide.health.title" = "健康监测";
 "market.guide.health.body" = "选带心率服务（0x180D）与心率测量特征（0x2A37）的设备。App 只解析该特征的心率读数，其它健康类自定义报文不会自动识别。";
 "market.guide.environment.title" = "环境采集";

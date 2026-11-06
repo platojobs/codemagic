@@ -6,6 +6,8 @@ struct ProductCatalogSnapshot: Equatable {
     let marketItems: [MarketItem]
     /// 配件/固件部分失败时不为空；型号仍可用于兼容性查询。
     let marketItemsError: AppError?
+    /// 目录来源与更新时间；nil 表示使用没有目录元数据的降级实现（如测试桩）。
+    let catalogInfo: DeviceCatalogSnapshot?
 }
 
 /// 产品库 / 市场 / 设备信息的数据源协议。
@@ -16,9 +18,17 @@ protocol ProductServicing {
         peripheralID: UUID,
         completion: @escaping (Result<ProductModel, AppError>) -> Void
     )
+    /// 一次取回型号与市场条目；真实客户端保证只遍历一遍目录。
+    func fetchCatalogSnapshot(
+        completion: @escaping (Result<ProductCatalogSnapshot, AppError>) -> Void
+    )
+    /// 首屏先渲染的本地目录缓存；没有缓存返回 nil。
+    func cachedCatalogSnapshot() -> ProductCatalogSnapshot?
 }
 
 extension ProductServicing {
+    func cachedCatalogSnapshot() -> ProductCatalogSnapshot? { nil }
+
     /// 默认实现分两次取；真实客户端覆盖为单次遍历。
     /// 型号是兼容性查询的核心，型号失败才整体失败；配件/固件失败只降级为错误提示。
     func fetchCatalogSnapshot(
@@ -35,13 +45,15 @@ extension ProductServicing {
                         completion(.success(ProductCatalogSnapshot(
                             products: products,
                             marketItems: items,
-                            marketItemsError: nil
+                            marketItemsError: nil,
+                            catalogInfo: nil
                         )))
                     case .failure(let error):
                         completion(.success(ProductCatalogSnapshot(
                             products: products,
                             marketItems: [],
-                            marketItemsError: error
+                            marketItemsError: error,
+                            catalogInfo: nil
                         )))
                     }
                 }
@@ -50,27 +62,33 @@ extension ProductServicing {
     }
 }
 
-/// 基于 URLSession + Codable 的实现，对齐 `PJGoIoT/api/openapi.yaml` v0.3.1：
-/// - `GET /api/v1/device-types` → 型号列表（`{items:[...]}`）
-/// - `GET /api/v1/device-types/{type}/catalog` → 型号元数据 + 固件 + 配件
+/// 基于 URLSession + Codable 的实现，对齐 `PJGoIoT/api/openapi.yaml` v0.3.5（契约 0.14.0）：
+/// - `GET /api/v1/catalog/device-types` → 设备类型目录（类型 / GATT / 指标 / 限制 / 兼容性）
+/// - `GET /api/v1/device-types/{type}/catalog` → 单型号固件 + 配件
 /// - `GET /api/v1/my/devices/ios/{externalId}` → 当前用户的单台 iOS 设备记录
 ///
-/// 产品 / 市场的固件与配件均来自 catalog，不再调用历史 `api/products` / `api/market`
-/// 或按 MAC 拼接多个端点。iOS 详情使用复合键路径，避免依赖无法获取的蓝牙 MAC。
+/// 类型清单与能力信息只认目录接口；逐型号 catalog 仅补充固件 / 配件，不参与
+/// 类型、GATT、指标、限制、兼容性的判定，避免两份互相竞争的真值。
 final class ProductAPIClient: ProductServicing {
     private let configuration: APIConfiguration
     private let httpClient: HTTPClient
     private let tokenStore: TokenStoring?
+    private let catalogService: DeviceCatalogServicing
     private let decoder = JSONDecoder()
 
     init(
         configuration: APIConfiguration,
         httpClient: HTTPClient = URLSessionHTTPClient(),
-        tokenStore: TokenStoring? = nil
+        tokenStore: TokenStoring? = nil,
+        catalogService: DeviceCatalogServicing? = nil
     ) {
         self.configuration = configuration
         self.httpClient = httpClient
         self.tokenStore = tokenStore
+        self.catalogService = catalogService ?? DeviceCatalogClient(
+            configuration: configuration,
+            httpClient: httpClient
+        )
     }
 
     // MARK: - Products / Market
@@ -78,8 +96,8 @@ final class ProductAPIClient: ProductServicing {
     func fetchProducts(completion: @escaping (Result<[ProductModel], AppError>) -> Void) {
         loadCatalogs { result in
             switch result {
-            case .success(let pairs):
-                completion(.success(pairs.map { self.product(from: $0.type, catalog: $0.catalog) }))
+            case .success(let snapshot):
+                completion(.success(self.products(from: snapshot)))
             case .failure(let error):
                 completion(.failure(error))
             }
@@ -89,8 +107,13 @@ final class ProductAPIClient: ProductServicing {
     func fetchMarketItems(completion: @escaping (Result<[MarketItem], AppError>) -> Void) {
         loadCatalogs { result in
             switch result {
-            case .success(let pairs):
-                completion(.success(self.marketItems(from: pairs)))
+            case .success(let snapshot):
+                let items = self.marketItems(from: snapshot.pairs)
+                if items.isEmpty, let error = snapshot.catalogError {
+                    completion(.failure(error))
+                } else {
+                    completion(.success(items))
+                }
             case .failure(let error):
                 completion(.failure(error))
             }
@@ -103,16 +126,28 @@ final class ProductAPIClient: ProductServicing {
     ) {
         loadCatalogs { result in
             switch result {
-            case .success(let pairs):
+            case .success(let snapshot):
+                let items = self.marketItems(from: snapshot.pairs)
                 completion(.success(ProductCatalogSnapshot(
-                    products: pairs.map { self.product(from: $0.type, catalog: $0.catalog) },
-                    marketItems: self.marketItems(from: pairs),
-                    marketItemsError: nil
+                    products: self.products(from: snapshot),
+                    marketItems: items,
+                    marketItemsError: items.isEmpty ? snapshot.catalogError : nil,
+                    catalogInfo: snapshot.catalogInfo
                 )))
             case .failure(let error):
                 completion(.failure(error))
             }
         }
+    }
+
+    func cachedCatalogSnapshot() -> ProductCatalogSnapshot? {
+        guard let info = catalogService.cachedSnapshot() else { return nil }
+        return ProductCatalogSnapshot(
+            products: info.catalog.items.map { product(from: $0, catalog: nil) },
+            marketItems: [],
+            marketItemsError: nil,
+            catalogInfo: info
+        )
     }
 
     // MARK: - Device info
@@ -142,31 +177,48 @@ final class ProductAPIClient: ProductServicing {
     // MARK: - Catalog loading
 
     private struct CatalogPair {
-        let type: DeviceTypeInfo
+        let type: DeviceTypeCatalogItem
         let catalog: DeviceCatalog?
     }
 
-    /// 先取型号列表，再逐个取 catalog；单个 catalog 失败时降级为仅有型号元数据，
-    /// 只有全部失败才整体报错，避免一个坏型号导致产品 / 市场空白。
-    private func loadCatalogs(completion: @escaping (Result<[CatalogPair], AppError>) -> Void) {
-        fetchDeviceTypes { [weak self] result in
+    private struct CatalogLoadResult {
+        let pairs: [CatalogPair]
+        let catalogInfo: DeviceCatalogSnapshot
+        /// 逐型号 catalog（固件 / 配件）部分失败时的最后一个错误。
+        let catalogError: AppError?
+    }
+
+    /// 先取服务端目录（带条件请求与缓存兜底），再逐个取固件 / 配件。
+    /// 单个逐型号 catalog 失败只降级为「无固件 / 无配件」，目录本身仍可展示。
+    private func loadCatalogs(completion: @escaping (Result<CatalogLoadResult, AppError>) -> Void) {
+        catalogService.refresh { [weak self] result in
             guard let self else { return }
             switch result {
             case .failure(let error):
                 completion(.failure(error))
-            case .success(let types):
-                guard !types.isEmpty else {
-                    completion(.success([]))
+            case .success(let info):
+                guard !info.catalog.items.isEmpty else {
+                    completion(.success(CatalogLoadResult(
+                        pairs: [],
+                        catalogInfo: info,
+                        catalogError: nil
+                    )))
                     return
                 }
-                self.fetchCatalogs(for: types, completion: completion)
+                self.fetchCatalogs(for: info.catalog.items) { pairs, lastError in
+                    completion(.success(CatalogLoadResult(
+                        pairs: pairs,
+                        catalogInfo: info,
+                        catalogError: lastError
+                    )))
+                }
             }
         }
     }
 
     private func fetchCatalogs(
-        for types: [DeviceTypeInfo],
-        completion: @escaping (Result<[CatalogPair], AppError>) -> Void
+        for types: [DeviceTypeCatalogItem],
+        completion: @escaping (_ pairs: [CatalogPair], _ lastError: AppError?) -> Void
     ) {
         var pairs: [CatalogPair] = []
         var lastError: AppError?
@@ -174,11 +226,7 @@ final class ProductAPIClient: ProductServicing {
 
         func next() {
             guard index < types.count else {
-                if pairs.isEmpty, let lastError {
-                    completion(.failure(lastError))
-                } else {
-                    completion(.success(pairs))
-                }
+                completion(pairs, lastError)
                 return
             }
             let type = types[index]
@@ -198,21 +246,6 @@ final class ProductAPIClient: ProductServicing {
         next()
     }
 
-    private func fetchDeviceTypes(completion: @escaping (Result<[DeviceTypeInfo], AppError>) -> Void) {
-        let url = endpoint("api/v1/device-types")
-        send(url, as: DeviceTypeListEnvelope.self) { result in
-            switch result {
-            case .success(let envelope):
-                completion(.success(envelope.items))
-            case .failure(.decoding):
-                // 兼容直接返回数组的后端。
-                self.send(url, as: [DeviceTypeInfo].self, completion: completion)
-            case .failure(let error):
-                completion(.failure(error))
-            }
-        }
-    }
-
     private func fetchCatalog(
         _ type: String,
         completion: @escaping (Result<DeviceCatalog, AppError>) -> Void
@@ -228,25 +261,29 @@ final class ProductAPIClient: ProductServicing {
 
     // MARK: - Mapping
 
-    private func product(from type: DeviceTypeInfo, catalog: DeviceCatalog?) -> ProductModel {
+    private func products(from snapshot: CatalogLoadResult) -> [ProductModel] {
+        snapshot.pairs.map { product(from: $0.type, catalog: $0.catalog) }
+    }
+
+    private func product(from type: DeviceTypeCatalogItem, catalog: DeviceCatalog?) -> ProductModel {
         let firmware = catalog?.firmwares.first?.version ?? ""
-        let deviceType = catalog?.deviceType.name.isEmpty == false
-            ? (catalog?.deviceType.name ?? "")
-            : (type.name.isEmpty ? type.type : type.name)
-        let compatibility = catalog?.deviceType.compatibility ?? type.compatibility
         let noteParts = [
             type.descriptionText,
             catalog?.accessories.isEmpty == false ? L10n.f("product.accessoryCount", String(describing: catalog?.accessories.count ?? 0)) : "",
         ]
         return ProductModel(
             mac: "",
-            vendor: type.vendor,
-            deviceType: deviceType,
+            // 目录不提供厂商字段；逐型号 catalog 有则展示，没有保持空串，不编造。
+            vendor: catalog?.deviceType.vendor ?? "",
+            deviceType: type.resolvedDisplayName,
             firmwareVersion: firmware,
             gattServices: type.gattServices,
-            compatibility: compatibility?.displayItems ?? [],
+            compatibility: type.compatibility?.displayItems ?? [],
             note: noteParts.filter { !$0.isEmpty }.joined(separator: L10n.t("common.semicolonSeparator")),
-            apiIdentifier: type.type
+            apiIdentifier: type.type,
+            typeIdentifier: type.type,
+            catalogMetrics: type.metrics,
+            catalogLimitations: type.limitations
         )
     }
 
@@ -362,19 +399,6 @@ final class ProductAPIClient: ProductServicing {
             )
         }
         return .server(statusCode: response.statusCode)
-    }
-
-    private struct DeviceTypeListEnvelope: Decodable {
-        let items: [DeviceTypeInfo]
-
-        private enum CodingKeys: String, CodingKey {
-            case items
-        }
-
-        init(from decoder: Decoder) throws {
-            let container = try decoder.container(keyedBy: CodingKeys.self)
-            items = (try? container.decodeIfPresent([DeviceTypeInfo].self, forKey: .items)) ?? []
-        }
     }
 
     private struct APIErrorEnvelope: Decodable {

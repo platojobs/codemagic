@@ -846,6 +846,14 @@
 "market.compatibility.limitations" = "Known limitations: %@";
 "market.compatibility.noMetrics" = "No supported metric detected";
 "market.compatibility.noServices" = "No GATT services declared";
+"market.compatibility.noLimitations" = "No known limitations declared";
+"catalog.updatedAt" = "Catalog updated: %@";
+"catalog.offlineCache" = "Offline cache; server unreachable";
+"catalog.metricUnsupported" = "%@ · Unsupported in this version";
+"catalog.metricsPassthrough" = "Pass-through device: no metrics declared; the app parses and reports readings";
+"catalog.cacheMissing" = "No local catalog cache is available for a 304 response";
+"catalog.decodeFailed" = "Failed to decode the device type catalog";
+"catalog.refreshFailed" = "Catalog refresh failed: %@";
 "market.guide.health.title" = "Health monitoring";
 "market.guide.health.body" = "Choose a device with the Heart Rate service (0x180D) and Heart Rate Measurement characteristic (0x2A37). The app parses only that characteristic; other health-specific payloads are not recognized automatically.";
 "market.guide.environment.title" = "Environmental sensing";
