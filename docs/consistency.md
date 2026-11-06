@@ -526,7 +526,7 @@ iOS 用例固化在 `codemagicTests/ReadingsGoldenTests.swift`；新增特征或
 ### 3.18 服务端场景（v0.21.0，openapi 0.16.0）
 
 - **契约**：`GET /scenes` 一次返回本人全部场景（无分页，`{items}`）；`POST /scenes` 201、`GET/PUT/DELETE /scenes/{id}` 200/200/204；跨用户与已软删统一 404。`PUT` body 是 5 个字段的子集，每个字段 `{value, updatedAt}`，服务端按字段比较时间戳（字段级 LWW）；没有字段更新时 version 不变。
-- **表结构（迁移 v14）**：`scenarios` 增加 `kind TEXT NOT NULL DEFAULT 'manual'`、`remote_id TEXT`（唯一索引，仅非空）、`version INTEGER`、`enabled INTEGER`、`cooldown_seconds INTEGER`、`trigger TEXT`、`sync_state TEXT NOT NULL DEFAULT 'localOnly'`（`localOnly` / `pending` / `synced` / `pendingDelete`）、`deleted_at REAL`、`device_missing INTEGER`、`last_synced_at REAL`、`last_run_at REAL`，以及 5 个字段级时间戳 `name_updated_at` / `enabled_updated_at` / `cooldown_updated_at` / `trigger_updated_at` / `actions_updated_at`。
+- **表结构（迁移 v14，v15 增列见 3.20）**：`scenarios` 增加 `kind TEXT NOT NULL DEFAULT 'manual'`、`remote_id TEXT`（唯一索引，仅非空）、`version INTEGER`、`enabled INTEGER`、`cooldown_seconds INTEGER`、`trigger TEXT`、`sync_state TEXT NOT NULL DEFAULT 'localOnly'`（`localOnly` / `pending` / `synced` / `pendingDelete` / `rejected`）、`deleted_at REAL`、`device_missing INTEGER`、`last_synced_at REAL`、`last_run_at REAL`，以及 5 个字段级时间戳 `name_updated_at` / `enabled_updated_at` / `cooldown_updated_at` / `trigger_updated_at` / `actions_updated_at`。
 - **两类场景不混用**：`kind='manual'` 是 v0.8.0 的手动动作组，只在本机执行、**不上传**；`kind='automation'` 是服务端场景。旧行迁移后保持 `kind='manual'`、`sync_state='localOnly'`；服务端场景读取只查 `kind='automation'`，手动场景只查 `kind='manual'` 且 `deleted_at IS NULL`。
 - **脏字段判定**：`fieldUpdatedAt[field] > lastSyncedAt`。保存只有被编辑字段推进时间戳；拉取时若本地是 pending，**脏字段保留本地**、非脏字段采用远端值，且非脏字段时间戳回落到旧同步基线，保证不会被服务端超前时钟误判为脏。
 - **首次接入（不静默丢弃）**：本机已有 `kind='automation'` 场景逐条 `POST /scenes`；成功后 `markCreated` 写回 `remoteId` 与 `version`。首次上传前 `GET /scenes` 做基线，若发现内容签名（`name/enabled/cooldown/trigger/actions` 排序 JSON）唯一匹配的远端场景（上次 POST 响应丢失），**认领**该场景而不是重复创建。
@@ -546,6 +546,19 @@ iOS 用例固化在 `codemagicTests/ReadingsGoldenTests.swift`；新增特征或
   - ISO 星期 → Calendar `weekday`：`7` → `1`（周日），其余 `iso + 1`。
   - 春季 DST 跳过的本地时间（如 `02:30`）顺延到下一个有效时刻；秋季重复时刻取**第一次**；跨 DST 的周期任务由带 `timeZone` 的 `UNCalendarNotificationTrigger(repeats: true)` 按本地日历重复，不按 86400 秒漂移。
   - 无 `daysOfWeek` 为每日一条，否则每个星期一条；只有包含 `notify` 动作的 enabled 且未删除场景才注册，注册前先取消 `scene-` 前缀的旧请求。
+
+### 3.20 场景 `rejected` 终态与 429 退避持久化（v0.24.0）
+
+Android 自 v0.22.0 起把服务端 `SCENE_*` 4xx 视为终态；iOS v0.24.0 对齐同一口径。
+
+- **原有行为（v0.23.0）**：`POST/PUT /scenes` 返回 `SCENE_*` 4xx 时，`SceneSyncService` 只把该场景留在 `pending` 并把错误抛给整轮同步；下一轮（前台 / 手动 / 后台）仍会再次上传同一条场景，形成反复重试。重启不改变状态，因为 `pending` 已落库，重启后 `fetchPending` 仍会捞出它。
+- **表结构（迁移 v15）**：`scenarios` 增加 `rejection_code TEXT`、`rejection_reason TEXT`、`rejected_at REAL`、`next_retry_at REAL`。迁移用 `PRAGMA table_info(scenarios)` 判列，缺列才 `ALTER TABLE ... ADD COLUMN`，可重复执行；旧行保持 `NULL`，迁移后 `PRAGMA user_version = 15`。
+- **拒绝判定**：`AppError.isSceneRejection` = 有 `apiCode` 且 `apiCode.hasPrefix("SCENE_")` 且 HTTP 状态在 400..<500（排除 429，429 走退避）。
+- **落库与终态**：命中拒绝时 `SceneStore.markRejected` 写 `sync_state='rejected'`、`rejection_code`、`rejection_reason`（优先服务端 `message`）、`rejected_at`；`fetchPending` 只捞 `sync_state IN ('pending','pendingDelete')`，因此终态永不自动重试，重启后仍不会重试。该场景不打断同批其他场景的同步。
+- **用户编辑回 pending**：`SceneStore.save` 记录「保存前是否 rejected」，统一置 `.pending`；若原为 rejected 且本次确有字段被编辑，清空拒绝字段与 `next_retry_at`，下一轮重新上传。
+- **429 跨进程保留**：`SceneStore.markRateLimited` 把 `Retry-After`（缺省 30 秒）写入 `next_retry_at`；`fetchPending(now:)` 过滤 `next_retry_at IS NULL OR next_retry_at <= now`。同步服务注入同一时钟，重启后仍按截止时间才开始重试。
+- **徽章顺序（与 Android 同序）**：设备已移除 → 拒绝原因 → 同步状态。`rejected` 行隐藏「待同步」徽章，详情追加「拒绝原因：…」；无障碍状态优先播报拒绝原因。
+- **测试**：`codemagicTests/SceneSyncTests.swift` 覆盖「拒绝后不重试」「关闭并重开数据库后仍不重试」「编辑字段后回 pending 并重新上传」「429 `Retry-After` 跨重启保留且截止后恢复」，另加 `scenarios` INSERT 列顺序回归（`created_at` 必须落在 `created_at`，不能把 `next_retry_at` 写成 `created_at`）。
 
 ## 4. 错误码
 

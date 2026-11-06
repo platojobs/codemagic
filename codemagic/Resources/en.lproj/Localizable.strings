@@ -689,6 +689,7 @@
 "sync.state.pending" = "Pending sync";
 "sync.state.pendingDelete" = "Pending deletion";
 "sync.state.synced" = "Synced";
+"sync.state.rejected" = "Rejected";
 "sync.summary.completed" = "Sync completed: pushed %@, pulled %@";
 "sync.summary.conflicts" = "%@, %@ conflicts (cloud version applied)";
 "sync.summary.readings" = ", %@ readings (skipped %@ duplicates)";
@@ -835,6 +836,7 @@
 "profile.section.household" = "Household";
 "household.member.me" = "Me";
 "household.member.actions.title" = "Member %@";
+"household.member.generatedName" = "Member %@";
 "household.transfer.action" = "Transfer ownership";
 "household.transfer.title" = "Transfer household ownership?";
 "household.transfer.message" = "Transfer household ownership to %@.";
@@ -1032,6 +1034,10 @@
 "scene.duration.seconds" = "%@ sec";
 "scene.sync.pending" = "Pending sync";
 "scene.sync.synced" = "Synced";
+"scene.sync.rejected" = "Rejected";
+"scene.sync.rejectedLog" = "Scene \"%@\" was rejected by the server: %@";
+"scene.cell.rejectedReason" = "Rejection: %@";
+"scene.cell.rejectedA11y" = "Rejected, reason: %@";
 "scene.cell.toggleA11y" = "Enable or disable scene";
 "scene.cell.device" = "Device %@";
 "scene.cell.nextFire" = "Next %@";

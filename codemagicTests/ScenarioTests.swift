@@ -48,7 +48,9 @@ final class ScenarioTests: XCTestCase {
         XCTAssertTrue(names.contains("sync_state"), "服务端场景参与同步")
         XCTAssertTrue(names.contains("deleted_at"), "服务端场景支持软删同步")
         XCTAssertTrue(names.contains("name_updated_at"), "5 个字段各带 LWW 时间戳")
-        XCTAssertEqual(columns.count, 21)
+        XCTAssertEqual(columns.count, 25)
+        XCTAssertTrue(names.contains("rejection_code"), "拒绝终态需落库原始码")
+        XCTAssertTrue(names.contains("next_retry_at"), "429 退避需跨进程保留")
     }
 
     func testMigrationFromVersion5AddsSceneColumnsAndPreservesLegacyRows() throws {
@@ -80,16 +82,17 @@ final class ScenarioTests: XCTestCase {
 
         let migrated = try SQLiteDatabase(path: path)
         defer { migrated.close() }
-        XCTAssertEqual(try migrated.query("PRAGMA user_version;").first?.integer("user_version"), 14)
+        XCTAssertEqual(try migrated.query("PRAGMA user_version;").first?.integer("user_version"), 15)
 
         let columns = try migrated.query("PRAGMA table_info(scenarios);")
-        XCTAssertEqual(columns.count, 21)
+        XCTAssertEqual(columns.count, 25)
         XCTAssertEqual(Set(columns.compactMap { $0.text("name") }), [
             "id", "name", "actions", "created_at", "updated_at",
             "kind", "remote_id", "version", "enabled", "cooldown_seconds", "trigger",
             "sync_state", "deleted_at", "device_missing", "last_synced_at", "last_run_at",
             "name_updated_at", "enabled_updated_at", "cooldown_updated_at",
             "trigger_updated_at", "actions_updated_at",
+            "rejection_code", "rejection_reason", "rejected_at", "next_retry_at",
         ])
 
         // 旧数据不丢：仍由手动场景存储读取，且没有混入服务端场景列表。

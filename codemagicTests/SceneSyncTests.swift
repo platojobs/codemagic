@@ -17,6 +17,24 @@ final class SceneSyncTests: XCTestCase {
         testDatabase.cleanUp()
     }
 
+    // MARK: - Persistence
+
+    /// 回归：INSERT 的 created_at 排在字段时间戳之前，参数顺序错位会把 created_at 写成
+    /// updated_at，并把 created_at 落到 next_retry_at（导致退避过滤误判）。
+    func testInsertKeepsCreatedAtAndLeavesRetryColumnsEmpty() throws {
+        let createdAt = Date(timeIntervalSince1970: 1_000)
+        let updatedAt = Date(timeIntervalSince1970: 3_000)
+        let scene = makeScene(name: "列顺序", createdAt: createdAt, updatedAt: updatedAt)
+        try store.insert(scene, now: updatedAt)
+
+        let loaded = try XCTUnwrap(try store.fetch(id: scene.id))
+        XCTAssertEqual(loaded.createdAt.timeIntervalSince1970, createdAt.timeIntervalSince1970, accuracy: 0.001)
+        XCTAssertEqual(loaded.updatedAt.timeIntervalSince1970, updatedAt.timeIntervalSince1970, accuracy: 0.001)
+        XCTAssertNil(loaded.nextRetryAt, "插入时 next_retry_at 必须为空，不能被 created_at 顶替")
+        XCTAssertNil(loaded.rejectedAt)
+        XCTAssertEqual(loaded.fieldUpdatedAt[.name]?.timeIntervalSince1970 ?? 0, 3_000, accuracy: 0.001)
+    }
+
     // MARK: - First upload
 
     func testFirstUploadPostsEveryLocalSceneAndWritesBackRemoteID() throws {
@@ -278,6 +296,118 @@ final class SceneSyncTests: XCTestCase {
         XCTAssertNil(try store.fetch(remoteID: "remote-c")?.deletedAt)
     }
 
+    // MARK: - Rejection / 429
+
+    func testSceneRejectionBecomesTerminalAndIsNotRetried() throws {
+        let now = Date(timeIntervalSince1970: 5_000)
+        let sceneID = UUID()
+        try store.insert(makeScene(id: sceneID, name: "非法触发"), now: Date(timeIntervalSince1970: 1_000))
+        let api = FakeSceneAPI(now: now)
+        api.createError = .api(
+            code: "SCENE_TRIGGER_INVALID",
+            statusCode: 400,
+            message: "触发条件不合法"
+        )
+        let service = SceneSyncService(api: api, store: store, logStore: logStore, now: { now })
+
+        XCTAssertTrue(push(service).isSuccess, "拒绝是已处理结果，不应中断整轮同步")
+        let rejected = try XCTUnwrap(store.fetch(id: sceneID))
+        XCTAssertEqual(rejected.syncState, .rejected)
+        XCTAssertEqual(rejected.rejectionCode, "SCENE_TRIGGER_INVALID")
+        XCTAssertEqual(rejected.rejectionReason, "触发条件不合法")
+        XCTAssertEqual(rejected.rejectedAt, now)
+        XCTAssertEqual(try store.pendingCount(), 0, "终态不得留在待同步队列")
+
+        XCTAssertTrue(push(service).isSuccess)
+        XCTAssertEqual(api.createCallCount, 1, "拒绝后再次同步不得重试")
+    }
+
+    func testRejectedSceneSurvivesRestartAndStillDoesNotRetry() throws {
+        let now = Date(timeIntervalSince1970: 5_000)
+        let sceneID = UUID()
+        try store.insert(makeScene(id: sceneID, name: "跨重启拒绝"), now: Date(timeIntervalSince1970: 1_000))
+        let api = FakeSceneAPI(now: now)
+        api.createError = .api(code: "SCENE_ACTION_INVALID", statusCode: 400, message: "动作不合法")
+        XCTAssertTrue(push(SceneSyncService(api: api, store: store, logStore: logStore, now: { now })).isSuccess)
+
+        // 模拟进程重启：关闭连接后重新打开同一 SQLite 文件。
+        store = nil
+        testDatabase.database.close()
+        let reopened = try testDatabase.makeDatabaseHandle()
+        defer { reopened.close() }
+        let restartedStore = SceneStore(database: reopened)
+        let service = SceneSyncService(
+            api: api,
+            store: restartedStore,
+            logStore: ScanLogStore(database: reopened),
+            now: { now }
+        )
+
+        XCTAssertTrue(push(service).isSuccess)
+        XCTAssertEqual(api.createCallCount, 1, "重启后仍不得重试")
+        XCTAssertEqual(try restartedStore.fetch(id: sceneID)?.syncState, .rejected)
+    }
+
+    func testEditingRejectedSceneResetsToPendingAndUploads() throws {
+        let now = Date(timeIntervalSince1970: 5_000)
+        let sceneID = UUID()
+        try store.insert(makeScene(id: sceneID, name: "被拒绝后编辑"), now: Date(timeIntervalSince1970: 1_000))
+        let api = FakeSceneAPI(now: now)
+        api.createError = .api(code: "SCENE_NAME_INVALID", statusCode: 400, message: "名称不合法")
+        XCTAssertTrue(push(SceneSyncService(api: api, store: store, logStore: logStore, now: { now })).isSuccess)
+
+        var edited = try XCTUnwrap(store.fetch(id: sceneID))
+        XCTAssertEqual(edited.syncState, .rejected)
+        edited.name = "修正后的名称"
+        try store.save(edited, editedFields: [.name], now: Date(timeIntervalSince1970: 5_100))
+        let reset = try XCTUnwrap(store.fetch(id: sceneID))
+        XCTAssertEqual(reset.syncState, .pending, "用户编辑后回到待同步")
+        XCTAssertNil(reset.rejectionCode)
+        XCTAssertNil(reset.rejectionReason)
+        XCTAssertNil(reset.rejectedAt)
+
+        api.createError = nil
+        let service = SceneSyncService(api: api, store: store, logStore: logStore, now: { now })
+        XCTAssertTrue(push(service).isSuccess)
+        XCTAssertEqual(api.createCallCount, 2, "编辑后重新提交一次")
+        XCTAssertEqual(try store.fetch(id: sceneID)?.syncState, .synced)
+    }
+
+    func testRateLimitRetryAfterPersistsAcrossRestart() throws {
+        let now = Date(timeIntervalSince1970: 5_000)
+        let sceneID = UUID()
+        try store.insert(makeScene(id: sceneID, name: "限流场景"), now: Date(timeIntervalSince1970: 1_000))
+        let api = FakeSceneAPI(now: now)
+        api.createError = .rateLimited(retryAfterSeconds: 30)
+        XCTAssertFalse(push(SceneSyncService(api: api, store: store, logStore: logStore, now: { now })).isSuccess)
+        XCTAssertEqual(api.createCallCount, 1)
+        XCTAssertEqual(
+            try store.fetch(id: sceneID)?.nextRetryAt,
+            now.addingTimeInterval(30),
+            "Retry-After 必须落库"
+        )
+        XCTAssertTrue(try store.fetchPending(now: now).isEmpty, "退避期内不进入上传队列")
+
+        store = nil
+        testDatabase.database.close()
+        let reopened = try testDatabase.makeDatabaseHandle()
+        defer { reopened.close() }
+        let restartedStore = SceneStore(database: reopened)
+        let restartedService = SceneSyncService(
+            api: api,
+            store: restartedStore,
+            logStore: ScanLogStore(database: reopened),
+            now: { now.addingTimeInterval(1) }
+        )
+        XCTAssertTrue(push(restartedService).isSuccess, "未到退避截止前重启也不得提前重试")
+        XCTAssertEqual(api.createCallCount, 1)
+        XCTAssertEqual(
+            try restartedStore.fetchPending(now: now.addingTimeInterval(31)).count,
+            1,
+            "退避结束后恢复待同步"
+        )
+    }
+
     // MARK: - Helpers
 
     private func push(_ service: SceneSyncService) -> Result<Int, AppError> {
@@ -299,12 +429,17 @@ private extension Result {
 /// 内存版场景接口：实现字段级 LWW 比较，便于验证「两端改不同字段都保留」。
 private final class FakeSceneAPI: SceneAPIServicing {
     var isOnline = true
+    /// 非 nil 时创建 / 更新直接返回该错误，用于验证拒绝终态与 429 退避。
+    var createError: AppError?
+    var updateError: AppError?
     private let now: Date
     private var remoteScenes: [String: RemoteScene] = [:]
     private var fieldDates: [String: [SceneFieldKey: Date]] = [:]
     private var nextID = 1
 
     private(set) var listCallCount = 0
+    private(set) var createCallCount = 0
+    private(set) var updateCallCount = 0
     private(set) var createdInputs: [SceneCreateInput] = []
     private(set) var updates: [(id: String, patch: ScenePatchInput)] = []
     private(set) var deletedIDs: [String] = []
@@ -340,6 +475,11 @@ private final class FakeSceneAPI: SceneAPIServicing {
             completion(.failure(.network("offline")))
             return
         }
+        createCallCount += 1
+        if let createError {
+            completion(.failure(createError))
+            return
+        }
         createdInputs.append(input)
         let remote = RemoteScene(
             id: "remote-\(nextID)",
@@ -367,6 +507,11 @@ private final class FakeSceneAPI: SceneAPIServicing {
     ) {
         guard isOnline else {
             completion(.failure(.network("offline")))
+            return
+        }
+        updateCallCount += 1
+        if let updateError {
+            completion(.failure(updateError))
             return
         }
         updates.append((id, patch))

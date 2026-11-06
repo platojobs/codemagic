@@ -95,7 +95,7 @@ final class SceneSyncService: SceneSyncServicing {
     func pushPending(token: String, completion: @escaping (Result<Int, AppError>) -> Void) {
         let pending: [Scene]
         do {
-            pending = try store.fetchPending()
+            pending = try store.fetchPending(now: now())
         } catch {
             completion(.failure(.database(L10n.f("scene.sync.fetchFailed", String(describing: error)))))
             return
@@ -116,7 +116,7 @@ final class SceneSyncService: SceneSyncServicing {
                 case .success(let remotes):
                     do {
                         let adopted = try self.reconcileOrphans(pending, remotes: remotes)
-                        let remaining = try self.store.fetchPending()
+                        let remaining = try self.store.fetchPending(now: self.now())
                         self.upload(remaining, adoptedCount: adopted, index: 0, token: token, completion: completion)
                     } catch {
                         completion(.failure(.database(L10n.f("scene.sync.reconcileFailed", String(describing: error)))))
@@ -209,7 +209,7 @@ final class SceneSyncService: SceneSyncServicing {
                         self.notifyChanged()
                         completion(.success(()))
                     } else {
-                        completion(.failure(error))
+                        self.handleUploadFailure(scene, error: error, completion: completion)
                     }
                 }
             }
@@ -236,7 +236,7 @@ final class SceneSyncService: SceneSyncServicing {
                         completion(.failure(.database(L10n.f("scene.sync.markFailed", String(describing: error)))))
                     }
                 case .failure(let error):
-                    completion(.failure(error))
+                    self.handleUploadFailure(scene, error: error, completion: completion)
                 }
             }
             return
@@ -271,10 +271,34 @@ final class SceneSyncService: SceneSyncServicing {
                     self.notifyChanged()
                     completion(.success(()))
                 } else {
-                    completion(.failure(error))
+                    self.handleUploadFailure(scene, error: error, completion: completion)
                 }
             }
         }
+    }
+
+    /// `SCENE_*` 拒绝落 `rejected` 终态并继续同步后续场景；429 把 `Retry-After` 落库后中止本轮。
+    private func handleUploadFailure(
+        _ scene: Scene,
+        error: AppError,
+        completion: @escaping (Result<Void, AppError>) -> Void
+    ) {
+        if error.isSceneRejection, let code = error.apiCode {
+            do {
+                try store.markRejected(id: scene.id, code: code, reason: error.apiMessage, now: now())
+                notifyChanged()
+                recordLog(L10n.f("scene.sync.rejectedLog", scene.name, code))
+                completion(.success(()))
+            } catch {
+                completion(.failure(.database(L10n.f("scene.sync.markFailed", String(describing: error)))))
+            }
+            return
+        }
+        if case .rateLimited = error {
+            try? store.markRateLimited(id: scene.id, retryAfterSeconds: error.retryAfterSeconds, now: now())
+            notifyChanged()
+        }
+        completion(.failure(error))
     }
 
     private func recordLog(_ message: String, level: ScanLogLevel = .info) {

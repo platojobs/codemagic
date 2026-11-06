@@ -331,6 +331,13 @@ struct Scene: Identifiable, Equatable {
     var fieldUpdatedAt: [SceneFieldKey: Date]
     var lastSyncedAt: Date?
     var lastRunAt: Date?
+    /// 服务端拒绝码（`SCENE_*`）；仅 `syncState == .rejected` 时有值。
+    var rejectionCode: String?
+    /// 可读拒绝原因，来自服务端 `error.message`；缺失时回退到错误码目录文案。
+    var rejectionReason: String?
+    var rejectedAt: Date?
+    /// 429 的退避截止时间；持久化后跨进程生效。
+    var nextRetryAt: Date?
 
     init(
         id: UUID = UUID(),
@@ -348,7 +355,11 @@ struct Scene: Identifiable, Equatable {
         syncState: SyncState = .pending,
         fieldUpdatedAt: [SceneFieldKey: Date] = [:],
         lastSyncedAt: Date? = nil,
-        lastRunAt: Date? = nil
+        lastRunAt: Date? = nil,
+        rejectionCode: String? = nil,
+        rejectionReason: String? = nil,
+        rejectedAt: Date? = nil,
+        nextRetryAt: Date? = nil
     ) {
         self.id = id
         self.remoteID = remoteID
@@ -366,6 +377,21 @@ struct Scene: Identifiable, Equatable {
         self.fieldUpdatedAt = fieldUpdatedAt
         self.lastSyncedAt = lastSyncedAt
         self.lastRunAt = lastRunAt
+        self.rejectionCode = rejectionCode
+        self.rejectionReason = rejectionReason
+        self.rejectedAt = rejectedAt
+        self.nextRetryAt = nextRetryAt
+    }
+
+    /// 服务端拒绝后的展示文案：优先服务端可读原因，其次错误码目录，最后原始码。
+    var rejectionText: String {
+        if let rejectionReason, !rejectionReason.isEmpty {
+            return rejectionReason
+        }
+        if let rejectionCode {
+            return APIErrorCatalog.entry(for: rejectionCode).message
+        }
+        return L10n.t("scene.sync.rejected")
     }
 
     var summary: String {

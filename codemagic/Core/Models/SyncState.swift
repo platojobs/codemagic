@@ -11,6 +11,8 @@ enum SyncState: String, Codable, CaseIterable {
     case pendingDelete
     /// 仅存在本机、不参与云端同步（例如旧版本留下的手动场景）。
     case localOnly
+    /// 服务端明确拒绝（`SCENE_*` 4xx）：终态，不自动重试，用户编辑后才回到 `pending`。
+    case rejected
 
     var title: String {
         switch self {
@@ -18,6 +20,7 @@ enum SyncState: String, Codable, CaseIterable {
         case .synced: return L10n.t("sync.state.synced")
         case .pendingDelete: return L10n.t("sync.state.pendingDelete")
         case .localOnly: return L10n.t("sync.state.localOnly")
+        case .rejected: return L10n.t("sync.state.rejected")
         }
     }
 }

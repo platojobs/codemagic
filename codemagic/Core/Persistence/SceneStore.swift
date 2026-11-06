@@ -36,13 +36,16 @@ final class SceneStore {
     }
 
     /// 待上传 / 待删除的场景，按最后修改时间升序，保证先发生的编辑先同步。
-    func fetchPending() throws -> [Scene] {
+    /// `nextRetryAt` 尚未到的行（429 退避）会被跳过，退避时间落库后跨进程生效。
+    func fetchPending(now: Date = Date()) throws -> [Scene] {
         try database.query(
             """
             SELECT * FROM scenarios
             WHERE kind = 'automation' AND sync_state IN ('pending', 'pendingDelete')
+              AND (next_retry_at IS NULL OR next_retry_at <= ?)
             ORDER BY updated_at ASC;
-            """
+            """,
+            [.double(now.timeIntervalSince1970)]
         ).compactMap(Self.makeScene)
     }
 
@@ -68,6 +71,10 @@ final class SceneStore {
         normalized.deletedAt = nil
         normalized.deviceMissing = false
         normalized.lastSyncedAt = nil
+        normalized.rejectionCode = nil
+        normalized.rejectionReason = nil
+        normalized.rejectedAt = nil
+        normalized.nextRetryAt = nil
         normalized.fieldUpdatedAt = Dictionary(
             uniqueKeysWithValues: SceneFieldKey.allCases.map { ($0, now) }
         )
@@ -83,8 +90,17 @@ final class SceneStore {
             updated.fieldUpdatedAt[field] = now
         }
         updated.updatedAt = now
+        let wasRejected = updated.syncState == .rejected
         if updated.deletedAt == nil {
             updated.syncState = .pending
+        }
+        // 拒绝是终态；只有用户实际编辑字段才解除，并清掉拒绝信息与 429 退避。
+        if wasRejected && !editedFields.isEmpty {
+            updated.syncState = .pending
+            updated.rejectionCode = nil
+            updated.rejectionReason = nil
+            updated.rejectedAt = nil
+            updated.nextRetryAt = nil
         }
         if updated.remoteID == nil {
             // 本地新建的字段时间戳应在插入时已补齐；这里兜底，避免缺字段被判为「不脏」。
@@ -236,10 +252,33 @@ final class SceneStore {
         guard var scene = try fetch(id: id) else { return }
         scene.syncState = .synced
         scene.lastSyncedAt = now
+        scene.rejectionCode = nil
+        scene.rejectionReason = nil
+        scene.rejectedAt = nil
+        scene.nextRetryAt = nil
         if scene.deletedAt != nil {
             // 已软删的行保持 tombstone，但同步状态不再排队。
             scene.syncState = .synced
         }
+        try persist(scene, createdAt: scene.createdAt)
+    }
+
+    /// 服务端 `SCENE_*` 拒绝：落终态与可读原因，之后不再自动重试。
+    func markRejected(id: UUID, code: String, reason: String?, now: Date = Date()) throws {
+        guard var scene = try fetch(id: id) else { return }
+        scene.syncState = .rejected
+        scene.rejectionCode = code
+        scene.rejectionReason = reason
+        scene.rejectedAt = now
+        scene.nextRetryAt = nil
+        try persist(scene, createdAt: scene.createdAt)
+    }
+
+    /// 429：把 `Retry-After` 落库为 `nextRetryAt`，重启后继续遵守退避。
+    func markRateLimited(id: UUID, retryAfterSeconds: Int?, now: Date = Date()) throws {
+        guard var scene = try fetch(id: id) else { return }
+        let seconds = max(retryAfterSeconds ?? 60, 1)
+        scene.nextRetryAt = now.addingTimeInterval(TimeInterval(seconds))
         try persist(scene, createdAt: scene.createdAt)
     }
 
@@ -257,6 +296,10 @@ final class SceneStore {
         local.deletedAt = remote.deletedAt
         local.syncState = .synced
         local.lastSyncedAt = max(now, remote.updatedAt)
+        local.rejectionCode = nil
+        local.rejectionReason = nil
+        local.rejectedAt = nil
+        local.nextRetryAt = nil
         local.fieldUpdatedAt = Dictionary(
             uniqueKeysWithValues: SceneFieldKey.allCases.map { ($0, remote.updatedAt) }
         )
@@ -278,6 +321,10 @@ final class SceneStore {
         local.deletedAt = nil
         local.syncState = .synced
         local.lastSyncedAt = max(now, remote.updatedAt)
+        local.rejectionCode = nil
+        local.rejectionReason = nil
+        local.rejectedAt = nil
+        local.nextRetryAt = nil
         // 服务端没有暴露字段时间戳；用服务端 updatedAt 作为基线，
         // 之后本地编辑只要晚于它即可被 PUT 的字段级 LWW 接受。
         local.fieldUpdatedAt = Dictionary(
@@ -292,6 +339,10 @@ final class SceneStore {
         if scene.deletedAt == nil { scene.deletedAt = now }
         scene.syncState = .synced
         scene.lastSyncedAt = now
+        scene.rejectionCode = nil
+        scene.rejectionReason = nil
+        scene.rejectedAt = nil
+        scene.nextRetryAt = nil
         try persist(scene, createdAt: scene.createdAt)
     }
 
@@ -341,6 +392,10 @@ final class SceneStore {
             .double(timestamp(.cooldownSeconds, fallback: scene.updatedAt)),
             .double(timestamp(.trigger, fallback: scene.updatedAt)),
             .double(timestamp(.actions, fallback: scene.updatedAt)),
+            scene.rejectionCode.map { .text($0) } ?? .null,
+            scene.rejectionReason.map { .text($0) } ?? .null,
+            scene.rejectedAt.map { .double($0.timeIntervalSince1970) } ?? .null,
+            scene.nextRetryAt.map { .double($0.timeIntervalSince1970) } ?? .null,
         ]
 
         let assignments: [String] = [
@@ -362,6 +417,10 @@ final class SceneStore {
             "cooldown_updated_at = ?",
             "trigger_updated_at = ?",
             "actions_updated_at = ?",
+            "rejection_code = ?",
+            "rejection_reason = ?",
+            "rejected_at = ?",
+            "next_retry_at = ?",
         ]
         var updateParameters = parameters
         updateParameters.append(.text(scene.id.uuidString))
@@ -370,16 +429,22 @@ final class SceneStore {
             "UPDATE scenarios SET \(assignments.joined(separator: ", ")) WHERE id = ? AND kind = 'automation';",
             updateParameters
         )
+        // INSERT 的列顺序里 `created_at` 排在 5 个字段时间戳之前，参数必须按同样位置插入，
+        // 不能把 createdAt 直接追加到末尾，否则会整体错位（created_at 变成 name 的时间戳）。
+        let insertParameters =
+            [.text(scene.id.uuidString)] + parameters[0..<13]
+            + [.double(createdAt.timeIntervalSince1970)] + parameters[13...]
         try database.execute(
             """
             INSERT OR IGNORE INTO scenarios
             (id, kind, remote_id, name, actions, trigger, version, enabled, cooldown_seconds,
              sync_state, deleted_at, device_missing, last_synced_at, last_run_at, updated_at,
              created_at, name_updated_at, enabled_updated_at, cooldown_updated_at,
-             trigger_updated_at, actions_updated_at)
-            VALUES (?, 'automation', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+             trigger_updated_at, actions_updated_at, rejection_code, rejection_reason,
+             rejected_at, next_retry_at)
+            VALUES (?, 'automation', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """,
-            [.text(scene.id.uuidString)] + parameters + [.double(createdAt.timeIntervalSince1970)]
+            insertParameters
         )
     }
 
@@ -427,7 +492,11 @@ final class SceneStore {
                 .actions: fieldDate("actions_updated_at"),
             ],
             lastSyncedAt: row.double("last_synced_at").map { Date(timeIntervalSince1970: $0) },
-            lastRunAt: row.double("last_run_at").map { Date(timeIntervalSince1970: $0) }
+            lastRunAt: row.double("last_run_at").map { Date(timeIntervalSince1970: $0) },
+            rejectionCode: row.text("rejection_code"),
+            rejectionReason: row.text("rejection_reason"),
+            rejectedAt: row.double("rejected_at").map { Date(timeIntervalSince1970: $0) },
+            nextRetryAt: row.double("next_retry_at").map { Date(timeIntervalSince1970: $0) }
         )
     }
 }

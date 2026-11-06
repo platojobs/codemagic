@@ -92,7 +92,10 @@ final class SceneAutomationCell: UITableViewCell {
     private let detailLabel = UILabel()
     private let syncChip = StatusChipView(text: "", kind: .neutral)
     private let missingChip = StatusChipView(text: L10n.t("scene.deviceMissing"), kind: .danger)
+    private let rejectionChip = StatusChipView(text: L10n.t("scene.sync.rejected"), kind: .danger)
     private let toggle = UISwitch()
+    private let titleRow = UIStackView()
+    private let chipsRow = UIStackView()
     private var onToggle: ((Bool) -> Void)?
 
     override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
@@ -118,6 +121,8 @@ final class SceneAutomationCell: UITableViewCell {
         nameLabel.applyFont(AppText.body.font(weight: .semibold))
         nameLabel.textColor = Palette.textPrimary
         nameLabel.numberOfLines = 1
+        // 行高受限时优先保留场景名称，避免 AX 档名称被裁成 0 高。
+        nameLabel.setContentCompressionResistancePriority(.required, for: .vertical)
 
         triggerLabel.applyFont(AppText.caption.font())
         triggerLabel.textColor = Palette.textSecondary
@@ -132,12 +137,17 @@ final class SceneAutomationCell: UITableViewCell {
         toggle.translatesAutoresizingMaskIntoConstraints = false
         toggle.widthAnchor.constraint(equalToConstant: Layout.buttonH).isActive = true
 
-        let chips = UIStackView(arrangedSubviews: [syncChip, missingChip])
+        let chips = chipsRow
+        chips.addArrangedSubview(missingChip)
+        chips.addArrangedSubview(rejectionChip)
+        chips.addArrangedSubview(syncChip)
         chips.axis = .horizontal
         chips.spacing = Layout.space4
         chips.alignment = .center
 
-        let titleRow = UIStackView(arrangedSubviews: [nameLabel, chips])
+        let titleRow = self.titleRow
+        titleRow.addArrangedSubview(nameLabel)
+        titleRow.addArrangedSubview(chips)
         titleRow.axis = .horizontal
         titleRow.spacing = Layout.space8
         titleRow.alignment = .center
@@ -173,8 +183,18 @@ final class SceneAutomationCell: UITableViewCell {
         nextFire: String?,
         onToggle: @escaping (Bool) -> Void
     ) {
+        // AX 档名称与徽章横排会互相挤压，改用上下排；在 configure 里切换，
+        // 让 UITableView 的自适应行高按新布局重新计算。
+        let isAccessibility = traitCollection.preferredContentSizeCategory.isAccessibilityCategory
+        titleRow.axis = isAccessibility ? .vertical : .horizontal
+        titleRow.alignment = isAccessibility ? .leading : .center
+        chipsRow.axis = isAccessibility ? .vertical : .horizontal
+        chipsRow.alignment = isAccessibility ? .leading : .center
+        nameLabel.numberOfLines = isAccessibility ? 2 : 1
+
         nameLabel.text = scene.name
         triggerLabel.text = scene.trigger.title
+        let rejected = scene.syncState == .rejected
         var details: [String] = [scene.actionSummary]
         if let deviceName {
             details.append(L10n.f("scene.cell.device", deviceName))
@@ -182,20 +202,22 @@ final class SceneAutomationCell: UITableViewCell {
         if let nextFire {
             details.append(L10n.f("scene.cell.nextFire", nextFire))
         }
+        if rejected {
+            details.append(L10n.f("scene.cell.rejectedReason", scene.rejectionText))
+        }
         detailLabel.text = details.joined(separator: L10n.t("common.semicolonSeparator"))
         missingChip.isHidden = !deviceMissing
+        rejectionChip.isHidden = !rejected
         let pending = scene.syncState == .pending || scene.syncState == .pendingDelete
-        syncChip.isHidden = !pending && scene.remoteID != nil
+        syncChip.isHidden = rejected || (!pending && scene.remoteID != nil)
         syncChip.set(text: pending ? L10n.t("scene.sync.pending") : L10n.t("scene.sync.synced"), kind: pending ? .warning : .success)
         toggle.isOn = scene.enabled
         toggle.isEnabled = !deviceMissing
         self.onToggle = onToggle
-        accessibilityLabel = L10n.f(
-            "scene.cell.a11y",
-            scene.name,
-            scene.trigger.title,
-            deviceMissing ? L10n.t("scene.deviceMissing") : L10n.f("scene.cell.enabledState", scene.enabled ? L10n.t("common.on") : L10n.t("common.off"))
-        )
+        let state = rejected
+            ? L10n.f("scene.cell.rejectedA11y", scene.rejectionText)
+            : (deviceMissing ? L10n.t("scene.deviceMissing") : L10n.f("scene.cell.enabledState", scene.enabled ? L10n.t("common.on") : L10n.t("common.off")))
+        accessibilityLabel = L10n.f("scene.cell.a11y", scene.name, scene.trigger.title, state)
     }
 
     @objc private func toggleChanged() {

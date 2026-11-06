@@ -287,7 +287,7 @@ final class DeviceCatalogTests: XCTestCase {
         defer { migrated.close() }
 
         let version = try migrated.query("PRAGMA user_version;").first?.integer("user_version")
-        XCTAssertEqual(version, 14)
+        XCTAssertEqual(version, 15)
 
         let columns = Set(try migrated.query("PRAGMA table_info(device_catalog_cache);")
             .compactMap { $0.text("name") })

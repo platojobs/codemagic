@@ -689,6 +689,7 @@
 "sync.state.pending" = "待同步";
 "sync.state.pendingDelete" = "待同步删除";
 "sync.state.synced" = "已同步";
+"sync.state.rejected" = "已拒绝";
 "sync.summary.completed" = "同步完成：推送 %@，拉取 %@";
 "sync.summary.conflicts" = "%@，冲突 %@ 条（已采用云端版本）";
 "sync.summary.readings" = "，读数 %@ 条（跳过重复 %@ 条）";
@@ -835,6 +836,7 @@
 "profile.section.household" = "家庭";
 "household.member.me" = "我";
 "household.member.actions.title" = "成员 %@";
+"household.member.generatedName" = "成员 %@";
 "household.transfer.action" = "转让所有权";
 "household.transfer.title" = "转让家庭所有权？";
 "household.transfer.message" = "将家庭所有权转让给 %@。";
@@ -1032,6 +1034,10 @@
 "scene.duration.seconds" = "%@ 秒";
 "scene.sync.pending" = "待同步";
 "scene.sync.synced" = "已同步";
+"scene.sync.rejected" = "已拒绝";
+"scene.sync.rejectedLog" = "场景「%@」被服务端拒绝：%@";
+"scene.cell.rejectedReason" = "拒绝原因：%@";
+"scene.cell.rejectedA11y" = "已拒绝，原因：%@";
 "scene.cell.toggleA11y" = "启用或停用场景";
 "scene.cell.device" = "设备 %@";
 "scene.cell.nextFire" = "下次 %@";

@@ -72,6 +72,17 @@ enum AppError: Error, Equatable {
         return nil
     }
 
+    var apiMessage: String? {
+        if case .api(_, _, let message) = self { return message }
+        return nil
+    }
+
+    /// 服务端明确拒绝场景（`SCENE_*` 4xx）：场景落 `rejected` 终态，不再自动重试。
+    var isSceneRejection: Bool {
+        guard let apiCode, case .api(_, let statusCode, _) = self else { return false }
+        return (400..<500).contains(statusCode) && apiCode.hasPrefix("SCENE_")
+    }
+
     /// 410 `RESYNC_REQUIRED`：游标早于最老保留行，必须全量重同步。
     /// 无结构化错误体的 410 也按同一语义处理（不静默当成空页）。
     var isResyncRequired: Bool {

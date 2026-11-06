@@ -173,6 +173,9 @@ final class SQLiteDatabase {
         if version < 14 {
             try migrateToVersion14()
         }
+        if version < 15 {
+            try migrateToVersion15()
+        }
     }
 
     /// v1：五张业务表，均含 `id / updated_at / deleted_at / sync_state`。
@@ -661,6 +664,28 @@ final class SQLiteDatabase {
         CREATE INDEX IF NOT EXISTS idx_scenarios_kind ON scenarios(kind, deleted_at);
         PRAGMA user_version = 14;
         """
+        try executeScript(script)
+    }
+
+    /// v15：场景同步拒绝终态与 429 跨进程退避。
+    ///
+    /// - `rejection_code` / `rejection_reason` / `rejected_at`：服务端 `SCENE_*` 拒绝的原始码、
+    ///   可读原因与拒绝时间；`sync_state = 'rejected'` 为终态，不再进入待同步队列。
+    /// - `next_retry_at`：429 `Retry-After` 的截止时间，落库后重启仍遵守。
+    /// - 可重复执行：`PRAGMA table_info` 判列，缺列才 `ALTER`，旧行保留且值为 NULL。
+    private func migrateToVersion15() throws {
+        let columns = Set(try performQuery("PRAGMA table_info(scenarios);", [])
+            .compactMap { $0.text("name") })
+        var script = ""
+        func add(_ name: String, _ definition: String) {
+            guard !columns.contains(name) else { return }
+            script += "ALTER TABLE scenarios ADD COLUMN \(name) \(definition);\n"
+        }
+        add("rejection_code", "TEXT")
+        add("rejection_reason", "TEXT")
+        add("rejected_at", "REAL")
+        add("next_retry_at", "REAL")
+        script += "PRAGMA user_version = 15;"
         try executeScript(script)
     }
 
