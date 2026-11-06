@@ -110,7 +110,8 @@ final class SQLiteDatabase {
                 "scenarios",
                 "rooms",
                 "households",
-                "device_assignment_pending"
+                "device_assignment_pending",
+                "feedback_drafts"
             ]
             try performExecute("BEGIN IMMEDIATE;", [])
             do {
@@ -158,6 +159,9 @@ final class SQLiteDatabase {
         }
         if version < 10 {
             try migrateToVersion10()
+        }
+        if version < 11 {
+            try migrateToVersion11()
         }
     }
 
@@ -458,6 +462,49 @@ final class SQLiteDatabase {
             script += "ALTER TABLE households ADD COLUMN room_count INTEGER NOT NULL DEFAULT 0;\n"
         }
         script += "PRAGMA user_version = 10;"
+        try executeScript(script)
+    }
+
+    /// v11：意见反馈本地待发队列。
+    ///
+    /// 当前没有反馈接收接口，条目只落本机；`attempts / last_attempt_at` 记录真实重试次数，
+    /// 界面据此展示「未发送」，绝不伪造发送成功。
+    /// 可重复执行：先 `PRAGMA table_info` 判列，缺列才 `ALTER`，半迁移或夹具库也能补齐。
+    private func migrateToVersion11() throws {
+        let columns = Set(try performQuery("PRAGMA table_info(feedback_drafts);", [])
+            .compactMap { $0.text("name") })
+        var script = """
+        CREATE TABLE IF NOT EXISTS feedback_drafts (
+            id TEXT PRIMARY KEY NOT NULL,
+            category TEXT NOT NULL DEFAULT 'other',
+            message TEXT NOT NULL DEFAULT '',
+            contact TEXT NOT NULL DEFAULT '',
+            created_at REAL NOT NULL DEFAULT 0,
+            attempts INTEGER NOT NULL DEFAULT 0,
+            last_attempt_at REAL
+        );
+        """
+        if !columns.isEmpty {
+            if !columns.contains("category") {
+                script += "ALTER TABLE feedback_drafts ADD COLUMN category TEXT NOT NULL DEFAULT 'other';\n"
+            }
+            if !columns.contains("message") {
+                script += "ALTER TABLE feedback_drafts ADD COLUMN message TEXT NOT NULL DEFAULT '';\n"
+            }
+            if !columns.contains("contact") {
+                script += "ALTER TABLE feedback_drafts ADD COLUMN contact TEXT NOT NULL DEFAULT '';\n"
+            }
+            if !columns.contains("created_at") {
+                script += "ALTER TABLE feedback_drafts ADD COLUMN created_at REAL NOT NULL DEFAULT 0;\n"
+            }
+            if !columns.contains("attempts") {
+                script += "ALTER TABLE feedback_drafts ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0;\n"
+            }
+            if !columns.contains("last_attempt_at") {
+                script += "ALTER TABLE feedback_drafts ADD COLUMN last_attempt_at REAL;\n"
+            }
+        }
+        script += "PRAGMA user_version = 11;"
         try executeScript(script)
     }
 

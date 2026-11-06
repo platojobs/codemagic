@@ -70,7 +70,7 @@ final class RoomTests: XCTestCase {
         defer { migrated.close() }
 
         let version = try migrated.query("PRAGMA user_version;").first?.integer("user_version")
-        XCTAssertEqual(version, 10)
+        XCTAssertEqual(version, 11)
 
         let roomColumns = try migrated.query("PRAGMA table_info(rooms);").compactMap { $0.text("name") }
         XCTAssertEqual(

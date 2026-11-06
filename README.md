@@ -12,12 +12,12 @@
 
 | 项 | 结果 |
 | --- | --- |
-| 版本 | **v0.15.0**（`MARKETING_VERSION 0.15.0`，`CURRENT_PROJECT_VERSION 23`，tag `v0.15.0`：家庭管理补齐成员移除 / 退出 / 邀请码列表与撤销 / 房间整段排序 / 真实计数，契约对齐 `PJGoIoT` v0.13.0 / openapi 0.9.0） |
+| 版本 | **v0.17.0**（`MARKETING_VERSION 0.17.0`，`CURRENT_PROJECT_VERSION 25`，tag `v0.17.0`：市场改为兼容性查询 / 选购指南 / 服务入口且不造假商品；「我的」补帮助中心、意见反馈本地待发队列、关于页文档链接；产品按能力类型浏览，契约仍对齐 `PJGoIoT` v0.15.0 / openapi 0.11.0） |
 | 五模块（首页 / 智能 / 产品 / 市场 / 我的） | 已实现，纯代码 UIKit，真实数据路径；设备管理并入首页，规则与场景集中在「智能」 |
 | CoreBluetooth 扫描 + 连接 | 已实现（`CBCentralManager`，真实 RSSI） |
 | BLE 读数采集 | 已实现：连接后订阅心率 `0x2A37`、电量 `0x2A19`、温度 `0x2A6E`、Nordic UART TX `6E400003-…`；各特征独立解析器，失败静默丢弃并写本地日志 |
 | 长周期读数图表 | 已实现：1 小时 / 24 小时 / 7 天 / 30 天区间切换（映射 `1m` / `1h` / `1h` / `1d`），X 轴按桶 `start` 真实时间比例定位，缺口断线，`avg` 折线 + `min`–`max` 区间带，Y 轴自适应并带单位；**v0.11.0 支持点选 / 长按桶查看 start–end、min/max/avg/last 与条数（本地时区），点空白取消，Y 轴不变，并给出无障碍摘要** |
-| 本地持久化 | 已实现（SQLite3，含同步字段；迁移 **v10** 为 `households` 增加 `room_count`（服务端真实房间数，不本地计数）；v9 新增 `households`（`id` / `remote_id` / `name` / `is_personal` / `role` / `member_count` / `device_count`）与 `device_assignment_pending`（设备归属上报队列），为 `rooms` 启用 `remote_id` 并增加 `household_id` / `sync_state` / `deleted`，为 `saved_devices` 增加 `household_id` / `remote_room_id` / `remote_household_id`；v8 新增 `rooms` 表与可空 `room_id`，v7 为 `rules` 加指标阈值字段，v6 新增仅本机的 `scenarios` 表；v5 新增 `readings` 表，本地保留 7 天；v4 区分 `advertised_name` 与用户别名并记录三态 patch） |
+| 本地持久化 | 已实现（SQLite3，含同步字段；迁移 **v11** 新增 `feedback_drafts`（反馈待发队列，`PRAGMA table_info` 判列可重复执行）；迁移 **v10** 为 `households` 增加 `room_count`（服务端真实房间数，不本地计数）；v9 新增 `households`（`id` / `remote_id` / `name` / `is_personal` / `role` / `member_count` / `device_count`）与 `device_assignment_pending`（设备归属上报队列），为 `rooms` 启用 `remote_id` 并增加 `household_id` / `sync_state` / `deleted`，为 `saved_devices` 增加 `household_id` / `remote_room_id` / `remote_household_id`；v8 新增 `rooms` 表与可空 `room_id`，v7 为 `rules` 加指标阈值字段，v6 新增仅本机的 `scenarios` 表；v5 新增 `readings` 表，本地保留 7 天；v4 区分 `advertised_name` 与用户别名并记录三态 patch） |
 | 家庭（v0.15.0） | **已接入后端**：`GET /households` 的 `memberCount` / `deviceCount` / `roomCount` 全部使用服务端真实数字；「我的 → 家庭管理」按角色裁剪入口：owner 可签发 / 撤销邀请码、移除成员、改家庭名、退出家庭，member 只能查看与退出。成员支持左滑 / 点击移除（二次确认并说明对方设备回其个人家庭）；owner 还有其他成员时退出前置提示「请先转让所有权或移除其他成员」，服务端 409 同一文案。邀请码列表只展示哈希前缀 / 状态 / 过期时间并可撤销，绝无明文。房间支持拖拽与上下移动排序，整段提交 `PUT /rooms/order`；409（`ROOM_SET_MISMATCH` 或 v0.13.0 的 `CONFLICT`）自动重新 GET 并提示「房间列表已变化，已刷新」。设备归属仍走独立 `PATCH /my/devices/{platform}/{externalId}`；退出 / 被移除后本地设备回落个人家庭、房间脱钩保留并标注未同步 |
 | 本地化（v0.12.0） | **已实现**：全部界面文案走 `L10n.t` / `L10n.f`，资源为 `Resources/zh-Hans.lproj/Localizable.strings` 与 `en.lproj/Localizable.strings`；工程 `knownRegions` 含 `zh-Hans`，`CFBundleLocalizations = [en, zh-Hans]`，设置跟随系统语言；术语双语见第 11 节；单测强制扫描 View / ViewModel 源码不得硬编码中文，并校验两语言 key 集合与占位符一致 |
 | 动态字体（v0.12.0） | **已实现**：字号统一走 `AppText`（`UIFontMetrics` 缩放）+ `applyFont(_:)`（`adjustsFontForContentSizeCategory = true`）；表格行高自适应；图表 Y 轴左侧留白随字号测量增长，超大字号缩为 3 个刻度且不与绘图区重叠 |

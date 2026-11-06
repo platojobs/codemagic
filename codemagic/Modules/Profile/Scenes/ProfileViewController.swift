@@ -1,6 +1,6 @@
 import UIKit
 
-/// 「我的」页：蓝牙权限自检、本地扫描日志入口、家庭管理、同步状态、基础设置与关于。
+/// 「我的」页：蓝牙权限自检、本地扫描日志入口、家庭管理、同步状态、帮助/反馈、基础设置与关于。
 final class ProfileViewController: UIViewController {
     private enum Section: Int, CaseIterable {
         case bluetooth
@@ -11,6 +11,7 @@ final class ProfileViewController: UIViewController {
         case alerts
         case appearance
         case settings
+        case support
         case about
     }
 
@@ -20,19 +21,22 @@ final class ProfileViewController: UIViewController {
     private let roomStore: RoomStore?
     private let savedDeviceStore: SavedDeviceStore?
     private let householdService: HouseholdService?
+    private let feedbackStore: FeedbackStore?
 
     init(
         viewModel: ProfileViewModel,
         scanLogStore: ScanLogStore,
         roomStore: RoomStore? = nil,
         savedDeviceStore: SavedDeviceStore? = nil,
-        householdService: HouseholdService? = nil
+        householdService: HouseholdService? = nil,
+        feedbackStore: FeedbackStore? = nil
     ) {
         self.viewModel = viewModel
         self.scanLogStore = scanLogStore
         self.roomStore = roomStore
         self.savedDeviceStore = savedDeviceStore
         self.householdService = householdService
+        self.feedbackStore = feedbackStore
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -55,6 +59,7 @@ final class ProfileViewController: UIViewController {
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         viewModel.activate()
+        tableView.reloadData()
     }
 
     override func viewWillDisappear(_ animated: Bool) {
@@ -177,6 +182,28 @@ final class ProfileViewController: UIViewController {
             popover.sourceRect = tableView.rectForRow(at: IndexPath(row: 0, section: Section.appearance.rawValue))
         }
         present(sheet, animated: true)
+    }
+
+    private func openHelpCenter() {
+        let controller = HelpCenterViewController(topic: .all)
+        navigationController?.pushViewController(controller, animated: true)
+    }
+
+    private func openFeedback() {
+        guard let feedbackStore else {
+            presentMessage(title: L10n.t("feedback.entry"), message: L10n.t("feedback.storeUnavailable"))
+            return
+        }
+        let controller = FeedbackViewController(store: feedbackStore)
+        navigationController?.pushViewController(controller, animated: true)
+    }
+
+    /// 市场「采集省电建议」入口：定位到「我的 → 设置」的后台采集开关。
+    func revealBackgroundCollectionSetting() {
+        guard isViewLoaded else { return }
+        view.layoutIfNeeded()
+        let indexPath = IndexPath(row: 2, section: Section.settings.rawValue)
+        tableView.scrollToRow(at: indexPath, at: .middle, animated: true)
     }
 
     private func openAbout() {
@@ -356,6 +383,7 @@ extension ProfileViewController: UITableViewDataSource {
         case .alerts: return 3
         case .appearance: return 1
         case .settings: return 3
+        case .support: return feedbackStore == nil ? 1 : 2
         case .about: return 3
         }
     }
@@ -371,6 +399,7 @@ extension ProfileViewController: UITableViewDataSource {
         case .alerts: return L10n.t("profile.section.alerts")
         case .appearance: return L10n.t("profile.appearance")
         case .settings: return L10n.t("profile.section.settings")
+        case .support: return L10n.t("profile.section.support")
         case .about: return L10n.t("profile.aboutShort")
         }
     }
@@ -390,6 +419,8 @@ extension ProfileViewController: UITableViewDataSource {
             return L10n.t("profile.footnote.appearance")
         case .settings:
             return "\(viewModel.backgroundCollectionStatusText)\n\(viewModel.backgroundCollectionGuidance)"
+        case .support:
+            return L10n.t("profile.footnote.support")
         case .about:
             return viewModel.startupWarning ?? L10n.t("profile.footnote.consistency")
         case .localData:
@@ -534,6 +565,17 @@ extension ProfileViewController: UITableViewDataSource {
             }
             return cell
 
+        case .support:
+            if indexPath.row == 0 {
+                return makeValueCell(title: L10n.t("help.entry"), value: "", showsDisclosure: true)
+            }
+            let pending = (try? feedbackStore?.count()) ?? 0
+            return makeValueCell(
+                title: L10n.t("feedback.entry"),
+                value: pending > 0 ? L10n.f("profile.feedbackPending", String(describing: pending)) : "",
+                showsDisclosure: true
+            )
+
         case .about:
             switch indexPath.row {
             case 0:
@@ -581,6 +623,10 @@ extension ProfileViewController: UITableViewDelegate {
             openSystemSettings()
         case .appearance where indexPath.row == 0:
             presentAppearancePicker()
+        case .support where indexPath.row == 0:
+            openHelpCenter()
+        case .support where indexPath.row == 1:
+            openFeedback()
         case .about where indexPath.row == 2:
             openAbout()
         default:

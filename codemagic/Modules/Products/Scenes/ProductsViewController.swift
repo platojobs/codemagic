@@ -1,16 +1,21 @@
 import UIKit
 
 /// 产品模块：型号库（厂商、固件版本、GATT 服务与特征），数据来自网络层。
+/// 可按设备类型浏览；类型由 GATT 能力推导，不硬编码型号名单。
 final class ProductsViewController: UIViewController {
     private let tableView = UITableView(frame: .zero, style: .plain)
     private let emptyStateView = EmptyStateView()
     private let errorStateView = ErrorStateView(height: 240)
     private lazy var skeletonController = SkeletonController(host: view)
+    private let categoryBar = ProductCategoryBar()
+    private let categoryBarContainer = UIView()
 
     private let viewModel: ProductsViewModel
+    private let savedDeviceStore: SavedDeviceStore?
 
-    init(viewModel: ProductsViewModel) {
+    init(viewModel: ProductsViewModel, savedDeviceStore: SavedDeviceStore? = nil) {
         self.viewModel = viewModel
+        self.savedDeviceStore = savedDeviceStore
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -23,6 +28,7 @@ final class ProductsViewController: UIViewController {
         super.viewDidLoad()
         title = L10n.t("tab.products")
         view.backgroundColor = AppTheme.Palette.background
+        configureCategoryBar()
         configureTableView()
         navigationItem.rightBarButtonItem = UIBarButtonItem(
             title: L10n.t("market.refresh"),
@@ -37,6 +43,23 @@ final class ProductsViewController: UIViewController {
         viewModel.loadIfNeeded()
     }
 
+    private func configureCategoryBar() {
+        categoryBarContainer.translatesAutoresizingMaskIntoConstraints = false
+        categoryBar.translatesAutoresizingMaskIntoConstraints = false
+        categoryBarContainer.addSubview(categoryBar)
+        view.addSubview(categoryBarContainer)
+        NSLayoutConstraint.activate([
+            categoryBarContainer.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            categoryBarContainer.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            categoryBarContainer.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            categoryBarContainer.heightAnchor.constraint(equalToConstant: Layout.space48 + Layout.space12),
+            categoryBar.topAnchor.constraint(equalTo: categoryBarContainer.topAnchor),
+            categoryBar.leadingAnchor.constraint(equalTo: categoryBarContainer.leadingAnchor),
+            categoryBar.trailingAnchor.constraint(equalTo: categoryBarContainer.trailingAnchor),
+            categoryBar.bottomAnchor.constraint(equalTo: categoryBarContainer.bottomAnchor),
+        ])
+    }
+
     private func configureTableView() {
         tableView.translatesAutoresizingMaskIntoConstraints = false
         tableView.backgroundColor = Palette.canvas
@@ -49,7 +72,7 @@ final class ProductsViewController: UIViewController {
         view.addSubview(tableView)
 
         NSLayoutConstraint.activate([
-            tableView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            tableView.topAnchor.constraint(equalTo: categoryBarContainer.bottomAnchor),
             tableView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             tableView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             tableView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
@@ -62,6 +85,7 @@ final class ProductsViewController: UIViewController {
         switch viewModel.state {
         case .idle, .loading:
             tableView.backgroundView = nil
+            categoryBarContainer.isHidden = true
             // 300ms 后才出现骨架，行高与真实产品行一致（72）。
             skeletonController.begin {
                 SkeletonView.list(rows: 6, rowHeight: Layout.row2)
@@ -69,6 +93,7 @@ final class ProductsViewController: UIViewController {
 
         case .failed(let error):
             skeletonController.end()
+            categoryBarContainer.isHidden = true
             errorStateView.configure(
                 title: L10n.t("products.loadFailed"),
                 message: L10n.f("market.loadFailedDetail", String(describing: error.localizedDescriptionText))
@@ -77,8 +102,9 @@ final class ProductsViewController: UIViewController {
             }
             tableView.backgroundView = errorStateView
 
-        case .loaded(let products) where products.isEmpty:
+        case .loaded(let all) where all.isEmpty:
             skeletonController.end()
+            categoryBarContainer.isHidden = true
             emptyStateView.configure(
                 symbolName: SymbolName.product,
                 title: L10n.t("products.emptyTitle"),
@@ -88,13 +114,38 @@ final class ProductsViewController: UIViewController {
             )
             tableView.backgroundView = emptyStateView
 
+        case .loaded where viewModel.products.isEmpty:
+            skeletonController.end()
+            showCategoryBar()
+            emptyStateView.configure(
+                symbolName: SymbolName.product,
+                title: L10n.t("products.filtered.emptyTitle"),
+                message: L10n.t("products.filtered.emptyMessage"),
+                actionTitle: L10n.t("products.filter.all"),
+                action: { [weak self] in
+                    self?.viewModel.selectCategory(.all)
+                }
+            )
+            tableView.backgroundView = emptyStateView
+
         case .loaded:
             skeletonController.end()
+            showCategoryBar()
             tableView.backgroundView = nil
         }
 
         tableView.separatorStyle = viewModel.products.isEmpty ? .none : .singleLine
         tableView.reloadData()
+    }
+
+    private func showCategoryBar() {
+        categoryBarContainer.isHidden = viewModel.categories.isEmpty
+        categoryBar.configure(
+            categories: viewModel.categories,
+            selected: viewModel.selectedCategory
+        ) { [weak self] filter in
+            self?.viewModel.selectCategory(filter)
+        }
     }
 
     @objc private func handleRefresh() {
@@ -114,7 +165,8 @@ extension ProductsViewController: UITableViewDataSource {
         ) as? ProductCell else {
             return UITableViewCell()
         }
-        cell.configure(product: viewModel.products[indexPath.row])
+        let product = viewModel.products[indexPath.row]
+        cell.configure(product: product, category: ProductsViewModel.category(of: product))
         return cell
     }
 }
@@ -123,7 +175,10 @@ extension ProductsViewController: UITableViewDelegate {
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
         let product = viewModel.products[indexPath.row]
-        let detail = ProductDetailViewController(product: product)
+        let detail = ProductDetailViewController(
+            product: product,
+            savedDeviceStore: savedDeviceStore
+        )
         navigationController?.pushViewController(detail, animated: true)
     }
 }

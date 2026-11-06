@@ -1,12 +1,14 @@
 import Foundation
 
-/// 市场视图模型：配件与固件信息，只读展示，无购物车/订单/支付。
-/// 筛选维度使用服务端真实字段：`vendor` 与 `compatibility` 展开后的字段值。
+/// 市场视图模型：兼容性查询、选购指南、服务入口与可隐藏的示例条目。
+///
+/// 兼容性数据只来自 `ProductModel.gattServices` 与 `ReadingCharacteristic` 的推导结果，
+/// 不维护第二份型号/能力真值；示例条目默认隐藏，避免被误认为在售商品。
 final class MarketViewModel {
     enum State: Equatable {
         case idle
         case loading
-        case loaded([MarketItem])
+        case loaded
         case failed(AppError)
     }
 
@@ -14,8 +16,11 @@ final class MarketViewModel {
         didSet { onChange?() }
     }
 
-    /// 服务端返回的全量条目；`state` 中的 `loaded` 是筛选后的结果。
-    private(set) var allItems: [MarketItem] = []
+    private(set) var profiles: [DeviceCompatibilityProfile] = []
+    private(set) var sampleItems: [MarketItem] = []
+    private(set) var marketItemsError: AppError?
+    private(set) var selectedTypeID: String?
+    private(set) var showSampleItems = false
     private(set) var selectedVendor: String?
     private(set) var selectedCompatibility: String?
 
@@ -36,31 +41,71 @@ final class MarketViewModel {
 
     func reload() {
         state = .loading
-        productService.fetchMarketItems { [weak self] result in
+        productService.fetchCatalogSnapshot { [weak self] result in
             guard let self else { return }
             switch result {
-            case .success(let items):
-                self.allItems = items
+            case .success(let snapshot):
+                self.profiles = MarketInsights.profiles(from: snapshot.products)
+                self.sampleItems = snapshot.marketItems
+                self.marketItemsError = snapshot.marketItemsError
+                if let selected = self.selectedTypeID,
+                   !self.profiles.contains(where: { $0.id == selected }) {
+                    self.selectedTypeID = nil
+                }
+                if self.selectedTypeID == nil {
+                    self.selectedTypeID = self.profiles.first?.id
+                }
                 self.dropInvalidFilters()
-                self.applyFilters()
+                self.state = .loaded
 
             case .failure(let error):
-                self.allItems = []
+                self.profiles = []
+                self.sampleItems = []
+                self.marketItemsError = nil
+                self.selectedTypeID = nil
                 self.state = .failed(error)
             }
         }
     }
 
-    // MARK: - Filters
+    // MARK: - 兼容性查询
 
-    /// 厂商筛选取值：只包含非空 `vendor`。
-    var vendors: [String] {
-        uniqueSorted(allItems.map(\.vendor))
+    var selectedProfile: DeviceCompatibilityProfile? {
+        guard let selectedTypeID else { return profiles.first }
+        return profiles.first { $0.id == selectedTypeID }
     }
 
-    /// 兼容性筛选取值：来自 `Compatibility` 的真实字段值（平台 / 协议 / 扩展字段）。
+    func selectType(_ id: String) {
+        guard profiles.contains(where: { $0.id == id }), selectedTypeID != id else { return }
+        selectedTypeID = id
+        onChange?()
+    }
+
+    var recommendations: [ScenarioRecommendation] {
+        MarketInsights.recommendations(from: profiles)
+    }
+
+    // MARK: - 示例条目
+
+    func setShowSampleItems(_ visible: Bool) {
+        guard showSampleItems != visible else { return }
+        showSampleItems = visible
+        onChange?()
+    }
+
+    var hasContent: Bool {
+        if case .loaded = state {
+            return !profiles.isEmpty || (showSampleItems && !sampleItems.isEmpty)
+        }
+        return false
+    }
+
+    var vendors: [String] {
+        uniqueSorted(sampleItems.map(\.vendor))
+    }
+
     var compatibilityOptions: [String] {
-        uniqueSorted(allItems.flatMap(\.compatibilityTags))
+        uniqueSorted(sampleItems.flatMap(\.compatibilityTags))
     }
 
     var hasActiveFilter: Bool {
@@ -69,24 +114,28 @@ final class MarketViewModel {
 
     func selectVendor(_ vendor: String?) {
         selectedVendor = vendor
-        applyFilters()
+        applyFiltersDroppingInvalid()
     }
 
     func selectCompatibility(_ tag: String?) {
         selectedCompatibility = tag
-        applyFilters()
+        applyFiltersDroppingInvalid()
     }
 
     func resetFilters() {
         guard hasActiveFilter else { return }
         selectedVendor = nil
         selectedCompatibility = nil
-        applyFilters()
+        onChange?()
     }
 
+    /// 仅在开启「示例条目」时用于列表展示；筛选维度仍是服务端真实字段。
     var items: [MarketItem] {
-        if case .loaded(let items) = state { return items }
-        return []
+        sampleItems.filter { item in
+            if let vendor = selectedVendor, item.vendor != vendor { return false }
+            if let tag = selectedCompatibility, !item.compatibilityTags.contains(tag) { return false }
+            return true
+        }
     }
 
     // MARK: - Private
@@ -100,13 +149,9 @@ final class MarketViewModel {
         }
     }
 
-    private func applyFilters() {
-        let filtered = allItems.filter { item in
-            if let vendor = selectedVendor, item.vendor != vendor { return false }
-            if let tag = selectedCompatibility, !item.compatibilityTags.contains(tag) { return false }
-            return true
-        }
-        state = .loaded(filtered)
+    private func applyFiltersDroppingInvalid() {
+        dropInvalidFilters()
+        onChange?()
     }
 
     private func uniqueSorted(_ values: [String]) -> [String] {

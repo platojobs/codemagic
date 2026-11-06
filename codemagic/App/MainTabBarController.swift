@@ -60,7 +60,8 @@ final class MainTabBarController: UITabBarController {
 
         let products = makeNavigationController(
             root: ProductsViewController(
-                viewModel: ProductsViewModel(productService: environment.productService)
+                viewModel: ProductsViewModel(productService: environment.productService),
+                savedDeviceStore: environment.savedDeviceStore
             ),
             title: L10n.t("tab.products"),
             imageName: SymbolName.productsTab,
@@ -94,7 +95,8 @@ final class MainTabBarController: UITabBarController {
                 scanLogStore: environment.scanLogStore,
                 roomStore: environment.roomStore,
                 savedDeviceStore: environment.savedDeviceStore,
-                householdService: environment.householdService
+                householdService: environment.householdService,
+                feedbackStore: environment.feedbackStore
             ),
             title: L10n.t("tab.profile"),
             imageName: SymbolName.profileTab,
@@ -113,6 +115,26 @@ final class MainTabBarController: UITabBarController {
         else { return }
         navigation.popToRootViewController(animated: false)
         home.openDeviceDetail(deviceID: deviceID)
+    }
+
+    /// 市场页「配对向导」：切到首页并打开扫描页。
+    func openHomeScanner() {
+        selectedIndex = 0
+        guard let navigation = viewControllers?[0] as? UINavigationController,
+              let home = navigation.viewControllers.first as? HomeDashboardViewController
+        else { return }
+        navigation.popToRootViewController(animated: false)
+        home.startPairingWizard()
+    }
+
+    /// 市场页「采集省电建议」：切到「我的 → 设置」，定位到后台采集开关。
+    func openProfileBackgroundSettings() {
+        selectedIndex = 4
+        guard let navigation = viewControllers?[4] as? UINavigationController,
+              let profile = navigation.viewControllers.first as? ProfileViewController
+        else { return }
+        navigation.popToRootViewController(animated: false)
+        profile.revealBackgroundCollectionSetting()
     }
 
     private func configureBarAppearance() {

@@ -87,9 +87,72 @@ final class AboutViewController: UIViewController {
             L10n.t("about.consistencyBody")
         ))
 
+        contentStack.addArrangedSubview(makeSectionTitle(L10n.t("about.documents")))
+        contentStack.addArrangedSubview(makeDocumentButton(
+            title: L10n.t("about.license"),
+            resourceName: "LICENSE",
+            fileExtension: nil
+        ))
+        contentStack.addArrangedSubview(makeDocumentButton(
+            title: L10n.t("about.privacyPolicy"),
+            resourceName: "privacy-policy",
+            fileExtension: "md"
+        ))
+        contentStack.addArrangedSubview(makeDocumentButton(
+            title: L10n.t("about.dataSafety"),
+            resourceName: "app-privacy",
+            fileExtension: "md"
+        ))
+        contentStack.addArrangedSubview(makeDocumentButton(
+            title: L10n.t("about.consistencyDoc"),
+            resourceName: "consistency",
+            fileExtension: "md"
+        ))
+
         contentStack.addArrangedSubview(makeBodyLabel(
             L10n.t("about.deviceCheck")
         ))
+    }
+
+    private func makeDocumentButton(
+        title: String,
+        resourceName: String,
+        fileExtension: String?
+    ) -> UIButton {
+        var configuration = UIButton.Configuration.plain()
+        configuration.title = title
+        configuration.image = UIImage(
+            systemName: SymbolName.disclosure,
+            withConfiguration: UIImage.SymbolConfiguration(pointSize: Layout.icon16, weight: .medium)
+        )
+        configuration.imagePlacement = .trailing
+        configuration.imagePadding = Layout.space8
+        configuration.contentInsets = NSDirectionalEdgeInsets(
+            top: Layout.space12,
+            leading: Layout.cardPadding,
+            bottom: Layout.space12,
+            trailing: Layout.cardPadding
+        )
+        configuration.baseForegroundColor = Palette.textPrimary
+        configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
+            var outgoing = incoming
+            outgoing.font = AppText.callout.font()
+            return outgoing
+        }
+        let button = UIButton(configuration: configuration)
+        button.contentHorizontalAlignment = .leading
+        button.styleAsCardSurface()
+        button.heightAnchor.constraint(greaterThanOrEqualToConstant: Layout.space48).isActive = true
+        button.accessibilityLabel = title
+        button.addAction(UIAction { [weak self] _ in
+            let controller = DocumentViewController(
+                titleText: title,
+                resourceName: resourceName,
+                fileExtension: fileExtension
+            )
+            self?.navigationController?.pushViewController(controller, animated: true)
+        }, for: .touchUpInside)
+        return button
     }
 
     private func makeTitleLabel(_ text: String) -> UILabel {

@@ -12,6 +12,7 @@ final class AppEnvironment {
     let scanLogStore: ScanLogStore
     let recentDeviceStore: RecentDeviceStore
     let deviceInfoCacheStore: DeviceInfoCacheStore
+    let feedbackStore: FeedbackStore
     let settingsStore: SettingsStore
     let notificationService: LocalNotificationServing
     let ruleAlertCoordinator: RuleAlertCoordinator
@@ -63,6 +64,7 @@ final class AppEnvironment {
         scanLogStore = ScanLogStore(database: resolved.database)
         recentDeviceStore = RecentDeviceStore(database: resolved.database)
         deviceInfoCacheStore = DeviceInfoCacheStore(database: resolved.database)
+        feedbackStore = FeedbackStore(database: resolved.database)
         roomStore = RoomStore(database: resolved.database)
         householdStore = HouseholdStore(database: resolved.database)
         pendingAssignmentStore = DeviceAssignmentPendingStore(database: resolved.database)

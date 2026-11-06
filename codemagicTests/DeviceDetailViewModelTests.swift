@@ -238,23 +238,42 @@ final class ProductsAndMarketViewModelTests: XCTestCase {
         let viewModel = MarketViewModel(productService: service)
         viewModel.loadIfNeeded()
 
-        guard case .loaded(let items) = viewModel.state else {
+        guard case .loaded = viewModel.state else {
             return XCTFail("应加载成功")
         }
+        XCTAssertFalse(viewModel.showSampleItems, "示例条目默认隐藏")
+        viewModel.setShowSampleItems(true)
+        let items = viewModel.items
         XCTAssertEqual(items.count, 1)
         XCTAssertEqual(items.first?.kind, .firmware)
     }
 
     func testMarketFailure() {
         let service = StubProductService()
-        service.marketResult = .failure(.decoding("bad json"))
+        service.productsResult = .failure(.decoding("bad json"))
         let viewModel = MarketViewModel(productService: service)
         viewModel.loadIfNeeded()
 
         guard case .failed(let error) = viewModel.state else {
-            return XCTFail("应加载失败")
+            return XCTFail("型号目录失败应进入错误态")
         }
         XCTAssertEqual(error.code, "NET-003")
+    }
+
+    /// 示例条目接口失败只降级该区块，不拖垮兼容性查询。
+    func testMarketItemsFailureDegradesWithoutFailingCatalog() {
+        let service = StubProductService()
+        service.productsResult = .success([makeProduct()])
+        service.marketResult = .failure(.network("offline"))
+        let viewModel = MarketViewModel(productService: service)
+        viewModel.loadIfNeeded()
+
+        guard case .loaded = viewModel.state else {
+            return XCTFail("型号目录成功时整体应加载成功")
+        }
+        XCTAssertEqual(viewModel.profiles.count, 1)
+        XCTAssertEqual(viewModel.marketItemsError?.code, "NET-001")
+        XCTAssertTrue(viewModel.sampleItems.isEmpty)
     }
 
     func testMarketFiltersByVendorAndCompatibility() {
@@ -277,6 +296,7 @@ final class ProductsAndMarketViewModelTests: XCTestCase {
         ])
         let viewModel = MarketViewModel(productService: service)
         viewModel.loadIfNeeded()
+        viewModel.setShowSampleItems(true)
         XCTAssertEqual(viewModel.items.count, 3)
         XCTAssertEqual(viewModel.vendors, ["Acme", "Other"])
         XCTAssertEqual(

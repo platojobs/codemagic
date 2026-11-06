@@ -27,10 +27,11 @@ final class ProductCell: UITableViewCell {
         fatalError("init(coder:) has not been implemented")
     }
 
-    func configure(product: ProductModel) {
+    func configure(product: ProductModel, category: DeviceCapabilityCategory) {
         titleLabel.text = product.deviceType.isEmpty ? L10n.t("product.cell.unnamed") : product.deviceType
         metaLabel.text = L10n.f(
             "product.cell.meta",
+            category.title,
             product.vendor.isEmpty ? L10n.t("product.cell.unknownVendor") : product.vendor,
             product.firmwareVersion.isEmpty ? L10n.t("common.unknown") : product.firmwareVersion
         )

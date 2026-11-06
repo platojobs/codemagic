@@ -1,5 +1,13 @@
 import Foundation
 
+/// 一次 catalog 遍历同时得到型号与配件/固件，供市场页复用，避免重复请求。
+struct ProductCatalogSnapshot: Equatable {
+    let products: [ProductModel]
+    let marketItems: [MarketItem]
+    /// 配件/固件部分失败时不为空；型号仍可用于兼容性查询。
+    let marketItemsError: AppError?
+}
+
 /// 产品库 / 市场 / 设备信息的数据源协议。
 protocol ProductServicing {
     func fetchProducts(completion: @escaping (Result<[ProductModel], AppError>) -> Void)
@@ -8,6 +16,38 @@ protocol ProductServicing {
         peripheralID: UUID,
         completion: @escaping (Result<ProductModel, AppError>) -> Void
     )
+}
+
+extension ProductServicing {
+    /// 默认实现分两次取；真实客户端覆盖为单次遍历。
+    /// 型号是兼容性查询的核心，型号失败才整体失败；配件/固件失败只降级为错误提示。
+    func fetchCatalogSnapshot(
+        completion: @escaping (Result<ProductCatalogSnapshot, AppError>) -> Void
+    ) {
+        fetchProducts { result in
+            switch result {
+            case .failure(let error):
+                completion(.failure(error))
+            case .success(let products):
+                self.fetchMarketItems { marketResult in
+                    switch marketResult {
+                    case .success(let items):
+                        completion(.success(ProductCatalogSnapshot(
+                            products: products,
+                            marketItems: items,
+                            marketItemsError: nil
+                        )))
+                    case .failure(let error):
+                        completion(.success(ProductCatalogSnapshot(
+                            products: products,
+                            marketItems: [],
+                            marketItemsError: error
+                        )))
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// 基于 URLSession + Codable 的实现，对齐 `PJGoIoT/api/openapi.yaml` v0.3.1：
@@ -51,6 +91,24 @@ final class ProductAPIClient: ProductServicing {
             switch result {
             case .success(let pairs):
                 completion(.success(self.marketItems(from: pairs)))
+            case .failure(let error):
+                completion(.failure(error))
+            }
+        }
+    }
+
+    /// 单次 catalog 遍历同时产出型号与配件/固件，市场页不再重复请求。
+    func fetchCatalogSnapshot(
+        completion: @escaping (Result<ProductCatalogSnapshot, AppError>) -> Void
+    ) {
+        loadCatalogs { result in
+            switch result {
+            case .success(let pairs):
+                completion(.success(ProductCatalogSnapshot(
+                    products: pairs.map { self.product(from: $0.type, catalog: $0.catalog) },
+                    marketItems: self.marketItems(from: pairs),
+                    marketItemsError: nil
+                )))
             case .failure(let error):
                 completion(.failure(error))
             }

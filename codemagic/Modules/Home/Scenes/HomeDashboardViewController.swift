@@ -407,6 +407,11 @@ final class HomeDashboardViewController: UIViewController {
         present(navigation, animated: true)
     }
 
+    /// 市场页「配对向导」入口：切到首页后直接打开扫描页。
+    func startPairingWizard() {
+        presentScanner()
+    }
+
     @objc private func handleSort() {
         let sheet = UIAlertController(title: L10n.t("devices.sortOrder"), message: nil, preferredStyle: .actionSheet)
         for option in DeviceSort.allCases {
