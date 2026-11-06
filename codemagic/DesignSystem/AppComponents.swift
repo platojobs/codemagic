@@ -42,15 +42,17 @@ final class AppButton: UIButton {
     private func configure(title: String, symbolName: String?) {
         var configuration = UIButton.Configuration.plain()
         configuration.title = title
+        let isChip = style == .filterChip
         configuration.contentInsets = NSDirectionalEdgeInsets(
-            top: Layout.space12,
-            leading: Layout.space20,
-            bottom: Layout.space12,
-            trailing: Layout.space20
+            top: isChip ? Layout.space8 : Layout.space12,
+            leading: isChip ? Layout.space12 : Layout.space20,
+            bottom: isChip ? Layout.space8 : Layout.space12,
+            trailing: isChip ? Layout.space12 : Layout.space20
         )
         configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
             var outgoing = incoming
-            outgoing.font = AppText.body.font(weight: .medium)
+            // 筛选 chip 用 caption 字号，三个 chip 在常规字号下可完整同屏。
+            outgoing.font = (isChip ? AppText.caption : AppText.body).font(weight: .medium)
             outgoing.foregroundColor = nil
             return outgoing
         }
@@ -61,13 +63,21 @@ final class AppButton: UIButton {
             )
             configuration.imagePadding = Layout.space8
         }
+        if style == .filterChip {
+            // 空间不足时以整词截断 + 省略号收尾，不出现半截字。
+            configuration.titleLineBreakMode = .byTruncatingTail
+        }
         self.configuration = configuration
         titleLabel?.adjustsFontForContentSizeCategory = true
         layer.cornerRadius = style == .filterChip ? Radius.pill : Radius.card
         layer.cornerCurve = .continuous
         clipsToBounds = true
-        heightAnchor.constraint(equalToConstant: style == .filterChip ? Layout.chipH : Layout.buttonH)
-            .isActive = true
+        if style == .filterChip {
+            // 高度随动态字号增长，避免 AX 档文字被固定高度裁掉。
+            heightAnchor.constraint(greaterThanOrEqualToConstant: Layout.chipH).isActive = true
+        } else {
+            heightAnchor.constraint(equalToConstant: Layout.buttonH).isActive = true
+        }
 
         switch style {
         case .primary:
@@ -217,7 +227,8 @@ final class StatusChipView: UIView {
             label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Layout.space8),
             label.topAnchor.constraint(equalTo: topAnchor, constant: Layout.space4),
             label.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Layout.space4),
-            heightAnchor.constraint(equalToConstant: Layout.chipH),
+            // 高度随动态字号增长，AX 档不把徽章文字上下裁掉。
+            heightAnchor.constraint(greaterThanOrEqualToConstant: Layout.chipH),
         ])
     }
 

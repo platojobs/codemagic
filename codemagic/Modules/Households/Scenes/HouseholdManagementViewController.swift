@@ -43,6 +43,11 @@ final class HouseholdManagementViewController: UIViewController {
         fatalError("init(coder:) has not been implemented")
     }
 
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        applyBottomOcclusionInset(to: tableView)
+    }
+
     override func viewDidLoad() {
         super.viewDidLoad()
         title = L10n.t("household.title")
@@ -197,7 +202,7 @@ final class HouseholdManagementViewController: UIViewController {
         let canRemove = viewModel.canRemove(member: member)
         guard canTransfer || canRemove else { return }
         let sheet = UIAlertController(
-            title: L10n.f("household.member.actions.title", member.shortID),
+            title: L10n.f("household.member.actions.title", viewModel.memberDisplayName(for: member)),
             message: nil,
             preferredStyle: .actionSheet
         )
@@ -224,7 +229,7 @@ final class HouseholdManagementViewController: UIViewController {
     private func confirmTransferOwnership(_ member: HouseholdMember) {
         let alert = UIAlertController(
             title: L10n.t("household.transfer.title"),
-            message: L10n.f("household.transfer.message", member.shortID) + "\n\n" + viewModel.transferConsequence,
+            message: L10n.f("household.transfer.message", viewModel.memberDisplayName(for: member)) + "\n\n" + viewModel.transferConsequence,
             preferredStyle: .alert
         )
         alert.addAction(UIAlertAction(title: L10n.t("common.cancel"), style: .cancel))
@@ -245,7 +250,7 @@ final class HouseholdManagementViewController: UIViewController {
     private func confirmRemoveMember(_ member: HouseholdMember) {
         let alert = UIAlertController(
             title: L10n.t("household.member.remove.title"),
-            message: L10n.f("household.member.remove.message", member.shortID),
+            message: L10n.f("household.member.remove.message", viewModel.memberDisplayName(for: member)),
             preferredStyle: .alert
         )
         alert.addAction(UIAlertAction(title: L10n.t("common.cancel"), style: .cancel))
@@ -396,9 +401,10 @@ extension HouseholdManagementViewController: UITableViewDataSource {
                 configuration.textProperties.color = AppTheme.Palette.secondaryText
             } else {
                 let member = viewModel.members[indexPath.row]
+                let name = viewModel.memberDisplayName(for: member)
                 configuration.text = member.isCurrentUser
-                    ? "\(member.shortID) · \(member.role.displayName) · \(L10n.t("household.member.me"))"
-                    : "\(member.shortID) · \(member.role.displayName)"
+                    ? "\(name) · \(member.role.displayName) · \(L10n.t("household.member.me"))"
+                    : "\(name) · \(member.role.displayName)"
                 configuration.secondaryText = "\(member.kindDisplayName) · \(Self.dateFormatter.string(from: member.joinedAt))"
                 cell.selectionStyle = .default
                 cell.accessibilityLabel = configuration.text

@@ -50,6 +50,14 @@ final class HouseholdManagementViewModel {
         return "\(current.role.displayName) · \(members) · \(devices) · \(rooms)"
     }
 
+    /// 成员展示名：服务端未提供昵称时按稳定顺序生成「成员 N」，界面不出现原始 userID。
+    func memberDisplayName(for member: HouseholdMember) -> String {
+        guard let index = members.firstIndex(where: { $0.id == member.id }) else {
+            return L10n.t("household.member.anonymous")
+        }
+        return L10n.f("household.member.generatedName", String(index + 1))
+    }
+
     /// 成员行上的「移除成员」：owner 对非本人成员；`isSelf` 为真时一律不出现。
     func canRemove(member: HouseholdMember) -> Bool {
         capabilities.canAct(on: member) && member.role != .owner
@@ -97,7 +105,12 @@ final class HouseholdManagementViewModel {
             self.isRefreshing = false
             switch result {
             case .success(let members):
-                self.members = members
+                // 固定顺序（owner → 加入时间 → userID），保证「成员 N」跨刷新稳定。
+                self.members = members.sorted { lhs, rhs in
+                    if lhs.role != rhs.role { return lhs.role == .owner }
+                    if lhs.joinedAt != rhs.joinedAt { return lhs.joinedAt < rhs.joinedAt }
+                    return lhs.userID < rhs.userID
+                }
                 self.errorMessage = nil
             case .failure(let error):
                 // 成员拉取失败不清空旧列表，只给出可读原因。

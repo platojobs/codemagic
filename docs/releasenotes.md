@@ -4,6 +4,7 @@
 
 | Tag | MARKETING_VERSION | Build | 日期 | 对齐后端 |
 | --- | --- | --- | --- | --- |
+| `v0.24.0` | 0.24.0 | 32 | 2026-11-06 | PJGoIoT v0.22.0（无后端契约变更；场景 `rejected` 终态对齐 Android、429 退避持久化、首页 chip 与 AX 布局、成员可读名、底部 inset、房间列表一致性、seed 读数差异化） |
 | `v0.23.0` | 0.23.0 | 31 | 2026-11-06 | PJGoIoT v0.22.0（无后端契约变更；e2e 断言项数稳定化 430 ↔ 430、真实界面截图归档、场景指标名映射） |
 | `v0.22.0` | 0.22.0 | 30 | 2026-11-06 | PJGoIoT v0.22.0（openapi 0.17.0；`/auth/refresh`·`/auth/logout`·`/sessions`·`SCENE_*` 错误码·导出失败原因·反馈详情/关闭·`GET /my/devices/{mac}`） |
 | `v0.21.0` | 0.21.0 | 29 | 2026-11-06 | PJGoIoT v0.20.0（openapi 0.16.0；服务端场景 CRUD / 字段级 LWW / `deviceMissing` / `scene` change_log） |
@@ -34,6 +35,21 @@
 | `v0.3.0` | 0.3.0 | 4 | 2026-11-05 | 0.3.0 |
 | `v0.2.0` | 0.2.0 | 3 | 2026-11-05 | 0.2.0 |
 | `v0.1.0` | — | 1 | 2026-11-05 | — |
+
+---
+
+## v0.24.0（build 32）
+
+**主题：场景 `rejected` 终态跨端对齐；修看图发现的 chip / 成员名 / 底部遮挡 / 房间列表 / seed 读数问题**
+
+- **场景 `rejected` 终态（先查清现状再改）**：v0.23.0 收到 `SCENE_*` 4xx 时只把场景留在 `pending` 并让整轮同步失败，下一轮（前台 / 手动 / 后台）会再次上传同一条，重启后因为 `pending` 已落库仍会重试——即「反复重试」。v0.24.0 新增 `SyncState.rejected`，拒绝时落库 `rejection_code` / `rejection_reason` / `rejected_at`，`fetchPending` 只捞 `pending` / `pendingDelete`，终态永不自动重试；用户编辑任一字段才清空拒绝信息并回 `pending`。429 的 `Retry-After` 写入 `next_retry_at`，`fetchPending(now:)` 按截止时间过滤，跨进程 / 重启保留。列表徽章顺序对齐 Android：设备已移除 → 拒绝原因 → 同步状态，`rejected` 行隐藏「待同步」。详见 [consistency.md](consistency.md) 3.20。
+- **迁移 v15**：`PRAGMA table_info(scenarios)` 判列后按需 `ALTER TABLE` 增加 4 列，可重复执行；顺带修正 `scenarios` INSERT 的 `created_at` 参数位置（原实现把 `created_at` 追加在末尾，导致首插行的 `created_at` 与 `actions_updated_at` 错位，`next_retry_at` 会被 `created_at` 顶替）。
+- **首页筛选 chip**：按内容固有宽度 + 内边距排布，常规字号放不下时横向滚动（整词截断 + 省略号），AX 档改为竖排，不再出现 `序:` / `房间 · 3` / `我的家` 半截字。
+- **成员可读名**：「成员 1 · 所有者 · 我」，不再显示 `7CE87AF9` 这类原始用户 ID；原始 ID 只保留在排障入口。
+- **底部遮挡**：新增 `applyBottomOcclusionInset`，按悬浮 Tab 实际覆盖高度（窗口坐标）扣除系统已给的 `adjustedContentInset`，补到 `contentInset.bottom` / `scrollIndicatorInsets.bottom`；首页、家庭管理、房间管理、智能、市场、产品、设备详情、会话、反馈、我的等可滚动页统一接入。
+- **房间列表一致性**：家庭管理与房间管理同用 `householdService.visibleRooms()`，此前差异只是家庭管理最后一项（书房）被 Tab 遮住；修正 inset 后两页一致（客厅 / 主卧 / 书房）。
+- **seed 读数**：12 台设备覆盖 5 种 `deviceType`，电量按设备编号递减（约 35.8%–85.8%），温度 18–28℃、湿度 40–60%、心率 60–95 按类型波动；每台 336 点、7 天 / 30 分钟一个点；2 台离线设备读数停在 3 天前。
+- **测试**：单测 **421 个，0 失败**（新增 5 个）；e2e 本机 **430 项，0 失败**，与 CI 一致；重截 17 张截图（新增 `households-bottom.png`）。
 
 ---
 

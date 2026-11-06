@@ -349,6 +349,28 @@ extension UIView {
     }
 }
 
+extension UIViewController {
+    /// 底部滚动留白：把最后一项抬到 Tab 之上，并额外留 `spacing`。
+    /// iOS 26+ 的悬浮 Tab 不一定计入 `safeAreaInsets`，因此用视图坐标算实际遮挡量，
+    /// 并扣除滚动视图已自动获得的 safe-area inset，避免重复留白。
+    func applyBottomOcclusionInset(to scrollView: UIScrollView, spacing: CGFloat = Layout.space24) {
+        guard let tabBar = tabBarController?.tabBar, !tabBar.isHidden, tabBar.alpha > 0 else {
+            if abs(scrollView.contentInset.bottom - spacing) > 0.5 {
+                scrollView.contentInset.bottom = spacing
+            }
+            return
+        }
+        let tabFrame = view.convert(tabBar.bounds, from: tabBar)
+        let overlap = max(0, scrollView.frame.maxY - tabFrame.minY)
+        let automatic = max(0, scrollView.adjustedContentInset.bottom - scrollView.contentInset.bottom)
+        let bottom = max(0, overlap - automatic) + spacing
+        if abs(scrollView.contentInset.bottom - bottom) > 0.5 {
+            scrollView.contentInset.bottom = bottom
+            scrollView.scrollIndicatorInsets.bottom = bottom
+        }
+    }
+}
+
 extension UILabel {
     func apply(_ text: AppText, color: UIColor, alignment: NSTextAlignment = .natural) {
         self.attributedText = NSAttributedString(

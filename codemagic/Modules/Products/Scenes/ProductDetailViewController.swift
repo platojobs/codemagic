@@ -30,6 +30,11 @@ final class ProductDetailViewController: UIViewController {
         fatalError("init(coder:) has not been implemented")
     }
 
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        applyBottomOcclusionInset(to: tableView)
+    }
+
     override func viewDidLoad() {
         super.viewDidLoad()
         title = product.deviceType.isEmpty ? L10n.t("product.detail.title") : product.deviceType

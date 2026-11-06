@@ -157,6 +157,7 @@ final class ProductsViewController: UIViewController {
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
+        applyBottomOcclusionInset(to: tableView)
         updateStatusFooter()
     }
 

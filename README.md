@@ -12,13 +12,13 @@
 
 | 项 | 结果 |
 | --- | --- |
-| 版本 | **v0.23.0**（`MARKETING_VERSION 0.23.0`，`CURRENT_PROJECT_VERSION 31`，tag `v0.23.0`：① e2e 项数稳定化 —— 定位到「本机 430 / CI 432」差异是导出轮询把 2 条断言写在循环内、按轮次动态生成，改为循环外累积布尔量后两边固定 430（详见 [docs/consistency.md](docs/consistency.md)）；② 归档 16 张模拟器真实截图到 [docs/screenshots](docs/screenshots)，数据为「模拟器 + 本机后端 + seed 数据」；③ 修场景指标名映射，服务端 `temperature_celsius` 等键不再原样显示）。上一版 v0.22.0：会话生命周期接通 —— 所有带 Bearer 的请求共用 401 → **单飞 `POST /auth/refresh`** → 原子替换 Keychain token → 重放原请求；刷新返回 401 才进入「需要重新登录」并保留本地设备 / 读数 / 家庭 / 场景，网络或 5xx 失败不清会话；「我的」新增登录会话管理（`GET /sessions` 标出当前会话、`DELETE /sessions/{id}` 单独吊销、`POST /auth/logout` 退出当前会话），退出登录与删除账号明确区分；映射 6 个 `SCENE_*` 错误码；4xx 一律终态、429 单独按 `Retry-After`；导出解析 `failureReason`；反馈详情 `GET /feedback/{id}` + 本人关闭 `PATCH /feedback/{id}`（409 明确文案）；单设备详情按平台路由（Android → `GET /my/devices/{mac}`）；契约对齐 `PJGoIoT` v0.22.0 / openapi 0.17.0） |
+| 版本 | **v0.24.0**（`MARKETING_VERSION 0.24.0`，`CURRENT_PROJECT_VERSION 32`，tag `v0.24.0`：① 场景 `rejected` 终态对齐 Android —— 收到 `SCENE_*` 4xx 后落库拒绝码 / 可读原因 / `rejected_at`，终态不再自动重试，用户编辑字段才回 `pending`，429 的 `Retry-After` 落 `next_retry_at` 跨进程保留（迁移 v15，见 [docs/consistency.md](docs/consistency.md) 3.20）；② 首页筛选 chip 按固有宽度 + 内边距排布，常规字号横向滚动、AX 档竖排，不再出现半截字；③ 家庭成员显示「成员 N」而非原始用户 ID；④ 所有可滚动页面按悬浮 Tab 高度 + 安全区补底部 inset；⑤ 家庭管理与房间管理房间列表恢复一致；⑥ seed 读数改为 7 天 / 30 分钟一个点、按设备类型与型号差异化）。上一版 **v0.23.0**（`MARKETING_VERSION 0.23.0`，`CURRENT_PROJECT_VERSION 31`，tag `v0.23.0`：① e2e 项数稳定化 —— 定位到「本机 430 / CI 432」差异是导出轮询把 2 条断言写在循环内、按轮次动态生成，改为循环外累积布尔量后两边固定 430（详见 [docs/consistency.md](docs/consistency.md)）；② 归档 16 张模拟器真实截图到 [docs/screenshots](docs/screenshots)，数据为「模拟器 + 本机后端 + seed 数据」；③ 修场景指标名映射，服务端 `temperature_celsius` 等键不再原样显示）。上一版 v0.22.0：会话生命周期接通 —— 所有带 Bearer 的请求共用 401 → **单飞 `POST /auth/refresh`** → 原子替换 Keychain token → 重放原请求；刷新返回 401 才进入「需要重新登录」并保留本地设备 / 读数 / 家庭 / 场景，网络或 5xx 失败不清会话；「我的」新增登录会话管理（`GET /sessions` 标出当前会话、`DELETE /sessions/{id}` 单独吊销、`POST /auth/logout` 退出当前会话），退出登录与删除账号明确区分；映射 6 个 `SCENE_*` 错误码；4xx 一律终态、429 单独按 `Retry-After`；导出解析 `failureReason`；反馈详情 `GET /feedback/{id}` + 本人关闭 `PATCH /feedback/{id}`（409 明确文案）；单设备详情按平台路由（Android → `GET /my/devices/{mac}`）；契约对齐 `PJGoIoT` v0.22.0 / openapi 0.17.0） |
 | 五模块（首页 / 智能 / 产品 / 市场 / 我的） | 已实现，纯代码 UIKit，真实数据路径；设备管理并入首页，规则与场景集中在「智能」 |
 | CoreBluetooth 扫描 + 连接 | 已实现（`CBCentralManager`，真实 RSSI） |
 | BLE 读数采集 | 已实现：连接后订阅心率 `0x2A37`、电量 `0x2A19`、温度 `0x2A6E`、Nordic UART TX `6E400003-…`；各特征独立解析器，失败静默丢弃并写本地日志 |
 | 设备类型目录（v0.19.0） | **服务端为唯一事实源**：类型清单、展示名、GATT 服务、指标（`key` / `unit` / `characteristicUuid`）、限制与兼容性均来自 `GET /catalog/device-types`；本地只保留 SQLite 单行缓存（原始 JSON + `ETag` / `Last-Modified`），无第二份常量清单。下次请求带条件头，304 复用缓存并刷新 `last_used_at`；断网有缓存时展示缓存并标注「目录更新时间 / 离线缓存」，无缓存才给错误与重试。目录声明的指标按特征 UUID 与本地解析器对齐，解析不了的标注「当前版本不支持」；目录对 NUS 声明空指标时按透传处理 |
 | 长周期读数图表 | 已实现：1 小时 / 24 小时 / 7 天 / 30 天区间切换（映射 `1m` / `1h` / `1h` / `1d`），X 轴按桶 `start` 真实时间比例定位，缺口断线，`avg` 折线 + `min`–`max` 区间带，Y 轴自适应并带单位；**v0.11.0 支持点选 / 长按桶查看 start–end、min/max/avg/last 与条数（本地时区），点空白取消，Y 轴不变，并给出无障碍摘要** |
-| 本地持久化 | 已实现（SQLite3，含同步字段；迁移 **v14** 为 `scenarios` 增加 `kind` / `remote_id` / `version` / 字段级时间戳 / `sync_state` / `deleted_at` / `device_missing` 等列，旧手动场景保留；迁移 **v13** 新增 `device_catalog_cache`（单行原始 JSON + `etag` / `last_modified` / `fetched_at` / `last_used_at`，`PRAGMA table_info` 判列可重复执行）；迁移 **v12** 为 `feedback_drafts` 增加 `status` / `last_error` / `remote_id` / `next_retry_at`（`PRAGMA table_info` 判列可重复执行，旧行保留并默认 `pending`）；迁移 **v11** 新增 `feedback_drafts`；迁移 **v10** 为 `households` 增加 `room_count`（服务端真实房间数，不本地计数）；v9 新增 `households`（`id` / `remote_id` / `name` / `is_personal` / `role` / `member_count` / `device_count`）与 `device_assignment_pending`（设备归属上报队列），为 `rooms` 启用 `remote_id` 并增加 `household_id` / `sync_state` / `deleted`，为 `saved_devices` 增加 `household_id` / `remote_room_id` / `remote_household_id`；v8 新增 `rooms` 表与可空 `room_id`，v7 为 `rules` 加指标阈值字段，v6 新增仅本机的 `scenarios` 表；v5 新增 `readings` 表，本地保留 7 天；v4 区分 `advertised_name` 与用户别名并记录三态 patch） |
+| 本地持久化 | 已实现（SQLite3，含同步字段；迁移 **v15** 为 `scenarios` 增加 `rejection_code` / `rejection_reason` / `rejected_at` / `next_retry_at`（`PRAGMA table_info` 判列、可重复执行，旧行保留）；迁移 **v14** 为 `scenarios` 增加 `kind` / `remote_id` / `version` / 字段级时间戳 / `sync_state` / `deleted_at` / `device_missing` 等列，旧手动场景保留；迁移 **v13** 新增 `device_catalog_cache`（单行原始 JSON + `etag` / `last_modified` / `fetched_at` / `last_used_at`，`PRAGMA table_info` 判列可重复执行）；迁移 **v12** 为 `feedback_drafts` 增加 `status` / `last_error` / `remote_id` / `next_retry_at`（`PRAGMA table_info` 判列可重复执行，旧行保留并默认 `pending`）；迁移 **v11** 新增 `feedback_drafts`；迁移 **v10** 为 `households` 增加 `room_count`（服务端真实房间数，不本地计数）；v9 新增 `households`（`id` / `remote_id` / `name` / `is_personal` / `role` / `member_count` / `device_count`）与 `device_assignment_pending`（设备归属上报队列），为 `rooms` 启用 `remote_id` 并增加 `household_id` / `sync_state` / `deleted`，为 `saved_devices` 增加 `household_id` / `remote_room_id` / `remote_household_id`；v8 新增 `rooms` 表与可空 `room_id`，v7 为 `rules` 加指标阈值字段，v6 新增仅本机的 `scenarios` 表；v5 新增 `readings` 表，本地保留 7 天；v4 区分 `advertised_name` 与用户别名并记录三态 patch） |
 | 家庭（v0.15.0） | **已接入后端**：`GET /households` 的 `memberCount` / `deviceCount` / `roomCount` 全部使用服务端真实数字；「我的 → 家庭管理」按角色裁剪入口：owner 可签发 / 撤销邀请码、移除成员、改家庭名、退出家庭，member 只能查看与退出。成员支持左滑 / 点击移除（二次确认并说明对方设备回其个人家庭）；owner 还有其他成员时退出前置提示「请先转让所有权或移除其他成员」，服务端 409 同一文案。邀请码列表只展示哈希前缀 / 状态 / 过期时间并可撤销，绝无明文。房间支持拖拽与上下移动排序，整段提交 `PUT /rooms/order`；409（`ROOM_SET_MISMATCH` 或 v0.13.0 的 `CONFLICT`）自动重新 GET 并提示「房间列表已变化，已刷新」。设备归属仍走独立 `PATCH /my/devices/{platform}/{externalId}`；退出 / 被移除后本地设备回落个人家庭、房间脱钩保留并标注未同步 |
 | 本地化（v0.12.0） | **已实现**：全部界面文案走 `L10n.t` / `L10n.f`，资源为 `Resources/zh-Hans.lproj/Localizable.strings` 与 `en.lproj/Localizable.strings`；工程 `knownRegions` 含 `zh-Hans`，`CFBundleLocalizations = [en, zh-Hans]`，设置跟随系统语言；术语双语见第 11 节；单测强制扫描 View / ViewModel 源码不得硬编码中文，并校验两语言 key 集合与占位符一致 |
 | 动态字体（v0.12.0） | **已实现**：字号统一走 `AppText`（`UIFontMetrics` 缩放）+ `applyFont(_:)`（`adjustsFontForContentSizeCategory = true`）；表格行高自适应；图表 Y 轴左侧留白随字号测量增长，超大字号缩为 3 个刻度且不与绘图区重叠 |
@@ -27,7 +27,7 @@
 | 同步 | **已实现**：匿名登录、增量拉取、批量推送（设备 ≤100/批 + 读数 ≤200/批、幂等键含读数）、冲突提示、tombstone、Keychain token、前后台 / BGTask 触发、断网累积补传；后台唤醒仅做受限推送（不拉增量、不建号、≥15 分钟间隔）；**410 `RESYNC_REQUIRED` 自动全量重同步（pending 不丢）**，503 `TIMEOUT` 指数退避 |
 | 自绘 RSSI + 自绘折线图 + 代码组装空状态 | 已实现（读数图表纯 `draw(_:)`，无第三方图表库） |
 | 首启引导 | **已实现**：3 步（蓝牙 / 通知 / 后台采集），仅首次或未走完时出现，可跳过；步骤与完成标记持久化到 `UserDefaults` |
-| 单元测试 | **416 个用例，0 失败**（`** TEST SUCCEEDED **`，2026-11-06，Xcode 27.2 / iPhone 18 Pro · iOS 27.2 模拟器；v0.23.0 新增 1 个场景指标名映射用例，既有 415 个全部保持） |
+| 单元测试 | **421 个用例，0 失败**（`** TEST SUCCEEDED **`，2026-11-06，Xcode 27.2 / iPhone 18 Pro · iOS 27.2 模拟器；v0.24.0 新增 5 个用例：拒绝后不重试、重启后仍不重试、编辑字段后回 pending、429 `Retry-After` 跨重启保留、`scenarios` INSERT 列顺序回归，既有 416 个全部保持） |
 | 模拟器构建 | **通过**（`xcodebuild ... build`，`** BUILD SUCCEEDED **`） |
 | CI | **GitHub Actions 已实际运行 success**：v0.23.0 tag run [42221403125](https://github.com/platojobs/codemagic/actions/runs/42221403125)（success，提交 `20af92f`，ref `v0.23.0`），并行 `Build & Test`（**416 单测**，`Executed 416 tests, with 0 failures` / `** TEST SUCCEEDED **`）与 `E2E contract`（**430 项，0 SKIP，0 失败**，PJGoIoT 固定在 v0.22.0；本机同套件同为 430 项，v0.22.0 的 430 / 432 差异已消除）；同 sha 的 `main` run [42221374575](https://github.com/platojobs/codemagic/actions/runs/42221374575) 被 tag 运行的 `concurrency` 规则取消（按 `github.sha` 去重，属预期）；证据回填后的 `main` run [42222927474](https://github.com/platojobs/codemagic/actions/runs/42222927474) success（提交 `00060e4`，同为 416 单测 / 430 项 E2E）；v0.22.0 tag run [42200162903](https://github.com/platojobs/codemagic/actions/runs/42200162903)（415 单测 / 432 项 E2E）为上一基线；`codemagic.yaml` 作为可选替代保留但未验证 |
 | 真机 BLE / 签名 | **未验证**：本机无真机与 Apple 开发者账号；读数采集与图表需真机 / 可穿戴设备验证（见第 9 节） |
@@ -36,33 +36,34 @@
 
 ### 界面截图（模拟器 + 本机后端 + seed 数据）
 
-> 以下截图由 **iOS 模拟器（iPhone 18 Pro · iOS 27.2）里运行的 Debug 构建** 实际截取，后端是本机 `/tmp/pjgoiot-v022`（`PJGoIoT` v0.22.0）起的 Postgres 服务，数据为 seed 写入：3 个家庭、6 个房间、12 台设备（11 台在用 + 1 台被离线场景引用后移除）、8 天读数、4 个场景、3 条反馈（1 条已关闭）。**不是设计稿、不是拼图，也不是真机 / 生产环境**。
+> 以下截图由 **iOS 模拟器（iPhone 18 Pro · iOS 27.2）里运行的 Debug 构建** 实际截取，后端是本机 `/tmp/pjgoiot-v022`（`PJGoIoT` v0.22.0）起的 Postgres 服务，数据为 seed 写入：3 个家庭、6 个房间、12 台设备（11 台在用 + 1 台被离线场景引用后移除）、7 天读数（每 30 分钟一个点）、4 个云端场景 + 3 个本机场景 + 1 个被服务端拒绝的场景、3 条反馈（1 条已关闭）。**不是设计稿、不是拼图，也不是真机 / 生产环境**。
 
 | 页面 | 截图 | 内容 |
 | --- | --- | --- |
-| 首页 | [home.png](docs/screenshots/home.png) | 房间分段（客厅 · 3）、设备卡片含电量读数、快捷场景 |
-| 智能 · 场景列表 | [scenes.png](docs/screenshots/scenes.png) | 4 个云端场景（含 1 个「设备已移除」）与本机场景入口 |
+| 首页 | [home.png](docs/screenshots/home.png) | 筛选 chip 完整文案（排序 / 房间 · 3 / 我的家）、房间分段（客厅 · 3）、设备卡片含差异化电量读数、快捷场景 |
+| 智能 · 场景列表 | [scenes.png](docs/screenshots/scenes.png) | 4 个云端场景（含 1 个「设备已移除」、1 个「已拒绝」并附拒绝原因）与 3 个本机场景 |
 | 智能 · 场景详情 | [scene-detail.png](docs/screenshots/scene-detail.png) | 工作日早晨开窗提醒（定时 07:30、周一至周五、通知动作） |
 | 产品 · 列表 | [products.png](docs/screenshots/products.png) | 服务端目录的 5 类设备 |
 | 产品 · 详情 | [product-detail.png](docs/screenshots/product-detail.png) | 单个类型的功能与指标说明 |
 | 市场 | [market.png](docs/screenshots/market.png) | 服务端下发的商品与固件条目 |
 | 我的 | [profile.png](docs/screenshots/profile.png) | 同步状态、家庭入口、会话、账号与数据、外观与设置 |
-| 家庭管理 | [households.png](docs/screenshots/households.png) | 当前家庭「我的家」：6 台设备 / 3 个房间 |
+| 家庭管理 | [households.png](docs/screenshots/households.png) | 当前家庭「我的家」：6 台设备 / 3 个房间；成员显示「成员 1 · 所有者 · 我」 |
+| 家庭管理 · 底部 | [households-bottom.png](docs/screenshots/households-bottom.png) | 滚到底：房间列表（客厅 / 主卧 / 书房）与说明文字完整位于悬浮 Tab 之上 |
 | 家庭切换 | [households-list.png](docs/screenshots/households-list.png) | 3 个家庭（我的家 / 湖畔小筑 / 爸妈家） |
-| 房间管理 | [rooms.png](docs/screenshots/rooms.png) | 当前家庭的 6 个房间（客厅 / 主卧 / 书房 / 湖畔客厅 / 阳台 / 厨房）中的 3 个 |
+| 房间管理 | [rooms.png](docs/screenshots/rooms.png) | 当前家庭「我的家」的 3 个房间（客厅 / 主卧 / 书房），与家庭管理页一致 |
 | 会话管理 | [sessions.png](docs/screenshots/sessions.png) | 当前会话 + 另一条会话，可单独吊销 |
 | 反馈列表 | [feedback-list.png](docs/screenshots/feedback-list.png) | 3 条反馈，状态含「已关闭」 |
 | 反馈详情 | [feedback-detail.png](docs/screenshots/feedback-detail.png) | 单条反馈的正文、上下文与状态流转 |
 | 账号与数据 | [account-data.png](docs/screenshots/account-data.png) | 导出我的数据、注销账号、匿名账号与会话到期日 |
-| 首页（AX 最大字号） | [home-ax.png](docs/screenshots/home-ax.png) | 系统字号调至 AX 档，布局不重叠 |
-| 场景页（AX 最大字号） | [scenes-ax.png](docs/screenshots/scenes-ax.png) | 同上，场景列表在 AX 档下的折行表现 |
+| 首页（AX 最大字号） | [home-ax.png](docs/screenshots/home-ax.png) | 三个筛选 chip 改为竖排，文字完整不截断 |
+| 场景页（AX 最大字号） | [scenes-ax.png](docs/screenshots/scenes-ax.png) | 场景名与「设备已移除」「已拒绝」徽章改为上下排，文字完整 |
 
 seed 的边界（如实记录）：
 
-- 后端设备类型目录只有 **5 种** `deviceType`，因此 12 台设备覆盖这 5 类（不是 12 种不同型号）。
-- iOS 的 `Scenario` 与同步状态没有 `rejected`（`SyncState` 仅 pending / synced / pendingDelete / localOnly，服务端场景也无 `status` 字段），所以「1 个 `rejected` 场景」**无法在 iOS 界面呈现**；4 个场景实际是 2 个定时、1 个指标阈值、1 个绑定已移除设备的 `deviceMissing`。
+- 后端设备类型目录只有 **5 种** `deviceType`，因此 12 台设备覆盖这 5 类（不是 12 种不同型号）；电量 / 温度 / 湿度 / 心率按设备类型与编号分别生成，不再出现两台不同型号设备读数完全相同。
+- 「1 个 `rejected` 场景」由 seed 直接写入一条 `kind='automation'`、`sync_state='pending'`、引用已不存在设备的场景，App 启动同步时被服务端以 `SCENE_DEVICE_NOT_FOUND` 拒绝，落库后显示「已拒绝」+ 原因；不是伪造的本地状态。
 - 「2 台离线」用较旧的 `lastSeenAt` 表达；iOS 首页对远程设备统一显示「未连接」，没有独立的在线/离线状态。
-- AX 最大字号下布局不重叠、不溢出，但长文案会按行截断并以省略号收尾，部分固定高度卡片内的文字显示不全。
+- AX 最大字号下首页筛选 chip 与场景徽章已改为上下排，不再出现半截字；但「今日告警摘要」等固定高度卡片里的长文案仍会被裁切，属于既有布局限制。
 
 ---
 

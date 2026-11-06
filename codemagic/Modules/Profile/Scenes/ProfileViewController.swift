@@ -51,6 +51,11 @@ final class ProfileViewController: UIViewController {
         fatalError("init(coder:) has not been implemented")
     }
 
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        applyBottomOcclusionInset(to: tableView)
+    }
+
     override func viewDidLoad() {
         super.viewDidLoad()
         title = L10n.t("tab.profile")

@@ -28,6 +28,8 @@ final class HomeDashboardViewController: UIViewController {
         symbolName: "person.2"
     )
     private let controlsView = UIStackView()
+    private let chipsStack = UIStackView()
+    private let chipsScroll = UIScrollView()
     private var titleHost: LargeTitleHost?
 
     /// 收起状态只保存在当前会话：房间分区标题可点击展开 / 收起，未分配分区固定排最后。
@@ -54,6 +56,18 @@ final class HomeDashboardViewController: UIViewController {
     }
 
     // MARK: - Lifecycle
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        applyBottomOcclusionInset(to: collectionView)
+    }
+
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        guard previousTraitCollection?.preferredContentSizeCategory
+            != traitCollection.preferredContentSizeCategory else { return }
+        applyChipsArrangement()
+    }
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -148,16 +162,44 @@ final class HomeDashboardViewController: UIViewController {
         roomButton.addTarget(self, action: #selector(handleRooms), for: .touchUpInside)
         householdButton.addTarget(self, action: #selector(handleHouseholdSwitch), for: .touchUpInside)
 
-        let chips = UIStackView(arrangedSubviews: [sortButton, roomButton, householdButton, UIView()])
-        chips.axis = .horizontal
+        let chips = chipsStack
+        chips.addArrangedSubview(sortButton)
+        chips.addArrangedSubview(roomButton)
+        chips.addArrangedSubview(householdButton)
         chips.spacing = Layout.space8
-        chips.alignment = .center
+        chips.setContentHuggingPriority(.required, for: .horizontal)
+        chips.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        // 按内容固有宽度排布；常规字号放不下时横向滚动，AX 档改为竖排，保证三个 chip 文字完整。
+        chipsScroll.showsHorizontalScrollIndicator = false
+        chipsScroll.showsVerticalScrollIndicator = false
+        chipsScroll.translatesAutoresizingMaskIntoConstraints = false
+        chipsScroll.addSubview(chips)
+        chips.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            chips.topAnchor.constraint(equalTo: chipsScroll.contentLayoutGuide.topAnchor),
+            chips.bottomAnchor.constraint(equalTo: chipsScroll.contentLayoutGuide.bottomAnchor),
+            chips.leadingAnchor.constraint(equalTo: chipsScroll.contentLayoutGuide.leadingAnchor),
+            chips.trailingAnchor.constraint(equalTo: chipsScroll.contentLayoutGuide.trailingAnchor),
+            chipsScroll.heightAnchor.constraint(equalTo: chips.heightAnchor),
+        ])
+        applyChipsArrangement()
 
         controlsView.axis = .vertical
         controlsView.spacing = Layout.space8
         controlsView.addArrangedSubview(searchBar)
-        controlsView.addArrangedSubview(chips)
+        controlsView.addArrangedSubview(chipsScroll)
         refreshControls()
+    }
+
+    /// 常规字号横排、放不下时横向滚动；AX 档竖排，避免边缘 chip 只露出半个。
+    private func applyChipsArrangement() {
+        let isAccessibility = traitCollection.preferredContentSizeCategory.isAccessibilityCategory
+        chipsStack.axis = isAccessibility ? .vertical : .horizontal
+        chipsStack.alignment = isAccessibility ? .leading : .center
+        chipsStack.spacing = Layout.space8
+        chipsScroll.alwaysBounceHorizontal = !isAccessibility
+        chipsScroll.alwaysBounceVertical = false
     }
 
     private func refreshControls() {

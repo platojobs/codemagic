@@ -63,6 +63,11 @@ final class DeviceDetailViewController: UIViewController {
 
     // MARK: - Lifecycle
 
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        applyBottomOcclusionInset(to: tableView)
+    }
+
     override func viewDidLoad() {
         super.viewDidLoad()
         title = viewModel.device.displayName
