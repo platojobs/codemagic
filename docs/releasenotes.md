@@ -4,6 +4,7 @@
 
 | Tag | MARKETING_VERSION | Build | 日期 | 对齐后端 |
 | --- | --- | --- | --- | --- |
+| `v0.25.1` | 0.25.1 | 34 | 2026-11-07 | PJGoIoT v0.22.0（无后端契约变更；悬浮 Tab 胶囊下方到底部安全区的条带改为不透明遮挡，`BottomBand` 高度纯函数 + 单测） |
 | `v0.25.0` | 0.25.0 | 33 | 2026-11-06 | PJGoIoT v0.22.0（无后端契约变更；家庭房间分区去掉「房间」导航行、首页底部留白与设备卡名称/状态分行） |
 | `v0.24.0` | 0.24.0 | 32 | 2026-11-06 | PJGoIoT v0.22.0（无后端契约变更；场景 `rejected` 终态对齐 Android、429 退避持久化、首页 chip 与 AX 布局、成员可读名、底部 inset、房间列表一致性、seed 读数差异化） |
 | `v0.23.0` | 0.23.0 | 31 | 2026-11-06 | PJGoIoT v0.22.0（无后端契约变更；e2e 断言项数稳定化 430 ↔ 430、真实界面截图归档、场景指标名映射） |
@@ -36,6 +37,19 @@
 | `v0.3.0` | 0.3.0 | 4 | 2026-11-05 | 0.3.0 |
 | `v0.2.0` | 0.2.0 | 3 | 2026-11-05 | 0.2.0 |
 | `v0.1.0` | — | 1 | 2026-11-05 | — |
+
+---
+
+## v0.25.1（build 34）
+
+**主题：悬浮 Tab 胶囊下方到底部安全区的条带改为不透明遮挡**
+
+- **现象**：`households.png` 里悬浮 Tab 胶囊**下方**、屏幕最底边露出半截「创建家庭」按钮文字。这不是玻璃透视 —— 胶囊之外的条带没有任何背景，滚动内容直接画到了屏幕底边。
+- **修复**：`MainTabBarController` 新增 `bottomBand`（`Palette.canvas` 不透明），插到 `tabBar.superview` 里、紧贴 Tab 之下，覆盖从 Tab 顶边到屏幕底（含 home indicator 安全区）。iOS 26 的 Tab 会包在私有容器中并在布局阶段重排，因此每次 `viewDidLayoutSubviews` 都重新插到 Tab 之下；Tab 被隐藏时同步隐藏条带。条带本身拦截点按，被遮住的内容不会被误触。
+- **高度计算**：抽出纯函数 `BottomBand.frame(containerSize:barTop:)`，顶边夹在 `[0, containerHeight]` 内，高度 = `containerHeight - top`；单测覆盖 83pt 正常高度、顶边越界（0 高 / 整屏高）与空容器，`874 - 791 = 83`（含 34pt 安全区）。
+- **验证**：XCUITest 用可访问性树逐页实测 —— 条带顶边贴齐 Tab 顶边、底边到屏幕底；`home` / `home-bottom` / `households` / `households-bottom` / `rooms` / `profile` 的条带区域内，除 Tab 自身按钮外没有可点到的业务节点；`households.png` 的「创建家庭」残片消失。
+- **截图**：重截全部 18 张（含 `households.png`、`home-bottom.png`、`home.png`、`households-bottom.png`、`rooms.png`、两张 AX 图）。`home-bottom.png` 仍是精确滚到底：顶部是上一张卡片的页脚残句（被固定的搜索 / chip 区裁切），因为停到卡片间隙需要再向上多滚约 64pt，而最后一张卡距 Tab 只有约 8–32pt，会把最后两张卡压到 Tab 之下，所以保留残句以保证「最后一项完整位于 Tab 之上」的证据性。
+- **未验证**：AX 最大字号下设备卡仍是固定高度（164pt），状态完整只在常规字号验证；真机 BLE 与真实 Postgres e2e 本轮未重跑。
 
 ---
 

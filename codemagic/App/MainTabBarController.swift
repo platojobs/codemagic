@@ -4,6 +4,9 @@ import UIKit
 /// 首页承接原「设备」页的设备管理；规则入口只保留在「智能」页。
 final class MainTabBarController: UITabBarController {
     private let environment: AppEnvironment
+    /// iOS 26 悬浮玻璃胶囊只遮住自身，胶囊下方与两侧会透出滚动内容；
+    /// 这一层铺在 Tab 顶边到屏幕底边之间，保证条带内不会出现被切断的文字或按钮。
+    private let bottomBand = UIView()
 
     init(environment: AppEnvironment) {
         self.environment = environment
@@ -18,12 +21,18 @@ final class MainTabBarController: UITabBarController {
     override func viewDidLoad() {
         super.viewDidLoad()
         configureTabs()
+        configureBottomBand()
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(handleAccountDeleted),
             name: .accountDeleted,
             object: nil
         )
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        layoutBottomBand()
     }
 
     deinit {
@@ -159,6 +168,33 @@ final class MainTabBarController: UITabBarController {
         else { return }
         navigation.popToRootViewController(animated: false)
         profile.revealBackgroundCollectionSetting()
+    }
+
+    private func configureBottomBand() {
+        // 与 Tab 的不透明外观同色，玻璃胶囊透出的仍是画布色，不与页面割裂。
+        bottomBand.backgroundColor = Palette.canvas
+        bottomBand.isAccessibilityElement = false
+        bottomBand.accessibilityIdentifier = "main.bottomBand"
+        // 条带本身拦截点按，避免被遮住的内容还能被误触。
+        insertBottomBandBelowTabBar()
+    }
+
+    /// 把条带插到 Tab 的父视图里、紧贴 Tab 之下：iOS 26 的 Tab 可能包在私有容器中，
+    /// 直接插到 TabBarController 的 view 上会被容器盖住（表现为 Tab 胶囊消失）。
+    private func insertBottomBandBelowTabBar() {
+        guard let host = tabBar.superview else { return }
+        host.insertSubview(bottomBand, belowSubview: tabBar)
+    }
+
+    /// 条带跟随 Tab 顶边：胶囊以下到屏幕底（含 home indicator 安全区）全部不透明。
+    /// Tab 被隐藏（如未来某页使用 `hidesBottomBarWhenPushed`）时同步隐藏，避免整条盖住内容。
+    private func layoutBottomBand() {
+        let barVisible = !tabBar.isHidden && tabBar.alpha > 0
+        bottomBand.isHidden = !barVisible
+        guard barVisible, let host = tabBar.superview else { return }
+        bottomBand.frame = BottomBand.frame(containerSize: host.bounds.size, barTop: tabBar.frame.minY)
+        // Tab 容器可能在布局阶段被重排或重建，每次布局都重新贴到 Tab 之下，保证层次稳定。
+        insertBottomBandBelowTabBar()
     }
 
     private func configureBarAppearance() {

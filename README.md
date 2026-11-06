@@ -12,7 +12,7 @@
 
 | 项 | 结果 |
 | --- | --- |
-| 版本 | **v0.25.0**（`MARKETING_VERSION 0.25.0`，`CURRENT_PROJECT_VERSION 33`，tag `v0.25.0`：① 家庭管理「家庭房间」分区不再把「房间」导航入口当成一行房间 —— 入口移到分区头右侧「管理」，分区行数只等于真实房间数，与房间管理页一致；② 首页底部留白抽成 `BottomOcclusion` 纯函数并补测，`viewSafeAreaInsetsDidChange` 重算，滚到底时最后一项完整位于悬浮 Tab 之上；③ 设备卡名称与状态拆成两行，名称最多两行按需省略，状态（未连接 / 已连接 / 离线）独占一行不被截断；顺带修掉分区头复用导致旧标题叠字的问题）。上一版 **v0.24.0**（`MARKETING_VERSION 0.24.0`，`CURRENT_PROJECT_VERSION 32`，tag `v0.24.0`：① 场景 `rejected` 终态对齐 Android —— 收到 `SCENE_*` 4xx 后落库拒绝码 / 可读原因 / `rejected_at`，终态不再自动重试，用户编辑字段才回 `pending`，429 的 `Retry-After` 落 `next_retry_at` 跨进程保留（迁移 v15，见 [docs/consistency.md](docs/consistency.md) 3.20）；② 首页筛选 chip 按固有宽度 + 内边距排布，常规字号横向滚动、AX 档竖排，不再出现半截字；③ 家庭成员显示「成员 N」而非原始用户 ID；④ 所有可滚动页面按悬浮 Tab 高度 + 安全区补底部 inset；⑤ 家庭管理与房间管理房间列表恢复一致；⑥ seed 读数改为 7 天 / 30 分钟一个点、按设备类型与型号差异化）。上一版 **v0.23.0**（`MARKETING_VERSION 0.23.0`，`CURRENT_PROJECT_VERSION 31`，tag `v0.23.0`：① e2e 项数稳定化 —— 定位到「本机 430 / CI 432」差异是导出轮询把 2 条断言写在循环内、按轮次动态生成，改为循环外累积布尔量后两边固定 430（详见 [docs/consistency.md](docs/consistency.md)）；② 归档 16 张模拟器真实截图到 [docs/screenshots](docs/screenshots)，数据为「模拟器 + 本机后端 + seed 数据」；③ 修场景指标名映射，服务端 `temperature_celsius` 等键不再原样显示）。上一版 v0.22.0：会话生命周期接通 —— 所有带 Bearer 的请求共用 401 → **单飞 `POST /auth/refresh`** → 原子替换 Keychain token → 重放原请求；刷新返回 401 才进入「需要重新登录」并保留本地设备 / 读数 / 家庭 / 场景，网络或 5xx 失败不清会话；「我的」新增登录会话管理（`GET /sessions` 标出当前会话、`DELETE /sessions/{id}` 单独吊销、`POST /auth/logout` 退出当前会话），退出登录与删除账号明确区分；映射 6 个 `SCENE_*` 错误码；4xx 一律终态、429 单独按 `Retry-After`；导出解析 `failureReason`；反馈详情 `GET /feedback/{id}` + 本人关闭 `PATCH /feedback/{id}`（409 明确文案）；单设备详情按平台路由（Android → `GET /my/devices/{mac}`）；契约对齐 `PJGoIoT` v0.22.0 / openapi 0.17.0） |
+| 版本 | **v0.25.1**（`MARKETING_VERSION 0.25.1`，`CURRENT_PROJECT_VERSION 34`，tag `v0.25.1`：iOS 26 悬浮 Tab 的玻璃胶囊只遮住自身，胶囊下方到屏幕底会露出滚动内容；本版在最上层铺一条与画布同色的不透明条带（`BottomBand`），任意页面、任意滚动位置，Tab 条带区域内都不再出现被切断的文字或按钮，胶囊本身保留玻璃效果）。上一版 **v0.25.0**（`MARKETING_VERSION 0.25.0`，`CURRENT_PROJECT_VERSION 33`，tag `v0.25.0`：① 家庭管理「家庭房间」分区不再把「房间」导航入口当成一行房间 —— 入口移到分区头右侧「管理」，分区行数只等于真实房间数，与房间管理页一致；② 首页底部留白抽成 `BottomOcclusion` 纯函数并补测，`viewSafeAreaInsetsDidChange` 重算，滚到底时最后一项完整位于悬浮 Tab 之上；③ 设备卡名称与状态拆成两行，名称最多两行按需省略，状态（未连接 / 已连接 / 离线）独占一行不被截断；顺带修掉分区头复用导致旧标题叠字的问题）。上一版 **v0.24.0**（`MARKETING_VERSION 0.24.0`，`CURRENT_PROJECT_VERSION 32`，tag `v0.24.0`：① 场景 `rejected` 终态对齐 Android —— 收到 `SCENE_*` 4xx 后落库拒绝码 / 可读原因 / `rejected_at`，终态不再自动重试，用户编辑字段才回 `pending`，429 的 `Retry-After` 落 `next_retry_at` 跨进程保留（迁移 v15，见 [docs/consistency.md](docs/consistency.md) 3.20）；② 首页筛选 chip 按固有宽度 + 内边距排布，常规字号横向滚动、AX 档竖排，不再出现半截字；③ 家庭成员显示「成员 N」而非原始用户 ID；④ 所有可滚动页面按悬浮 Tab 高度 + 安全区补底部 inset；⑤ 家庭管理与房间管理房间列表恢复一致；⑥ seed 读数改为 7 天 / 30 分钟一个点、按设备类型与型号差异化）。上一版 **v0.23.0**（`MARKETING_VERSION 0.23.0`，`CURRENT_PROJECT_VERSION 31`，tag `v0.23.0`：① e2e 项数稳定化 —— 定位到「本机 430 / CI 432」差异是导出轮询把 2 条断言写在循环内、按轮次动态生成，改为循环外累积布尔量后两边固定 430（详见 [docs/consistency.md](docs/consistency.md)）；② 归档 16 张模拟器真实截图到 [docs/screenshots](docs/screenshots)，数据为「模拟器 + 本机后端 + seed 数据」；③ 修场景指标名映射，服务端 `temperature_celsius` 等键不再原样显示）。上一版 v0.22.0：会话生命周期接通 —— 所有带 Bearer 的请求共用 401 → **单飞 `POST /auth/refresh`** → 原子替换 Keychain token → 重放原请求；刷新返回 401 才进入「需要重新登录」并保留本地设备 / 读数 / 家庭 / 场景，网络或 5xx 失败不清会话；「我的」新增登录会话管理（`GET /sessions` 标出当前会话、`DELETE /sessions/{id}` 单独吊销、`POST /auth/logout` 退出当前会话），退出登录与删除账号明确区分；映射 6 个 `SCENE_*` 错误码；4xx 一律终态、429 单独按 `Retry-After`；导出解析 `failureReason`；反馈详情 `GET /feedback/{id}` + 本人关闭 `PATCH /feedback/{id}`（409 明确文案）；单设备详情按平台路由（Android → `GET /my/devices/{mac}`）；契约对齐 `PJGoIoT` v0.22.0 / openapi 0.17.0） |
 | 五模块（首页 / 智能 / 产品 / 市场 / 我的） | 已实现，纯代码 UIKit，真实数据路径；设备管理并入首页，规则与场景集中在「智能」 |
 | CoreBluetooth 扫描 + 连接 | 已实现（`CBCentralManager`，真实 RSSI） |
 | BLE 读数采集 | 已实现：连接后订阅心率 `0x2A37`、电量 `0x2A19`、温度 `0x2A6E`、Nordic UART TX `6E400003-…`；各特征独立解析器，失败静默丢弃并写本地日志 |
@@ -27,7 +27,7 @@
 | 同步 | **已实现**：匿名登录、增量拉取、批量推送（设备 ≤100/批 + 读数 ≤200/批、幂等键含读数）、冲突提示、tombstone、Keychain token、前后台 / BGTask 触发、断网累积补传；后台唤醒仅做受限推送（不拉增量、不建号、≥15 分钟间隔）；**410 `RESYNC_REQUIRED` 自动全量重同步（pending 不丢）**，503 `TIMEOUT` 指数退避 |
 | 自绘 RSSI + 自绘折线图 + 代码组装空状态 | 已实现（读数图表纯 `draw(_:)`，无第三方图表库） |
 | 首启引导 | **已实现**：3 步（蓝牙 / 通知 / 后台采集），仅首次或未走完时出现，可跳过；步骤与完成标记持久化到 `UserDefaults` |
-| 单元测试 | **426 个用例，0 失败**（`** TEST SUCCEEDED **`，2026-11-06，Xcode 27.2 / iPhone 18 Pro · iOS 27.2 模拟器；v0.25.0 新增 5 个用例：设备卡长名称下状态完整可见、分区头复用时旧标题被替换、悬浮 Tab 留白扣除自动 inset、房间分区只统计真实房间、分区头「管理」入口可触发，既有 421 个全部保持） |
+| 单元测试 | **427 个用例，0 失败**（`** TEST SUCCEEDED **`，2026-11-07，Xcode 27.2 / iPhone 18 Pro · iOS 27.2 模拟器；v0.25.1 新增 1 个用例：底部条带从 Tab 顶边覆盖到屏幕底边的高度计算（含越界收敛），既有 426 个全部保持） |
 | 模拟器构建 | **通过**（`xcodebuild ... build`，`** BUILD SUCCEEDED **`） |
 | CI | **GitHub Actions 已实际运行 success**：v0.25.0 tag run [42248120657](https://github.com/platojobs/codemagic/actions/runs/42248120657)（success，提交 `84ddef7`，ref `v0.25.0`），并行 `Build & Test`（**426 单测**，`Executed 426 tests, with 0 failures` / `** TEST SUCCEEDED **`）与 `E2E contract`（**430 项，0 SKIP，0 失败**，PJGoIoT 固定在 v0.22.0；本机同套件同为 430 项）；同 sha 的 `main` run [42248107827](https://github.com/platojobs/codemagic/actions/runs/42248107827) 先被 tag 运行的 `concurrency: ios-${sha}` 取消（属预期），待 tag run 结束后 `gh run rerun`，现为 **success**（同为 426 单测 / 430 项 E2E）；上一基线 v0.24.0 tag run [42237163018](https://github.com/platojobs/codemagic/actions/runs/42237163018)（421 单测 / 430 项 E2E）；`codemagic.yaml` 作为可选替代保留但未验证 |
 | 真机 BLE / 签名 | **未验证**：本机无真机与 Apple 开发者账号；读数采集与图表需真机 / 可穿戴设备验证（见第 9 节） |
@@ -41,7 +41,7 @@
 | 页面 | 截图 | 内容 |
 | --- | --- | --- |
 | 首页 | [home.png](docs/screenshots/home.png) | 筛选 chip 完整文案（排序 / 房间 · 3 / 我的家）、房间分段（客厅 · 3）、设备卡名称与状态分两行（未连接完整可见）、差异化电量读数、快捷场景 |
-| 首页 · 底部 | [home-bottom.png](docs/screenshots/home-bottom.png) | 滚到底：书房两张设备卡与分区头完整位于悬浮 Tab 之上，Tab 下方无卡片残片 |
+| 首页 · 底部 | [home-bottom.png](docs/screenshots/home-bottom.png) | 滚到底：书房两张设备卡与分区头完整位于悬浮 Tab 之上，Tab 胶囊下方条带内无卡片残片 |
 | 智能 · 场景列表 | [scenes.png](docs/screenshots/scenes.png) | 4 个云端场景（含 1 个「设备已移除」、1 个「已拒绝」并附拒绝原因）与 3 个本机场景 |
 | 智能 · 场景详情 | [scene-detail.png](docs/screenshots/scene-detail.png) | 工作日早晨开窗提醒（定时 07:30、周一至周五、通知动作） |
 | 产品 · 列表 | [products.png](docs/screenshots/products.png) | 服务端目录的 5 类设备 |
@@ -49,10 +49,10 @@
 | 市场 | [market.png](docs/screenshots/market.png) | 服务端下发的商品与固件条目 |
 | 我的 | [profile.png](docs/screenshots/profile.png) | 同步状态、家庭入口、会话、账号与数据、外观与设置 |
 | 家庭管理 | [households.png](docs/screenshots/households.png) | 当前家庭「我的家」：6 台设备 / 3 个房间；成员显示「成员 1 · 所有者 · 我」；房间分区头右侧为「管理」入口，列表只有真实房间 |
-| 家庭管理 · 底部 | [households-bottom.png](docs/screenshots/households-bottom.png) | 滚到底：房间列表（客厅 / 主卧 / 书房）与说明文字完整位于悬浮 Tab 之上 |
+| 家庭管理 · 底部 | [households-bottom.png](docs/screenshots/households-bottom.png) | 滚到底：房间列表（客厅 / 主卧 / 书房）与说明文字完整位于悬浮 Tab 之上，Tab 胶囊下方无「创建家庭」按钮残片 |
 | 家庭切换 | [households-list.png](docs/screenshots/households-list.png) | 3 个家庭（我的家 / 湖畔小筑 / 爸妈家） |
 | 房间管理 | [rooms.png](docs/screenshots/rooms.png) | 当前家庭「我的家」的 3 个房间（客厅 / 主卧 / 书房），与家庭管理页一致 |
-| 会话管理 | [sessions.png](docs/screenshots/sessions.png) | 当前会话 + 另一条会话，可单独吊销 |
+| 会话管理 | [sessions.png](docs/screenshots/sessions.png) | 当前会话与其他登录会话（截图时 2 条历史会话），可单独吊销 |
 | 反馈列表 | [feedback-list.png](docs/screenshots/feedback-list.png) | 3 条反馈，状态含「已关闭」 |
 | 反馈详情 | [feedback-detail.png](docs/screenshots/feedback-detail.png) | 单条反馈的正文、上下文与状态流转 |
 | 账号与数据 | [account-data.png](docs/screenshots/account-data.png) | 导出我的数据、注销账号、匿名账号与会话到期日 |
@@ -65,6 +65,7 @@ seed 的边界（如实记录）：
 - 「1 个 `rejected` 场景」由 seed 直接写入一条 `kind='automation'`、`sync_state='pending'`、引用已不存在设备的场景，App 启动同步时被服务端以 `SCENE_DEVICE_NOT_FOUND` 拒绝，落库后显示「已拒绝」+ 原因；不是伪造的本地状态。
 - 「2 台离线」用较旧的 `lastSeenAt` 表达；iOS 首页对远程设备统一显示「未连接」，没有独立的在线/离线状态。
 - 首页底部留白实测：滚到底时最后一张设备卡 `maxY = 759`，悬浮 Tab 顶边 `791`，两者相隔 32pt（24pt 留白 + 8pt 分区内边距），Tab 下方没有任何卡片残片（见 `home-bottom.png`）。`home.png` 截于页面顶部，iOS 26 的悬浮玻璃 Tab 会把中段内容透出来，属于系统 Tab 样式，不是 inset 失效。
+- Tab 条带遮挡（v0.25.1）：从 Tab 顶边 `791` 到屏幕底 `874`（含 34pt home indicator 安全区）由 `BottomBand.frame` 计算高度（`874 - 791 = 83`），条带铺在 Tab 之下、业务内容之上；可访问性树实测各页面该区域内除 Tab 自身按钮外没有可点到的业务节点，`households.png` 里原先露在胶囊下方的「创建家庭」按钮残片已消失。
 - AX 最大字号下首页筛选 chip 与场景徽章已改为上下排，不再出现半截字；但「今日告警摘要」等固定高度卡片里的长文案仍会被裁切（`home-ax.png` 可见），属于既有布局限制。设备卡在 AX 字号下仍是固定高度，本轮只保证常规字号下名称与状态完整，AX 档未验证。
 
 ---

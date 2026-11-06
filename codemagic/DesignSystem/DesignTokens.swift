@@ -360,6 +360,16 @@ enum BottomOcclusion {
     }
 }
 
+/// 底部条带：从悬浮 Tab 顶边一直遮挡到屏幕底边（含底部安全区）。
+/// iOS 26 的悬浮胶囊只覆盖自身，胶囊下方与两侧仍会透出滚动内容，因此需要在最上层铺一条
+/// 与画布同色的不透明条带；纯函数便于单测覆盖高度计算。
+enum BottomBand {
+    static func frame(containerSize: CGSize, barTop: CGFloat) -> CGRect {
+        let top = min(max(0, barTop), max(0, containerSize.height))
+        return CGRect(x: 0, y: top, width: containerSize.width, height: max(0, containerSize.height - top))
+    }
+}
+
 extension UIViewController {
     /// 底部滚动留白：把最后一项抬到 Tab 之上，并额外留 `spacing`。
     /// iOS 26+ 的悬浮 Tab 不一定计入 `safeAreaInsets`，因此用视图坐标算实际遮挡量，

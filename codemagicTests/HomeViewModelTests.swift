@@ -256,6 +256,21 @@ final class HomeLayoutTests: XCTestCase {
         XCTAssertEqual(BottomOcclusion.inset(overlap: 0, automaticInset: 0, spacing: 0), 0)
     }
 
+    /// 底部条带从 Tab 顶边覆盖到屏幕底边，高度含底部安全区；越界时收敛到 0 / 整屏。
+    func testBottomBandCoversTabTopToScreenBottom() {
+        let screen = CGSize(width: 402, height: 874)
+        let frame = BottomBand.frame(containerSize: screen, barTop: 791)
+        XCTAssertEqual(frame.minY, 791)
+        XCTAssertEqual(frame.height, 83, "条带高度 = 屏幕底边 - Tab 顶边（含 home indicator 安全区）")
+        XCTAssertEqual(frame.width, 402)
+        XCTAssertEqual(frame.maxY, 874)
+
+        XCTAssertEqual(BottomBand.frame(containerSize: screen, barTop: 874).height, 0)
+        XCTAssertEqual(BottomBand.frame(containerSize: screen, barTop: 900).height, 0, "顶边越界不再产生负高度")
+        XCTAssertEqual(BottomBand.frame(containerSize: screen, barTop: -10).height, 874, "顶边越界收敛到 0")
+        XCTAssertEqual(BottomBand.frame(containerSize: .zero, barTop: 0).height, 0)
+    }
+
     /// 家庭房间分区只统计真实房间；「管理」入口移到分区头，不再占一行。
     func testHouseholdRoomSectionCountsOnlyRealRooms() {
         XCTAssertEqual(HouseholdRoomSection.rowCount(roomCount: 3), 3)
