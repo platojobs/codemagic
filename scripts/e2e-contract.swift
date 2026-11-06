@@ -1312,13 +1312,17 @@ private func run() -> Int32 {
     var latestExportURL = ""
     var exportReady = false
     var exportPollCount = 0
+    // 轮询次数取决于服务端何时把任务标为 ready，断言必须放到循环外，
+    // 否则本机（1 次轮询）与 CI（2 次轮询）会产出不同数量的 [PASS]，项数永远对不齐。
+    var pollsAllOK = true
+    var pollStatusesAllValid = true
     while exportPollCount < 20 {
         exportPollCount += 1
         let poll = client.request("GET", "me/export/\(exportID)", token: claimedToken)
         let pollObject = jsonObject(poll.body) ?? [:]
         let status = text(pollObject, "status")
-        report.check(poll.status == 200, "轮询导出任务返回 200（第 \(exportPollCount) 次）", "status=\(poll.status)")
-        report.check(["pending", "ready", "failed"].contains(status), "轮询状态合法", "status=\(status)")
+        if poll.status != 200 { pollsAllOK = false }
+        if !["pending", "ready", "failed"].contains(status) { pollStatusesAllValid = false }
         if status == "ready" {
             exportReady = true
             latestExportURL = text(pollObject, "downloadUrl")
@@ -1336,6 +1340,8 @@ private func run() -> Int32 {
         }
         Thread.sleep(forTimeInterval: 0.2)
     }
+    report.check(pollsAllOK, "每次轮询导出任务均返回 200", "polls=\(exportPollCount)")
+    report.check(pollStatusesAllValid, "每次轮询状态合法", "polls=\(exportPollCount)")
     report.check(exportReady, "导出任务在限定次数内就绪", "polls=\(exportPollCount)")
 
     if exportReady, let exportPath = exportRelativePath(latestExportURL) {
@@ -1394,7 +1400,7 @@ private func run() -> Int32 {
         "status=\(deleteResponse.status) body=\(bodyText(deleteResponse.body))"
     )
     let bearerAfterDelete = client.request("POST", "me/export", token: claimedToken, json: [String: Any]())
-    report.check(bearerAfterDelete.status == 401, "注销后旧 Bearer 立即失效（401）", "status=\(bearerAfterDelete.status)")
+    report.check(bearerAfterDelete.status == 401, "注销后旧访问令牌立即失效（401）", "status=\(bearerAfterDelete.status)")
     let oldBearerAfterDelete = client.request("POST", "me/export", token: tokenA, json: [String: Any]())
     report.check(oldBearerAfterDelete.status == 401, "注销后最早 token 也失效（401）", "status=\(oldBearerAfterDelete.status)")
     let replayDelete = client.request("DELETE", "me", headers: ["X-Deletion-Token": deletionToken])
@@ -1597,10 +1603,16 @@ private func run() -> Int32 {
     let secondHouseholdID = text(jsonObject(secondHousehold.body) ?? [:], "id")
     report.check(secondHousehold.status == 201 && !secondHouseholdID.isEmpty, "owner 创建第二个家庭", "status=\(secondHousehold.status)")
 
-    for path in ["households/\(secondHouseholdID)", "households/\(secondHouseholdID)/members", "households/\(secondHouseholdID)/rooms"] {
+    // 用例名不嵌入随机家庭 id，否则每次运行的两份 PASS 清单都无法直接 diff；
+    // 真实 id 放 detail，失败时仍可定位。
+    for (label, path) in [
+        ("家庭信息", "households/\(secondHouseholdID)"),
+        ("成员列表", "households/\(secondHouseholdID)/members"),
+        ("房间列表", "households/\(secondHouseholdID)/rooms"),
+    ] {
         let crossResponse = client.request("GET", path, token: memberAccount.token)
-        report.check(crossResponse.status == 404, "跨家庭读取 \(path) 返回 404", "status=\(crossResponse.status)")
-        report.check(errorCode(crossResponse.body) == "NOT_FOUND", "跨家庭错误码为 NOT_FOUND（\(path)）", "code=\(errorCode(crossResponse.body))")
+        report.check(crossResponse.status == 404, "跨家庭读取\(label)返回 404", "path=\(path) status=\(crossResponse.status)")
+        report.check(errorCode(crossResponse.body) == "NOT_FOUND", "跨家庭读取\(label)错误码为 NOT_FOUND", "path=\(path) code=\(errorCode(crossResponse.body))")
     }
     let outsiderGet = client.request("GET", "households/\(householdID)", token: outsiderAccount.token)
     report.check(outsiderGet.status == 404, "非成员读取家庭返回 404", "status=\(outsiderGet.status)")
@@ -2129,7 +2141,7 @@ private func run() -> Int32 {
         "status=\(deleteAfterTransfer.status) body=\(bodyText(deleteAfterTransfer.body))"
     )
     let ownerBearerAfterDelete = client.request("POST", "me/export", token: ownerAccount.token, json: [String: Any]())
-    report.check(ownerBearerAfterDelete.status == 401, "注销后 owner 的 Bearer 立即失效（401）", "status=\(ownerBearerAfterDelete.status)")
+    report.check(ownerBearerAfterDelete.status == 401, "注销后 owner 的访问令牌立即失效（401）", "status=\(ownerBearerAfterDelete.status)")
     let ownerReplayDelete = client.request("DELETE", "me", headers: ["X-Deletion-Token": blockedDeletionToken])
     report.check(ownerReplayDelete.status == 404, "注销删除令牌重放返回 404", "status=\(ownerReplayDelete.status)")
 

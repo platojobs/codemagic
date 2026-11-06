@@ -226,8 +226,19 @@ iOS 端不再存在“历史端点”调用；唯一保留的旧路径 `/api/v1/
 - 长周期（v0.5.0）：`series` 按 `1m` 返回、桶按 `start` 升序且 `count` 合计等于推送条数、每桶 `min ≤ avg ≤ max`；空区间返回 `buckets: []`；非法 `bucket=5m` 返回 400 `BAD_REQUEST`；`metrics` 按 `lastAt` 倒序、最新温度指标在首位、心率指标 `count=3` 且 `unit=bpm`。
 - 家庭（v0.14.0）：三个匿名账号（owner / member / outsider）——个人家庭自动创建且不可删（403 `FORBIDDEN`）→ 创建家庭 → 邀请码 8 位且 `expiresAt` 为未来、一次性（重复领取 404）→ member 用小写码领取成功（`role=member`、成员数 2）→ 成员列表 owner / member 对应 → owner 建房并 PATCH 设备归属 → member `GET /my/devices` 可见该设备及 `householdId` / `roomId` → member 改房间 / 建房 / 签发邀请码 / 改家庭名均 403 `FORBIDDEN` → 跨家庭读取家庭 / 成员 / 房间均 404 `NOT_FOUND` → 非成员读取与改房间 404 → member 改 owner 设备 404 → 归属三态（缺失不变 / 空串清除 `roomId` 与 `householdId` 回落个人家庭 / 非空覆盖）→ 删除家庭后设备回到个人家庭、`roomId = null`。
 - 家庭管理（v0.15.0）：owner 创建家庭 → 邀请 `member` 领取 → 邀请码列表只含 `codeHashPrefix` / `status` / `expiresAt`（响应无明文字段、响应原文不含明文）→ 撤销 204 后第三人 claim 404 → 建房 3 间 → 整段 `PUT /rooms/order` 成功且顺序生效 → 缺项 / 多项 / 重复均 409（`CONFLICT` 或 `ROOM_SET_MISMATCH`）→ `GET /households` 的 `memberCount=2` / `roomCount=3` / `deviceCount=0` 为真实值 → 成员设备 PATCH 加入家庭 → owner 带成员退出 409 `CONFLICT` 且 message 非空 → owner 移除成员 204 → 被移除成员 `GET /households/{id}` 404、其设备回个人家庭且 `roomId=null` → 移除后 owner 退出 204、家庭 404。
+- 会话与反馈（v0.22.0）：`GET /sessions` 200 且标出 `current`；`POST /auth/refresh` 200 返回新 token、旧 token 立即 401、新 token 可访问；吊销不存在的会话 404；`POST /auth/logout` 204 后该 token 失效；`GET /feedback/{id}` 200 含 `statusMessage`；`PATCH /feedback/{id}` 200 关闭，再次 PATCH 409。
 
-当前共 **260 项断言全部通过**（v0.15.0 联调记录，后端 `PJGoIoT` **v0.13.0**，`STORE=fixture`）；真 Postgres 运行同一套契约，并额外直接查库验证邀请码只存 64 位哈希、移除成员后成员行删除、owner 退出后成员行清空。
+当前共 **430 项断言全部通过**（2026-11-06，后端 `PJGoIoT` **v0.22.0**，`STORE=fixture`；`scripts/e2e-contract.sh` 实跑 **430 PASS / 0 SKIP / 0 FAIL**）。真 Postgres 运行同一套契约，并额外直接查库验证邀请码只存 64 位哈希、移除成员后成员行删除、owner 退出后成员行清空。
+
+#### v0.23.0：430 / 432 差异定位与消除
+
+- **现象**：v0.22.0 时本机 `e2e-contract.sh` 报 430 项，CI 的 `E2E contract` job 报 432 项。
+- **定位方法**：把两边日志里的 `[PASS]` 行按执行顺序提取、去掉时间戳与随机 ID 后逐条 diff。差异只有两条，均在导出任务轮询段：
+  - `轮询导出任务返回 200（第 2 次）`
+  - `轮询状态合法（第 2 次）`
+- **真实原因**：`scripts/e2e-contract.swift` 把这两条断言写在 `while exportPollCount < 20` 循环体内，**每轮固定生成 2 条**。本机导出首轮即 `ready`（1 轮 → 2 条），CI 需要第二轮才 `ready`（2 轮 → 4 条），因此 CI 多 2 条。也就是说：**本地环境下「第 2 轮」的这两条断言根本没有执行过**，这不是 CI 多测，而是本地覆盖缺口。
+- **消除方式**：改为循环外累积布尔量 —— `pollsAllOK`（每轮 200）与 `pollStatusesAllValid`（每轮状态合法），任意轮次都固定为 2 条；轮询次数只写入断言 detail（`polls=N`），不再影响项数。修复后本机 430，CI 同为 430。
+- **顺带稳定化**：GitHub Actions 日志会把 `Bearer <token>` 做掩码，原用例名因此被截断；改为「注销后旧访问令牌立即失效（401）」「注销后 owner 的访问令牌立即失效（401）」。跨家庭用例名去掉随机家庭 UUID（改为家庭信息 / 成员列表 / 房间列表），保证两边清单可逐条比对。
 
 运行记录见 `README.md` 第 4.2 节；该脚本已接入 GitHub Actions `ios.yml` 的 `e2e-contract` job（macOS runner，与 build 并行）。若 CI checkout 到的后端尚未包含读数链路，第 7 节会输出 `[SKIP]`（能力门控，不计通过、不伪造 PASS）；`series` / `metrics` 自 v0.5.0 起属于必需契约，缺失即真实失败，不会跳过。
 

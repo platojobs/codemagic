@@ -536,24 +536,50 @@ print("PASS metrics: %s" % ", ".join("%s=%d" % (k, v["count"]) for k, v in sorte
 PY
 
 step "export / 注销"
-EXPORT_JSON="$(curl -fsS -H "Authorization: Bearer $TOKEN" \
-    "$BASE_URL/api/v1/me/export?limit=5000")"
+EXPORT_CREATE="$(curl -sS -X POST -H "Authorization: Bearer $TOKEN" \
+    -H "Content-Type: application/json" -d '{}' "$BASE_URL/api/v1/me/export")"
+EXPORT_ID="$(python3 -c 'import json,sys;print(json.loads(sys.argv[1]).get("id",""))' "$EXPORT_CREATE")" || true
+[ -n "$EXPORT_ID" ] || fail "创建导出任务失败：$EXPORT_CREATE"
+DOWNLOAD_URL=""
+for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+    POLL_JSON="$(curl -sS -H "Authorization: Bearer $TOKEN" "$BASE_URL/api/v1/me/export/$EXPORT_ID")"
+    STATUS="$(python3 -c 'import json,sys;print(json.loads(sys.argv[1]).get("status",""))' "$POLL_JSON")" || true
+    if [ "$STATUS" = "ready" ]; then
+        DOWNLOAD_URL="$(python3 -c 'import json,sys;print(json.loads(sys.argv[1]).get("downloadUrl",""))' "$POLL_JSON")" || true
+        break
+    fi
+    [ "$STATUS" = "failed" ] && fail "导出任务失败：$POLL_JSON"
+    sleep 0.2
+done
+[ -n "$DOWNLOAD_URL" ] || fail "导出任务未在限定轮询内就绪：$POLL_JSON"
+# 服务端返回 /api/v1/... 相对地址或绝对地址，统一拼成可直接请求的 URL。
+case "$DOWNLOAD_URL" in
+    http*) EXPORT_URL="$DOWNLOAD_URL" ;;
+    /api/v1/*) EXPORT_URL="$BASE_URL$DOWNLOAD_URL" ;;
+    /*) EXPORT_URL="$BASE_URL/api/v1$DOWNLOAD_URL" ;;
+    *) EXPORT_URL="$BASE_URL/api/v1/$DOWNLOAD_URL" ;;
+esac
+EXPORT_JSON="$(curl -fsS "$EXPORT_URL")"
 python3 - "$EXPORT_JSON" "$USER_ID" <<'PY'
 import json, sys
 body = json.loads(sys.argv[1])
 assert body["user"]["id"] == sys.argv[2], body["user"]
-assert len(body["devices"]) == 1
-assert len(body["readings"]) == 4, len(body["readings"])
-assert body["hasMore"] is False
-print("PASS export: devices=%d readings=%d nextCursor=%r" % (
-    len(body["devices"]), len(body["readings"]), body["nextCursor"]))
+# 前面的家庭结构用例会在同一账号下再建设备，这里只验证导出聚合本身可用且包含读数。
+assert len(body["devices"]) >= 1, len(body["devices"])
+assert len(body["readings"]) >= 1, len(body["readings"])
+print("PASS export: devices=%d readings=%d" % (
+    len(body["devices"]), len(body["readings"])))
 PY
 
+DELETE_TOKEN_JSON="$(curl -sS -X POST -H "Authorization: Bearer $TOKEN" \
+    -H "Content-Type: application/json" -d '{}' "$BASE_URL/api/v1/me/deletion-request")"
+DELETION_TOKEN="$(python3 -c 'import json,sys;print(json.loads(sys.argv[1]).get("token",""))' "$DELETE_TOKEN_JSON")" || true
+[ -n "$DELETION_TOKEN" ] || fail "申请删除令牌失败：$DELETE_TOKEN_JSON"
 DELETE_CODE="$(curl -s -o /dev/null -w '%{http_code}' -X DELETE \
-    -H "Authorization: Bearer $TOKEN" "$BASE_URL/api/v1/me")"
+    -H "X-Deletion-Token: $DELETION_TOKEN" "$BASE_URL/api/v1/me")"
 [ "$DELETE_CODE" = "204" ] || fail "注销期望 204，实际 $DELETE_CODE"
 AFTER_CODE="$(curl -s -o /dev/null -w '%{http_code}' \
-    -H "Authorization: Bearer $TOKEN" "$BASE_URL/api/v1/me/export")"
+    -H "Authorization: Bearer $TOKEN" "$BASE_URL/api/v1/households")"
 [ "$AFTER_CODE" = "401" ] || fail "注销后旧 token 期望 401，实际 $AFTER_CODE"
 log "PASS 注销: DELETE=204，旧 token 再访问=401"
 
