@@ -52,7 +52,7 @@
 - **占位符**：`notify` / `log` 文本支持 `{device}` / `{metric}` / `{value}`；缺失上下文替换 `—`，未知占位符原样保留（约定见 `docs/consistency.md` 3.19）。
 - **UI**：「智能 → 场景」分为「服务端场景」与「仅本机场景」；场景行显示触发条件、动作 / 设备、下次触发、待同步 / 已同步状态，设备缺失标注「设备已移除」；编辑器支持 4 类触发条件、冷却与 1–4 个不重复动作。UIKit 纯代码、iOS 15、中英双语、`UIFontMetrics`、48pt 触达、`accessibilityLabel`、仅 `DesignTokens`。
 - 单测 **402 个，0 失败**（新增 38 个：首次全量上传与写回 remoteId、orphan 认领、LWW 两端不同字段都保留、离线 pending 补传、软删同步与 change_log tombstone、基线缺失、deviceMissing 跳过 + 失败日志 + 标记刷新、RSSI / 指标连续条数 / 冷却、定时下一次触发含跨 DST、占位符渲染、SQLite v14 迁移与旧数据保留）。E2E fixture **414 项全 PASS**（后端 v0.20.0 干净 worktree：场景 CRUD、字段级 LWW、跨用户 404、非法触发 / 重复动作 400、设备删除后的 `deviceMissing`、软删后 GET/PUT 404、`change_log` upsert + tombstone）。
-- **CI**：tag `v0.21.0` run [42190873586](https://github.com/platojobs/codemagic/actions/runs/42190873586) success（`Build & Test` 402 单测 / `E2E contract` 414 项，后端固定 v0.20.0）；同 sha 的 `main` run [42190693581](https://github.com/platojobs/codemagic/actions/runs/42190693581) 被 tag 并发规则取消；证据回填后的 `main` run 结果待补。
+- **CI**：tag `v0.21.0` run [42190873586](https://github.com/platojobs/codemagic/actions/runs/42190873586) success（`Build & Test` 402 单测 / `E2E contract` 414 项，后端固定 v0.20.0）；同 sha 的 `main` run [42190693581](https://github.com/platojobs/codemagic/actions/runs/42190693581) 被 tag 并发规则取消；证据回填后的 `main` run [42193176880](https://github.com/platojobs/codemagic/actions/runs/42193176880) success（提交 `9086554`）。
 
 ---
 
