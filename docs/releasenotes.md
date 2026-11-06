@@ -49,6 +49,7 @@
 - **高度计算**：抽出纯函数 `BottomBand.frame(containerSize:barTop:)`，顶边夹在 `[0, containerHeight]` 内，高度 = `containerHeight - top`；单测覆盖 83pt 正常高度、顶边越界（0 高 / 整屏高）与空容器，`874 - 791 = 83`（含 34pt 安全区）。
 - **验证**：XCUITest 用可访问性树逐页实测 —— 条带顶边贴齐 Tab 顶边、底边到屏幕底；`home` / `home-bottom` / `households` / `households-bottom` / `rooms` / `profile` 的条带区域内，除 Tab 自身按钮外没有可点到的业务节点；`households.png` 的「创建家庭」残片消失。
 - **截图**：重截全部 18 张（含 `households.png`、`home-bottom.png`、`home.png`、`households-bottom.png`、`rooms.png`、两张 AX 图）。`home-bottom.png` 仍是精确滚到底：顶部是上一张卡片的页脚残句（被固定的搜索 / chip 区裁切），因为停到卡片间隙需要再向上多滚约 64pt，而最后一张卡距 Tab 只有约 8–32pt，会把最后两张卡压到 Tab 之下，所以保留残句以保证「最后一项完整位于 Tab 之上」的证据性。
+- **CI**：tag run [42256635350](https://github.com/platojobs/codemagic/actions/runs/42256635350) success（427 单测 / 430 项 E2E）；main run [42256610888](https://github.com/platojobs/codemagic/actions/runs/42256610888) 因 `concurrency: ios-${sha}` 先被取消，tag run 结束后重跑为 success。
 - **未验证**：AX 最大字号下设备卡仍是固定高度（164pt），状态完整只在常规字号验证；真机 BLE 与真实 Postgres e2e 本轮未重跑。
 
 ---
