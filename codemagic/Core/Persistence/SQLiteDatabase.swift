@@ -163,6 +163,9 @@ final class SQLiteDatabase {
         if version < 11 {
             try migrateToVersion11()
         }
+        if version < 12 {
+            try migrateToVersion12()
+        }
     }
 
     /// v1：五张业务表，均含 `id / updated_at / deleted_at / sync_state`。
@@ -511,6 +514,29 @@ final class SQLiteDatabase {
     private func currentUserVersion() throws -> Int {
         let rows = try performQuery("PRAGMA user_version;", [])
         return Int(rows.first?.integer("user_version") ?? 0)
+    }
+
+    /// v12：反馈草稿接入真实发送链路，增加状态 / 上次错误 / 远端 ID / 下次重试时间。
+    /// 旧行默认 `pending`，已有内容与创建时间保留。
+    /// 可重复执行：先 `PRAGMA table_info` 判列，缺列才 `ALTER`。
+    private func migrateToVersion12() throws {
+        let columns = Set(try performQuery("PRAGMA table_info(feedback_drafts);", [])
+            .compactMap { $0.text("name") })
+        var script = ""
+        if !columns.contains("status") {
+            script += "ALTER TABLE feedback_drafts ADD COLUMN status TEXT NOT NULL DEFAULT 'pending';\n"
+        }
+        if !columns.contains("last_error") {
+            script += "ALTER TABLE feedback_drafts ADD COLUMN last_error TEXT;\n"
+        }
+        if !columns.contains("remote_id") {
+            script += "ALTER TABLE feedback_drafts ADD COLUMN remote_id TEXT;\n"
+        }
+        if !columns.contains("next_retry_at") {
+            script += "ALTER TABLE feedback_drafts ADD COLUMN next_retry_at REAL;\n"
+        }
+        script += "PRAGMA user_version = 12;"
+        try executeScript(script)
     }
     /// 迁移脚本包含多条语句，必须用 sqlite3_exec 一次性执行；
     /// sqlite3_prepare_v2 只会预处理第一条语句。

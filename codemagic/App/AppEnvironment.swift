@@ -13,6 +13,7 @@ final class AppEnvironment {
     let recentDeviceStore: RecentDeviceStore
     let deviceInfoCacheStore: DeviceInfoCacheStore
     let feedbackStore: FeedbackStore
+    let feedbackCoordinator: FeedbackCoordinator
     let settingsStore: SettingsStore
     let notificationService: LocalNotificationServing
     let ruleAlertCoordinator: RuleAlertCoordinator
@@ -80,6 +81,14 @@ final class AppEnvironment {
             apiConfiguration = configuration
             let sessionTokenStore = KeychainTokenStore()
             tokenStore = sessionTokenStore
+            feedbackCoordinator = FeedbackCoordinator(
+                store: feedbackStore,
+                client: FeedbackAPIClient(
+                    configuration: configuration,
+                    httpClient: URLSessionHTTPClient(),
+                    tokenStore: sessionTokenStore
+                )
+            )
             productService = ProductAPIClient(configuration: configuration, tokenStore: sessionTokenStore)
             readingsStore = ReadingsStore(database: resolved.database)
             readingsService = ReadingsAPIClient(configuration: configuration, tokenStore: sessionTokenStore)
@@ -110,6 +119,10 @@ final class AppEnvironment {
             )
         } else {
             apiConfiguration = nil
+            feedbackCoordinator = FeedbackCoordinator(
+                store: feedbackStore,
+                client: UnavailableFeedbackService()
+            )
             productService = UnavailableProductService()
             readingsStore = ReadingsStore(database: resolved.database)
             readingsService = UnavailableReadingsAPI()
@@ -221,6 +234,33 @@ final class AppEnvironment {
                 fatalError(L10n.f("app.env.sqliteInitFailed", String(describing: error)))
             }
         }
+    }
+}
+
+/// 当 BASE_URL 配置失败时使用的空实现，让页面显示配置错误而不是崩溃。
+final class UnavailableFeedbackService: FeedbackServicing {
+    func submit(
+        draft: FeedbackDraft,
+        context: FeedbackClientContext,
+        diagnostics: String?,
+        completion: @escaping (Result<FeedbackReceipt, FeedbackSendFailure>) -> Void
+    ) {
+        completion(.failure(FeedbackSendFailure(
+            message: L10n.t("app.env.baseUrlMissing"),
+            isRateLimited: false,
+            retryAfter: nil,
+            isRetryable: false,
+            isConflict: false,
+            apiCode: nil
+        )))
+    }
+
+    func fetchMine(
+        cursor: String?,
+        limit: Int,
+        completion: @escaping (Result<FeedbackPage, AppError>) -> Void
+    ) {
+        completion(.failure(.configuration(L10n.t("app.env.baseUrlMissing"))))
     }
 }
 

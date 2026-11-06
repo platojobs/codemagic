@@ -4,6 +4,7 @@
 
 | Tag | MARKETING_VERSION | Build | 日期 | 对齐后端 |
 | --- | --- | --- | --- | --- |
+| `v0.18.0` | 0.18.0 | 26 | 2026-11-06 | PJGoIoT v0.16.0（openapi 0.12.0；`POST /feedback` / `GET /feedback/mine` 真链路、幂等与限流） |
 | `v0.17.0` | 0.17.0 | 25 | 2026-11-06 | PJGoIoT v0.15.0（openapi 0.11.0；无契约变更，市场 / 产品 / 我的为纯客户端能力） |
 | `v0.16.0` | 0.16.0 | 24 | 2026-11-05 | PJGoIoT v0.15.0（openapi 0.11.0；所有权转让 / `isSelf` / `household`·`room` 结构变更进 change_log） |
 | `v0.15.0` | 0.15.0 | 23 | 2026-11-05 | PJGoIoT v0.13.0（openapi 0.9.0；成员移除 / 退出 / 邀请码列表与撤销 / 房间整段排序 / 真实计数） |
@@ -28,6 +29,24 @@
 | `v0.3.0` | 0.3.0 | 4 | 2026-11-05 | 0.3.0 |
 | `v0.2.0` | 0.2.0 | 3 | 2026-11-05 | 0.2.0 |
 | `v0.1.0` | — | 1 | 2026-11-05 | — |
+
+---
+
+## v0.18.0（build 26）
+
+**主题：意见反馈接真实后端 —— 本地队列有状态、幂等重放、限流与退避**
+
+- **契约（PJGoIoT v0.16.0 / openapi 0.12.0）**：
+  - `POST /feedback`：`kind`（`bug` / `feature` / `experience` / `other`）、`body`（去空白非空、≤4000）、可选 `contact`（≤200）、可选 `diagnostics`（≤8000）、必填 `context`（`platform=ios` / `appVersion` / `buildType` / `osVersion` / `deviceModel`）；成功 `201 {feedbackId, createdAt}`。
+  - `GET /feedback/mine?cursor=&limit=`：只返回本人，倒序游标分页，`{items, nextCursor, hasMore}`，状态 `submitted` / `received` / `closed`；DTO 不含 `contact` 与 `diagnostics`。
+  - 幂等：`Idempotency-Key` 固定为草稿本地 ID；同内容重放返回同一 ID 且带 `Idempotent-Replayed: true`；同 key 不同内容 `409 IDEMPOTENCY_CONFLICT`；限流 `429 FEEDBACK_RATE_LIMITED` + `Retry-After`（账号 10/min、IP 30/min）。
+- **SQLite 迁移 v12**：`feedback_drafts` 条件补 `status` / `last_error` / `remote_id` / `next_retry_at`，用 `PRAGMA table_info` 判列、可重复执行；旧行默认 `pending`，不删任何草稿。
+- **状态机**：`pending → sending → sent / failed`。`markSending` 记一次尝试；只有 `2xx` 且解出非空 `feedbackId` 才落到 `sent`，缺 ID 与解码失败都按失败处理，绝不伪装成功。应用被杀导致的悬挂 `sending` 在下次启动回收到 `pending`，幂等键保证重放不重复。
+- **如实展示**：待发送显示「待发送（第 N 次重试）」，失败显示服务端可读原因，达到自动上限后仍保留草稿并保留手动重试入口，不静默删除。
+- **自动重试**：前台回到 App 与打开反馈页时触发，30 秒起有界指数退避、封顶 1 小时，自动上限 5 次；429 按 `Retry-After` 推迟且本轮停止批量重试，409 / 401 等终态失败不再自动重试。
+- **上下文自动填充**：`appVersion` 取 `CFBundleShortVersionString`，`buildType` 由 `#if DEBUG` 判定，`osVersion` 取 `UIDevice.current.systemVersion`，`deviceModel` 取 `uname` 机型标识，全部不硬编码。
+- **我的反馈**：新增「我的 → 我的反馈」，调用 `GET /feedback/mine`，展示状态与时间，下拉刷新、游标加载更多，空 / 错态复用现有 `EmptyStateView` / `ErrorStateView`。
+- 单测 **344 个，0 失败**（新增 16 个：状态机成功 / 失败分支、仅 2xx + ID 判成功、幂等键复用、429 `Retry-After`、终态冲突不自动重试、自动上限后草稿保留、退避策略、`POST /feedback` DTO 字段与可选字段省略、列表 DTO 不含 contact / diagnostics、`limit` clamp、游标透传、`feedback_drafts` v11→v12 迁移旧数据保留）。E2E fixture **314 项全 PASS**（新增反馈提交、同 key 同内容重放、同 key 不同内容 409、我的列表字段与跨账号隔离）。
 
 ---
 

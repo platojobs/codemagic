@@ -27,6 +27,7 @@ enum APIErrorCatalog {
         "TIMEOUT": Entry(handling: .retryWithBackoff, message: L10n.t("error.timeout")),
         "UNAUTHORIZED": Entry(handling: .reloginRequired, message: L10n.t("error.unauthorized")),
         "IDEMPOTENCY_CONFLICT": Entry(handling: .terminal, message: L10n.t("error.idempotencyConflict")),
+        "FEEDBACK_RATE_LIMITED": Entry(handling: .retryWithBackoff, message: L10n.t("error.feedbackRateLimited")),
         "RATE_LIMITED": Entry(handling: .retryWithBackoff, message: L10n.t("error.rateLimited")),
         "UNAVAILABLE": Entry(handling: .retryWithBackoff, message: L10n.t("error.serviceUnavailable")),
         "INTERNAL": Entry(handling: .retryWithBackoff, message: L10n.t("error.serverError")),
@@ -50,6 +51,7 @@ enum APILimits {
     static let readings = 500
     static let export = 5000
     static let changes = 500
+    static let feedback = 50
 
     static func clamp(_ value: Int, to upperBound: Int) -> Int {
         min(max(value, 1), upperBound)

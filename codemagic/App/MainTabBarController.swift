@@ -96,7 +96,7 @@ final class MainTabBarController: UITabBarController {
                 roomStore: environment.roomStore,
                 savedDeviceStore: environment.savedDeviceStore,
                 householdService: environment.householdService,
-                feedbackStore: environment.feedbackStore
+                feedbackCoordinator: environment.feedbackCoordinator
             ),
             title: L10n.t("tab.profile"),
             imageName: SymbolName.profileTab,

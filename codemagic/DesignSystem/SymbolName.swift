@@ -46,4 +46,6 @@ enum SymbolName {
     static let compatibility = "checkmark.seal"
     static let rule = "bolt.fill"
     static let shield = "lock.shield"
+    static let help = "questionmark.circle"
+    static let feedback = "envelope"
 }

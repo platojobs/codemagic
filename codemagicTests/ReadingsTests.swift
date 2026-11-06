@@ -322,7 +322,7 @@ final class ReadingsStoreTests: XCTestCase {
         defer { migrated.close() }
 
         let version = try migrated.query("PRAGMA user_version;").first?.integer("user_version")
-        XCTAssertEqual(version, 11, "迁移后版本为 11")
+        XCTAssertEqual(version, 12, "迁移后版本为 12")
 
         let store = ReadingsStore(database: migrated)
         let reading = DeviceReading(

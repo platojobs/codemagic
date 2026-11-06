@@ -40,6 +40,8 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     func sceneDidBecomeActive(_ scene: UIScene) {
         // 回到前台时补一次增量同步（120 秒内不重复）。
         SyncCoordinator.shared.syncOnForeground()
+        // 反馈队列按有界指数退避补发到期草稿；幂等键保证不会产生重复记录。
+        environment.feedbackCoordinator.retryEligible()
     }
 
     /// 首启引导：仅首次或未走完时出现；走完 / 跳过由引导页持久化。

@@ -1798,6 +1798,88 @@ private func run() -> Int32 {
         "payload=\(deletePayload)"
     )
 
+    // MARK: 反馈提交与读回
+
+    report.section("10. 反馈：提交 / 幂等重放 / 冲突 / 我的列表")
+    let feedbackAuthA = jsonObject(client.request("POST", "auth/anonymous", json: [String: Any]()).body) ?? [:]
+    let feedbackTokenA = text(feedbackAuthA, "token")
+    let feedbackAuthB = jsonObject(client.request("POST", "auth/anonymous", json: [String: Any]()).body) ?? [:]
+    let feedbackTokenB = text(feedbackAuthB, "token")
+    let feedbackKey = "e2e-feedback-\(UUID().uuidString.lowercased())"
+    let feedbackBody: [String: Any] = [
+        "kind": "bug",
+        "body": "e2e 反馈内容",
+        "contact": "e2e@example.com",
+        "diagnostics": "e2e diagnostics",
+        "context": [
+            "platform": "ios",
+            "appVersion": "0.18.0",
+            "buildType": "debug",
+            "osVersion": "15.5",
+            "deviceModel": "iPhone15,3",
+        ],
+    ]
+    let firstFeedback = client.request(
+        "POST", "feedback", token: feedbackTokenA, idempotencyKey: feedbackKey, json: feedbackBody
+    )
+    let firstObject = jsonObject(firstFeedback.body) ?? [:]
+    let feedbackID = text(firstObject, "feedbackId")
+    report.check(firstFeedback.status == 201, "POST /feedback 返回 201", "status=\(firstFeedback.status) body=\(firstObject)")
+    report.check(!feedbackID.isEmpty, "POST /feedback 返回 feedbackId", "body=\(firstObject)")
+    report.check(!text(firstObject, "createdAt").isEmpty, "POST /feedback 返回 createdAt", "body=\(firstObject)")
+
+    let replayFeedback = client.request(
+        "POST", "feedback", token: feedbackTokenA, idempotencyKey: feedbackKey, json: feedbackBody
+    )
+    let feedbackReplayObject = jsonObject(replayFeedback.body) ?? [:]
+    let feedbackReplayHeader = (replayFeedback.headers["Idempotent-Replayed"] as? String)?.lowercased() ?? ""
+    report.check(
+        replayFeedback.status == 200,
+        "同 key 同内容重放返回 200",
+        "status=\(replayFeedback.status) body=\(feedbackReplayObject)"
+    )
+    report.check(feedbackReplayHeader == "true", "重放带 Idempotent-Replayed: true", "header=\(feedbackReplayHeader)")
+    report.check(text(feedbackReplayObject, "feedbackId") == feedbackID, "重放返回同一 feedbackId", "body=\(feedbackReplayObject)")
+
+    var conflictingFeedbackBody = feedbackBody
+    conflictingFeedbackBody["body"] = "内容已变化"
+    let conflictFeedback = client.request(
+        "POST", "feedback", token: feedbackTokenA, idempotencyKey: feedbackKey, json: conflictingFeedbackBody
+    )
+    let conflictObject = jsonObject(conflictFeedback.body) ?? [:]
+    let conflictCode = text(conflictObject["error"] as? [String: Any] ?? [:], "code")
+    report.check(conflictFeedback.status == 409, "同 key 不同内容返回 409", "status=\(conflictFeedback.status) body=\(conflictObject)")
+    report.check(conflictCode == "IDEMPOTENCY_CONFLICT", "409 错误码为 IDEMPOTENCY_CONFLICT", "code=\(conflictCode)")
+
+    let mine = client.request("GET", "feedback/mine?limit=20", token: feedbackTokenA)
+    let mineObject = jsonObject(mine.body) ?? [:]
+    let mineItems = mineObject["items"] as? [[String: Any]] ?? []
+    let submittedItem = mineItems.first { text($0, "feedbackId") == feedbackID }
+    report.check(mine.status == 200, "GET /feedback/mine 返回 200", "status=\(mine.status)")
+    report.check(submittedItem != nil, "我的反馈包含刚提交的记录", "items=\(mineItems.count)")
+    report.check(
+        text(submittedItem ?? [:], "status") == "submitted",
+        "新反馈状态为 submitted",
+        "item=\(submittedItem ?? [:])"
+    )
+    report.check(
+        submittedItem?["contact"] == nil && submittedItem?["diagnostics"] == nil,
+        "我的反馈列表不返回 contact / diagnostics",
+        "item=\(submittedItem ?? [:])"
+    )
+    report.check(mineObject["hasMore"] is Bool, "列表返回 hasMore 布尔值", "body=\(mineObject)")
+    if mineObject["nextCursor"] != nil {
+        report.check(mineObject["nextCursor"] is String || mineObject["nextCursor"] is NSNull, "nextCursor 为字符串或 null")
+    }
+
+    let otherMine = client.request("GET", "feedback/mine?limit=20", token: feedbackTokenB)
+    let otherItems = (jsonObject(otherMine.body) ?? [:])["items"] as? [[String: Any]] ?? []
+    report.check(
+        !otherItems.contains { text($0, "feedbackId") == feedbackID },
+        "其他账号看不到该反馈",
+        "items=\(otherItems.count)"
+    )
+
     // MARK: 汇总
 
     print("\n=== E2E 合同联调结果 ===")

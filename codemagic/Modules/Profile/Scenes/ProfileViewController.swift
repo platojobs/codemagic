@@ -21,7 +21,7 @@ final class ProfileViewController: UIViewController {
     private let roomStore: RoomStore?
     private let savedDeviceStore: SavedDeviceStore?
     private let householdService: HouseholdService?
-    private let feedbackStore: FeedbackStore?
+    private let feedbackCoordinator: FeedbackCoordinator?
 
     init(
         viewModel: ProfileViewModel,
@@ -29,14 +29,14 @@ final class ProfileViewController: UIViewController {
         roomStore: RoomStore? = nil,
         savedDeviceStore: SavedDeviceStore? = nil,
         householdService: HouseholdService? = nil,
-        feedbackStore: FeedbackStore? = nil
+        feedbackCoordinator: FeedbackCoordinator? = nil
     ) {
         self.viewModel = viewModel
         self.scanLogStore = scanLogStore
         self.roomStore = roomStore
         self.savedDeviceStore = savedDeviceStore
         self.householdService = householdService
-        self.feedbackStore = feedbackStore
+        self.feedbackCoordinator = feedbackCoordinator
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -190,11 +190,20 @@ final class ProfileViewController: UIViewController {
     }
 
     private func openFeedback() {
-        guard let feedbackStore else {
+        guard let feedbackCoordinator else {
             presentMessage(title: L10n.t("feedback.entry"), message: L10n.t("feedback.storeUnavailable"))
             return
         }
-        let controller = FeedbackViewController(store: feedbackStore)
+        let controller = FeedbackViewController(coordinator: feedbackCoordinator)
+        navigationController?.pushViewController(controller, animated: true)
+    }
+
+    private func openMyFeedback() {
+        guard let feedbackCoordinator else {
+            presentMessage(title: L10n.t("feedback.mine.entry"), message: L10n.t("feedback.storeUnavailable"))
+            return
+        }
+        let controller = MyFeedbackViewController(coordinator: feedbackCoordinator)
         navigationController?.pushViewController(controller, animated: true)
     }
 
@@ -383,7 +392,7 @@ extension ProfileViewController: UITableViewDataSource {
         case .alerts: return 3
         case .appearance: return 1
         case .settings: return 3
-        case .support: return feedbackStore == nil ? 1 : 2
+        case .support: return feedbackCoordinator == nil ? 1 : 3
         case .about: return 3
         }
     }
@@ -566,15 +575,23 @@ extension ProfileViewController: UITableViewDataSource {
             return cell
 
         case .support:
-            if indexPath.row == 0 {
+            switch indexPath.row {
+            case 0:
                 return makeValueCell(title: L10n.t("help.entry"), value: "", showsDisclosure: true)
+            case 1:
+                let pending = feedbackCoordinator?.pendingCount() ?? 0
+                return makeValueCell(
+                    title: L10n.t("feedback.entry"),
+                    value: pending > 0 ? L10n.f("profile.feedbackPending", String(describing: pending)) : "",
+                    showsDisclosure: true
+                )
+            default:
+                return makeValueCell(
+                    title: L10n.t("feedback.mine.entry"),
+                    value: "",
+                    showsDisclosure: true
+                )
             }
-            let pending = (try? feedbackStore?.count()) ?? 0
-            return makeValueCell(
-                title: L10n.t("feedback.entry"),
-                value: pending > 0 ? L10n.f("profile.feedbackPending", String(describing: pending)) : "",
-                showsDisclosure: true
-            )
 
         case .about:
             switch indexPath.row {
@@ -627,6 +644,8 @@ extension ProfileViewController: UITableViewDelegate {
             openHelpCenter()
         case .support where indexPath.row == 1:
             openFeedback()
+        case .support where indexPath.row == 2:
+            openMyFeedback()
         case .about where indexPath.row == 2:
             openAbout()
         default:

@@ -1,9 +1,8 @@
 import UIKit
 
-/// 意见反馈：类型 + 描述 + 可选联系方式。
-///
-/// 当前没有反馈接收接口，提交只写入本机 SQLite 待发队列，界面如实标注「未发送」；
-/// 支持重试（只记录尝试次数）与删除，绝不伪造发送成功。
+/// 意见反馈：类型 + 描述 + 可选联系方式，提交走真实 `POST /feedback`。
+/// 草稿先落本地队列，只有收到 2xx 且拿到 `feedbackId` 才显示「已发送」；
+/// 失败按退避保留，支持手动重试与删除，绝不伪装成功。
 final class FeedbackViewController: UIViewController {
     private enum Section: Int, CaseIterable {
         case form
@@ -12,16 +11,17 @@ final class FeedbackViewController: UIViewController {
     }
 
     private let tableView = UITableView(frame: .zero, style: .insetGrouped)
-    private let store: FeedbackStore
+    private let coordinator: FeedbackCoordinator
 
     private var drafts: [FeedbackDraft] = []
     private var loadError: Error?
     private var category: FeedbackCategory = .bug
     private var messageText = ""
     private var contactText = ""
+    private var isSubmitting = false
 
-    init(store: FeedbackStore) {
-        self.store = store
+    init(coordinator: FeedbackCoordinator) {
+        self.coordinator = coordinator
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -36,6 +36,14 @@ final class FeedbackViewController: UIViewController {
         view.backgroundColor = Palette.canvas
         configureTableView()
         loadDrafts()
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        loadDrafts()
+        coordinator.retryEligible { [weak self] in
+            self?.loadDrafts()
+        }
     }
 
     private func configureTableView() {
@@ -59,7 +67,7 @@ final class FeedbackViewController: UIViewController {
 
     private func loadDrafts() {
         do {
-            drafts = try store.fetchAll()
+            drafts = try coordinator.store.fetchAll()
             loadError = nil
         } catch {
             loadError = error
@@ -69,47 +77,63 @@ final class FeedbackViewController: UIViewController {
     }
 
     private func submit() {
+        guard !isSubmitting else { return }
         let trimmed = messageText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             ToastView.show(L10n.t("feedback.messageRequired"), kind: .failure, in: self)
             return
         }
-        do {
-            _ = try store.insert(
-                category: category,
-                message: trimmed,
-                contact: contactText.trimmingCharacters(in: .whitespacesAndNewlines)
-            )
-            messageText = ""
-            contactText = ""
-            loadDrafts()
-            ToastView.show(L10n.t("feedback.savedUnsent"), kind: .info, in: self)
-        } catch {
-            ToastView.show(
-                L10n.f("feedback.saveFailed", String(describing: error.localizedDescription)),
-                kind: .failure,
-                in: self
-            )
+        guard trimmed.count <= FeedbackAPIClient.maxBodyLength else {
+            ToastView.show(L10n.t("feedback.messageTooLong"), kind: .failure, in: self)
+            return
+        }
+        let contact = contactText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard contact.count <= FeedbackAPIClient.maxContactLength else {
+            ToastView.show(L10n.t("feedback.contactTooLong"), kind: .failure, in: self)
+            return
+        }
+
+        isSubmitting = true
+        messageText = ""
+        contactText = ""
+        loadDrafts()
+        coordinator.enqueue(category: category, message: trimmed, contact: contact) { [weak self] result in
+            guard let self else { return }
+            self.isSubmitting = false
+            self.loadDrafts()
+            switch result {
+            case .success(let draft):
+                if draft.isSent {
+                    ToastView.show(L10n.t("feedback.sentNow"), kind: .success, in: self)
+                } else {
+                    ToastView.show(L10n.t("feedback.queuedPending"), kind: .info, in: self)
+                }
+            case .failure(let failure):
+                ToastView.show(self.message(for: failure), kind: .failure, in: self)
+            }
         }
     }
 
     private func retry(_ draft: FeedbackDraft) {
-        do {
-            _ = try store.recordAttempt(id: draft.id)
-            loadDrafts()
-            ToastView.show(L10n.t("feedback.retryUnavailable"), kind: .info, in: self)
-        } catch {
-            ToastView.show(
-                L10n.f("feedback.retryFailed", String(describing: error.localizedDescription)),
-                kind: .failure,
-                in: self
-            )
+        guard draft.canRetry else { return }
+        coordinator.send(id: draft.id) { [weak self] result in
+            guard let self else { return }
+            self.loadDrafts()
+            switch result {
+            case .success(let updated):
+                if updated.isSent {
+                    ToastView.show(L10n.t("feedback.sentNow"), kind: .success, in: self)
+                }
+            case .failure(let failure):
+                ToastView.show(self.message(for: failure), kind: .failure, in: self)
+            }
         }
+        loadDrafts()
     }
 
     private func delete(_ draft: FeedbackDraft) {
         do {
-            try store.delete(id: draft.id)
+            try coordinator.store.delete(id: draft.id)
             loadDrafts()
             ToastView.show(L10n.t("feedback.deleted"), kind: .info, in: self)
         } catch {
@@ -119,6 +143,13 @@ final class FeedbackViewController: UIViewController {
                 in: self
             )
         }
+    }
+
+    private func message(for failure: FeedbackSendFailure) -> String {
+        if failure.isRateLimited, let retryAfter = failure.retryAfter {
+            return L10n.f("feedback.rateLimitedWait", failure.message, String(describing: Int(retryAfter.rounded(.up))))
+        }
+        return failure.message
     }
 
     private func presentCategoryPicker(sourceView: UIView) {
@@ -140,14 +171,24 @@ final class FeedbackViewController: UIViewController {
     }
 
     private func presentDraftDetail(_ draft: FeedbackDraft) {
+        var lines = [draft.statusText]
+        if let failureText = draft.failureText {
+            lines.append(failureText)
+        }
+        if let remoteID = draft.remoteID, draft.isSent {
+            lines.append(L10n.f("feedback.remoteId", remoteID))
+        }
         let alert = UIAlertController(
             title: L10n.t("feedback.detailTitle"),
-            message: draft.message,
+            message: lines.joined(separator: "\n"),
             preferredStyle: .alert
         )
-        alert.addAction(UIAlertAction(title: L10n.t("feedback.retry"), style: .default) { [weak self] _ in
-            self?.retry(draft)
-        })
+        alert.message = [draft.message, lines.joined(separator: "\n")].joined(separator: "\n\n")
+        if draft.canRetry {
+            alert.addAction(UIAlertAction(title: L10n.t("feedback.retry"), style: .default) { [weak self] _ in
+                self?.retry(draft)
+            })
+        }
         alert.addAction(UIAlertAction(title: L10n.t("feedback.delete"), style: .destructive) { [weak self] _ in
             self?.delete(draft)
         })
@@ -207,14 +248,14 @@ extension FeedbackViewController: UITableViewDataSource {
         case .submit:
             let cell = UITableViewCell()
             var configuration = UIListContentConfiguration.cell()
-            configuration.text = L10n.t("feedback.submit")
+            configuration.text = isSubmitting ? L10n.t("feedback.submitting") : L10n.t("feedback.submit")
             configuration.textProperties.font = AppText.callout.font(weight: .medium)
-            configuration.textProperties.color = Palette.primaryText
+            configuration.textProperties.color = isSubmitting ? Palette.textDisabled : Palette.primaryText
             configuration.textProperties.alignment = .center
             cell.contentConfiguration = configuration
             cell.backgroundColor = Palette.surface
             cell.accessibilityTraits = .button
-            cell.accessibilityLabel = L10n.t("feedback.submit")
+            cell.accessibilityLabel = configuration.text
             return cell
 
         case .queue:
@@ -260,7 +301,8 @@ extension FeedbackViewController: UITableViewDataSource {
         cell.configure(
             title: L10n.t("feedback.description"),
             placeholder: L10n.t("feedback.descriptionPlaceholder"),
-            text: messageText
+            text: messageText,
+            maxLength: FeedbackAPIClient.maxBodyLength
         ) { [weak self] text in
             self?.messageText = text
         }
@@ -276,7 +318,8 @@ extension FeedbackViewController: UITableViewDataSource {
         cell.configure(
             title: L10n.t("feedback.contact"),
             placeholder: L10n.t("feedback.contactPlaceholder"),
-            text: contactText
+            text: contactText,
+            maxLength: FeedbackAPIClient.maxContactLength
         ) { [weak self] text in
             self?.contactText = text
         }
@@ -290,15 +333,17 @@ extension FeedbackViewController: UITableViewDataSource {
         configuration.textProperties.font = AppText.callout.font()
         configuration.textProperties.color = Palette.textPrimary
         configuration.textProperties.numberOfLines = 2
-        let attempts = draft.attempts > 0
-            ? L10n.f("feedback.statusWithAttempts", draft.statusText, String(describing: draft.attempts))
-            : draft.statusText
-        configuration.secondaryText = attempts
+        var secondary = draft.statusText
+        if let failureText = draft.failureText {
+            secondary += "\n" + failureText
+        }
+        configuration.secondaryText = secondary
         configuration.secondaryTextProperties.font = AppText.caption.font()
-        configuration.secondaryTextProperties.color = Palette.warning
+        configuration.secondaryTextProperties.color = draft.status == .failed ? Palette.warning : Palette.textSecondary
+        configuration.secondaryTextProperties.numberOfLines = 2
         cell.contentConfiguration = configuration
         cell.backgroundColor = Palette.surface
-        cell.accessibilityLabel = [draft.message, attempts].joined(separator: L10n.t("common.a11ySeparator"))
+        cell.accessibilityLabel = [draft.message, secondary].joined(separator: L10n.t("common.a11ySeparator"))
         return cell
     }
 }
@@ -335,6 +380,9 @@ extension FeedbackViewController: UITableViewDelegate {
             self?.delete(draft)
             completion(true)
         }
+        guard draft.canRetry else {
+            return UISwipeActionsConfiguration(actions: [delete])
+        }
         let retry = UIContextualAction(style: .normal, title: L10n.t("feedback.retry")) {
             [weak self] _, _, completion in
             self?.retry(draft)
@@ -345,7 +393,7 @@ extension FeedbackViewController: UITableViewDelegate {
     }
 }
 
-/// 描述输入：标题 + 多行 UITextView（关闭内部滚动，随文本增高）。
+/// 描述输入：标题 + 多行 UITextView（关闭内部滚动，随文本增高），按服务端上限截断。
 final class FeedbackTextCell: UITableViewCell {
     static let reuseIdentifier = "FeedbackTextCell"
 
@@ -354,6 +402,7 @@ final class FeedbackTextCell: UITableViewCell {
     private let textView = UITextView()
     private let placeholderLabel = AppTheme.makeLabel(text: .body, color: Palette.textDisabled)
     private var onTextChange: ((String) -> Void)?
+    private var maxLength = FeedbackAPIClient.maxBodyLength
 
     override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
         super.init(style: style, reuseIdentifier: reuseIdentifier)
@@ -367,11 +416,18 @@ final class FeedbackTextCell: UITableViewCell {
         fatalError("init(coder:) has not been implemented")
     }
 
-    func configure(title: String, placeholder: String, text: String, onTextChange: @escaping (String) -> Void) {
+    func configure(
+        title: String,
+        placeholder: String,
+        text: String,
+        maxLength: Int,
+        onTextChange: @escaping (String) -> Void
+    ) {
         titleLabel.text = title
         placeholderLabel.text = placeholder
         textView.text = text
         placeholderLabel.isHidden = !text.isEmpty
+        self.maxLength = maxLength
         self.onTextChange = onTextChange
         textView.accessibilityLabel = title
     }
@@ -437,13 +493,25 @@ final class FeedbackTextCell: UITableViewCell {
 }
 
 extension FeedbackTextCell: UITextViewDelegate {
+    func textView(
+        _ textView: UITextView,
+        shouldChangeTextIn range: NSRange,
+        replacementText text: String
+    ) -> Bool {
+        guard let current = textView.text,
+              let range = Range(range, in: current)
+        else { return true }
+        let updated = current.replacingCharacters(in: range, with: text)
+        return updated.count <= maxLength
+    }
+
     func textViewDidChange(_ textView: UITextView) {
         placeholderLabel.isHidden = !textView.text.isEmpty
         onTextChange?(textView.text)
     }
 }
 
-/// 联系方式输入：标题 + 单行 UITextField。
+/// 联系方式输入：标题 + 单行 UITextField，按服务端上限截断。
 final class FeedbackFieldCell: UITableViewCell {
     static let reuseIdentifier = "FeedbackFieldCell"
 
@@ -451,6 +519,7 @@ final class FeedbackFieldCell: UITableViewCell {
     private let titleLabel = AppTheme.makeLabel(text: .callout, color: Palette.textPrimary)
     private let textField = UITextField()
     private var onTextChange: ((String) -> Void)?
+    private var maxLength = FeedbackAPIClient.maxContactLength
 
     override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
         super.init(style: style, reuseIdentifier: reuseIdentifier)
@@ -464,10 +533,17 @@ final class FeedbackFieldCell: UITableViewCell {
         fatalError("init(coder:) has not been implemented")
     }
 
-    func configure(title: String, placeholder: String, text: String, onTextChange: @escaping (String) -> Void) {
+    func configure(
+        title: String,
+        placeholder: String,
+        text: String,
+        maxLength: Int,
+        onTextChange: @escaping (String) -> Void
+    ) {
         titleLabel.text = title
         textField.placeholder = placeholder
         textField.text = text
+        self.maxLength = maxLength
         self.onTextChange = onTextChange
         textField.accessibilityLabel = title
     }
@@ -479,6 +555,7 @@ final class FeedbackFieldCell: UITableViewCell {
         textField.autocorrectionType = .no
         textField.autocapitalizationType = .none
         textField.keyboardType = .emailAddress
+        textField.delegate = self
         textField.addTarget(self, action: #selector(handleChange), for: .editingChanged)
 
         let stack = UIStackView(arrangedSubviews: [titleLabel, textField])
@@ -505,11 +582,27 @@ final class FeedbackFieldCell: UITableViewCell {
     }
 
     @objc private func handleChange() {
+        if let text = textField.text, text.count > maxLength {
+            textField.text = String(text.prefix(maxLength))
+        }
         onTextChange?(textField.text ?? "")
     }
 
     override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
         super.traitCollectionDidChange(previousTraitCollection)
         container.refreshDynamicLayerColors()
+    }
+}
+
+extension FeedbackFieldCell: UITextFieldDelegate {
+    func textField(
+        _ textField: UITextField,
+        shouldChangeCharactersIn range: NSRange,
+        replacementString string: String
+    ) -> Bool {
+        let current = textField.text ?? ""
+        guard let range = Range(range, in: current) else { return true }
+        let updated = current.replacingCharacters(in: range, with: string)
+        return updated.count <= maxLength
     }
 }
