@@ -57,6 +57,7 @@
   - `GET /sync/changes` 中 `entity=user_device` 的最后一条 `payload` 含 `markedAt`，且取消后为 `null`（与「重放未产生重复变更」同一断言）。
   - 同内容幂等重放 / 换键不 409 的断言覆盖 `markedAt` 参与内容比较（缺省与 `null` 不同）。
 - **验证**：后端 `PJGoIoT` v0.25.0 干净 worktree，`e2e-contract.sh` **460 项 0 失败**；`e2e-postgres.sh` 真 Postgres 同样 PASS；构建 `BUILD SUCCEEDED`。
+- **CI**：main run [42312675743](https://github.com/platojobs/codemagic/actions/runs/42312675743) success（457 单测 / 460 项 E2E，fixture 固定 `PJGoIoT` v0.25.0）；tag run [42313368293](https://github.com/platojobs/codemagic/actions/runs/42313368293) success（同为 457 / 460）；tag `v0.30.0`（tagger platojobs），已发布 tag 未移动。
 - **未验证**：真实 APNs 推送、真机 BLE、Android 端同时在线的标记冲突表现。
 
 ## v0.29.0（build 38）
