@@ -229,7 +229,7 @@ iOS 端不再存在“历史端点”调用；唯一保留的旧路径 `/api/v1/
 - 会话与反馈（v0.22.0）：`GET /sessions` 200 且标出 `current`；`POST /auth/refresh` 200 返回新 token、旧 token 立即 401、新 token 可访问；吊销不存在的会话 404；`POST /auth/logout` 204 后该 token 失效；`GET /feedback/{id}` 200 含 `statusMessage`；`PATCH /feedback/{id}` 200 关闭，再次 PATCH 409。
 - 推送与场景分页（v0.23.0，iOS v0.26.0）：未带 token 注册 401；`POST /push/devices` 200 且 `status=active` / `platform=ios` / 返回 `id`；同一 `(user, token)` 幂等同一 `id` 并更新 `appVersion`；非法 `platform` / 空 `token` 均 400 `PUSH_DEVICE_INVALID`；跨用户 DELETE 404；本人 DELETE 204 且重复 DELETE 幂等 204；`GET /scenes` 不传参数仍是全量且无分页字段，`limit=2` 返回 2 条 + `hasMore` + `nextCursor`，游标翻页取回剩余 1 条且 `hasMore=false`，`limit=0` 400。
 
-当前共 **460 项断言全部通过**（2026-11-07，后端 `PJGoIoT` **v0.23.0**，`STORE=fixture`；`scripts/e2e-contract.sh` 实跑 **460 PASS / 0 SKIP / 0 FAIL**，v0.26.0 新增第 12 节推送设备注册 / 注销 / 幂等 / `PUSH_DEVICE_INVALID` / 跨用户 404 与 `/scenes` 可选 `limit` / `cursor` 分页）。真 Postgres 运行同一套契约，并额外直接查库验证邀请码只存 64 位哈希、移除成员后成员行删除、owner 退出后成员行清空。
+当前共 **460 项断言全部通过**（2026-11-07，后端 `PJGoIoT` **v0.23.0**，`STORE=fixture`；`scripts/e2e-contract.sh` 实跑 **460 PASS / 0 SKIP / 0 FAIL**，v0.26.0 新增第 12 节推送设备注册 / 注销 / 幂等 / `PUSH_DEVICE_INVALID` / 跨用户 404 与 `/scenes` 可选 `limit` / `cursor` 分页）。真 Postgres（后端 v0.23.0 干净 worktree）运行同一套契约，并额外直接查库验证邀请码只存 64 位哈希、移除成员后成员行删除、owner 退出后成员行清空，以及 `push_devices` 表存在、同 `(user, token)` 幂等 1 行、停用不硬删且 `inactive` 可重置为 `active`、跨用户互不可停用、推送注册不新增 `change_log`。
 
 #### v0.23.0：430 / 432 差异定位与消除
 

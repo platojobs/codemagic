@@ -1,49 +1,51 @@
-# 真实 Postgres 端到端联调（v0.16.0）
+# 真实 Postgres 端到端联调（v0.27.0）
 
 本文件记录 `scripts/e2e-postgres.sh` 的**真实本地运行输出**。与 `scripts/e2e-contract.sh`（后端 `STORE=fixture` 内存态）不同，本项起真实 Postgres + 真实 API，额外覆盖只有真实库才能构造的分支，并直接查库核对家庭链路的数据不变量。
 
 ## 环境与命令
 
-- iOS 仓库：`codemagic`（v0.23.0）
-- 后端：`PJGoIoT` **`v0.22.0`**，通过 `PJGOIOT_DIR` 指向干净 worktree（固定在该 tag，不改原仓库未提交内容）
+- iOS 仓库：`codemagic`（v0.27.0）
+- 后端：`PJGoIoT` **`v0.23.0`**，通过 `PJGOIOT_DIR` 指向干净 worktree（固定在该 tag，不改原仓库未提交内容）
 - 本机：macOS + Docker + Go 1.24+（Docker daemon 可用）
 - 命令：
 
 ```bash
 cd /Users/platojobs/Desktop/GitHub/platojobs/codemagic
-PJGOIOT_DIR=/tmp/pjgoiot-v022 ./scripts/e2e-postgres.sh
+git -C /Users/platojobs/Desktop/GitHub/platojobs/PJGoIoT worktree add /tmp/pjgoiot-v023 v0.23.0
+PJGOIOT_DIR=/tmp/pjgoiot-v023 ./scripts/e2e-postgres.sh
 ```
 
 脚本行为：
 
 1. 用 `$PJGOIOT_DIR/scripts/stack-for-e2e.sh` 在 `mktemp` 目录里起独立 Postgres 容器与 API，stdout 输出 `BASE_URL`；
-2. **以 `E2E_EXTERNAL_BASE_URL` 复用该栈**跑现有 **430 项**契约套件（`e2e-contract.sh` 支持外部后端后不再自起 fixture），其中第 9 节覆盖家庭链路与 v0.14.0 / v0.15.0 转让、`isSelf`、结构变更；
+2. **以 `E2E_EXTERNAL_BASE_URL` 复用该栈**跑现有 **460 项**契约套件（`e2e-contract.sh` 支持外部后端后不再自起 fixture），其中第 9 节覆盖家庭链路与 v0.14.0 / v0.15.0 转让、`isSelf`、结构变更，第 12 节覆盖推送注册 / 注销 / 幂等 / 400 `PUSH_DEVICE_INVALID` / 跨用户 404 与 `/scenes` 可选分页；
 3. **家庭链路（真 Postgres）**：新建 owner / member / outsider 三个匿名账号，创建家庭 → 两个邀请码（一个用于列表与撤销、一个给成员领取）→ 列表无明文 → 撤销后 claim 404 → 建 3 间房并整段排序成功 → 缺项 409 → owner 带成员退出 409 → 移除成员后对方 404 → owner 退出 204；再用 `psql` 直接查库：邀请码只存 64 位哈希、移除成员后成员行删除、退出后成员行清空；
 4. **家庭结构变更（真 Postgres）**：新建 owner / member → `isSelf` 恰一行 → 转让（非 owner 403、成功后原 owner 降级）→ 新 owner 改名、建房 / 改名 / 删房 → 双方 `change_log` 出现 `household` upsert（角色按接收者）与 `room` upsert / delete → 移除原 owner 后其 404 且不再收到后续结构变更，历史行仍可读 → 解散家庭推送 `household delete(deleted=true)`；并用 `psql` 核对 `households.owner_user_id`、成员行、`household_rooms`、`change_log`；
+4b. **推送令牌（真 Postgres）**：两个匿名账号 + 同一 token → 同账号再次注册沿用同一 `deviceId` 且字段更新 → 缺 `platform` / `token` 返回 400 `PUSH_DEVICE_INVALID` → 另一账号注册同一 token 得到独立 `deviceId`，且不能停用对方的设备（404）→ 本人停用（204）、重复停用仍 204 → 直接查库确认 `push_devices` 表存在、同 `(user, token)` 只有 1 行、`status=inactive` 且行未被硬删、另一账号独立 1 行 → 同 token 再注册恢复 `active`、沿用同一 `deviceId`、`last_error` 为空 → 注册前后两个账号的 `change_log` 条目数完全一致且不存在 push 实体；
 5. 用真实 SQL 把最老 `change_log.seq` 的 `server_ts` 改到 100 天前，再跑 `cmd/cleanup`（保留 90 天），构造 **410 `RESYNC_REQUIRED`**；
 6. 验证 `cursor=0` 全量重拉永不 410、series / metrics、export（`POST /me/export` 建异步任务 → 轮询 `GET /me/export/{id}` 至 `ready` → 下载 `downloadUrl`）、注销（`POST /me/deletion-request` 取令牌 → 带 `X-Deletion-Token` 执行 `DELETE /me`）；
 7. `trap` 停止栈并删除临时目录；`E2E_KEEP_STATE=1` 可保留现场。
 
 隔离说明：所有后端状态与日志都在 `mktemp` 目录（`E2E_STATE_DIR`）；契约 runner 是纯网络、无本地状态，**不读写 App 开发用的 SQLite / UserDefaults**。
 
-## 真实输出（2026-11-06，v0.23.0 / 后端 v0.22.0）
+## 真实输出（2026-11-07，v0.27.0 / 后端 v0.23.0）
 
 ```text
-== 起真实 Postgres + API（状态目录 /var/folders/…/codemagic-e2e-pg.eykQs5/stack） ==
-BASE_URL=http://127.0.0.1:55687
-PG_CONTAINER=pjgoiot-e2e-pg-9093-1 DATABASE_URL=postgres://pjgoiot:pjgoiot-e2e-only@127.0.0.1:55680/pjgoiot_e2e?sslmode=disable
+== 起真实 Postgres + API（状态目录 /var/folders/…/codemagic-e2e-pg.r5TCIS/stack） ==
+BASE_URL=http://127.0.0.1:58669
+PG_CONTAINER=pjgoiot-e2e-pg-80616-1 DATABASE_URL=postgres://pjgoiot:pjgoiot-e2e-only@127.0.0.1:58656/pjgoiot_e2e?sslmode=disable
 
 == 跑现有契约套件（复用真实栈） ==
-[e2e] 后端：/tmp/pjgoiot-v022
-[e2e] 复用外部后端：http://127.0.0.1:55687（跳过构建与启动）
-[e2e] 等待 http://127.0.0.1:55687/api/v1/health 返回 200…
+[e2e] 后端：/tmp/pjgoiot-v023
+[e2e] 复用外部后端：http://127.0.0.1:58669（跳过构建与启动）
+[e2e] 等待 http://127.0.0.1:58669/api/v1/health 返回 200…
 …
 === E2E 合同联调结果 ===
-通过：430 项，跳过：0 项，失败：0 项
+通过：460 项，跳过：0 项，失败：0 项
 结论：PASS
 
 === e2e-contract 摘要 ===
-后端：外部复用 http://127.0.0.1:55687
+后端：外部复用 http://127.0.0.1:58669
 结果：PASS
 
 == 家庭链路（真 Postgres）：成员移除 / 退出 409 / 邀请码无明文 / 重排 409 ==
@@ -51,6 +53,9 @@ PASS 真 Postgres：邀请码仅存哈希；移除成员 404；owner 退出 409�
 
 == 家庭结构变更（真 Postgres）：isSelf / 改名 / 建房 / 删房 / 转让 / 移除可见性 ==
 PASS 真 Postgres 结构变更：转让 owner_user_id / 移除可见性 / 删房 / change_log 实体
+
+== 推送令牌（真 Postgres）：表结构 / 注册幂等 / inactive 重置 / 跨用户隔离 / change_log 无副作用 ==
+PASS 真 Postgres 推送：表存在 / 同 token 幂等 1 行 / 停用不硬删 / inactive 重置 active / 跨用户独立且互不可停用 / change_log 无新增
 
 == 匿名登录 ==
 PASS 匿名登录: userId=1e94bb53-a332-4acf-a259-fca8e111f9d7 expiresAt=2027-05-05T12:36:54.180221Z
@@ -84,7 +89,7 @@ PASS 注销: DELETE=204，旧 token 再访问=401
 [e2e-postgres] PASS
 ```
 
-> 契约套件的 **430 项**断言全部 PASS，上方仅省略明细。430 与 CI 项数一致的定位过程见 [consistency.md](consistency.md) 的「v0.23.0：430 / 432 差异定位与消除」。
+> 契约套件的 **460 项**断言全部 PASS，上方仅省略明细。项数与 CI 一致（v0.26.0 起 460），差异定位过程见 [consistency.md](consistency.md) 的「v0.23.0：430 / 432 差异定位与消除」。
 >
 > 本版同时修了本脚本两处过期步骤（v0.22.0 后端语义变化）：导出由同步 `GET /me/export?limit=5000` 改为「建异步任务 → 轮询 → 下载 `downloadUrl`」；注销改为「`POST /me/deletion-request` 取令牌 → `X-Deletion-Token` 执行 `DELETE /me`」。导出断言不再硬编码设备/读数的精确条数（前面的家庭结构用例会在同一账号下再建数据），改为「聚合可用且非空」。
 

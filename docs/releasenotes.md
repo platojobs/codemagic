@@ -4,6 +4,7 @@
 
 | Tag | MARKETING_VERSION | Build | 日期 | 对齐后端 |
 | --- | --- | --- | --- | --- |
+| `v0.27.0` | 0.27.0 | 36 | 2026-11-07 | PJGoIoT v0.23.0（无后端契约变更；重截「我的」含推送注册行、真 Postgres 重跑并断言 `push_devices` 幂等 / `inactive` 重置 / 跨用户隔离 / `change_log` 无新增、补 App Store 上架材料与隐私营养标签） |
 | `v0.26.0` | 0.26.0 | 35 | 2026-11-07 | PJGoIoT v0.23.0（openapi 0.18.0；`POST /push/devices` / `DELETE /push/devices/{deviceId}`、通知权限与注册解耦、迁移 v16 `push_devices`、`PushMessageHandler`，e2e 升级 460 项） |
 | `v0.25.1` | 0.25.1 | 34 | 2026-11-07 | PJGoIoT v0.22.0（无后端契约变更；悬浮 Tab 胶囊下方到底部安全区的条带改为不透明遮挡，`BottomBand` 高度纯函数 + 单测） |
 | `v0.25.0` | 0.25.0 | 33 | 2026-11-06 | PJGoIoT v0.22.0（无后端契约变更；家庭房间分区去掉「房间」导航行、首页底部留白与设备卡名称/状态分行） |
@@ -38,6 +39,21 @@
 | `v0.3.0` | 0.3.0 | 4 | 2026-11-05 | 0.3.0 |
 | `v0.2.0` | 0.2.0 | 3 | 2026-11-05 | 0.2.0 |
 | `v0.1.0` | — | 1 | 2026-11-05 | — |
+
+---
+
+## v0.27.0（build 36）
+
+**主题：补证轮 —— 「我的」推送注册行截图、真 Postgres 推送断言、App Store 上架材料**
+
+- **截图**：重截 `docs/screenshots/profile.png`（1206×2622），滚到「阈值告警」分区，完整显示「推送注册 = 未配置推送」及三行说明（首次触发规则命中时请求通知权限；未配置推送 / 无法获取 APNs 令牌：未找到 `aps-environment` 授权字符串，不注册占位令牌）。截图从「登录会话」分区头开始，顶部无半行、底部未被悬浮 Tab 条带遮挡；XCUITest 同时断言推送行与说明的 `maxY` 均在 Tab 顶边之上、状态不是「已开启」。
+- **真 Postgres e2e**：用 `PJGoIoT` v0.23.0 干净 worktree 重跑 `scripts/e2e-postgres.sh`。契约 **460 项 0 失败**；推送真库断言全 PASS —— `push_devices` 表存在、同 `(user, token)` 只有 1 行、同 token 再注册沿用同一 `deviceId` 且字段更新、停用置 `status=inactive` 不硬删、同 token 再注册重置 `active`、另一账号同 token 得到独立行且不能停用对方设备（404）、拒绝缺字段 400 `PUSH_DEVICE_INVALID`、注册前后两个账号 `change_log` 条目数完全一致且不存在 push 实体。
+- **上架材料**：新增 iOS 侧 `docs/store-listing.md`，与 Android `store-listing.md` 对齐。中英文应用名（16 / 23 字符）、副标题（13 / 24）、促销文本（72 / 167）、完整描述（1387 / 3138）、关键词（46 / 66），全部 ≤ 平台上限。隐私营养标签逐项归类：设备标识（BLE UUID 与 APNs token → DeviceID）、读数（心率 → Health，温度 / 电量 / NUS → OtherDataTypes）、家庭关系（OtherUserContent）、反馈内容（OtherUserContent / 可选联系方式 → OtherUserContactInfo / 客户端诊断 → OtherDiagnosticData）、推送令牌（并入 DeviceID），全部 Linked、Tracking = No、App Functionality。
+- **隐私同步**：`PrivacyInfo.xcprivacy` 新增 `OtherDataTypes` / `OtherUserContactInfo` / `OtherDiagnosticData`（`plutil -lint` 通过）；`docs/app-privacy.md` 补对应代码位置，`docs/privacy-policy.md` 补家庭关系、反馈内容与推送令牌，注销步骤改为先停用推送设备。
+- **审核备注**：说明蓝牙权限用途、无真实设备时的空态（不伪造设备 / 读数）、推送服务当前未配置（无 APNs 证书与 entitlement，不注册占位 token）。文档顶部明确：**未上传 App Store Connect、无 Apple Developer Program 账号、无审核记录、无分发证书与 APNs 证书**。
+- **测试 / 构建**：单测 **447 个 0 失败**（无新增用例），签名构建 `BUILD SUCCEEDED`，e2e **460 项**与 CI 一致。
+- **CI**：待推送后回填。
+- **未验证**：真实 APNs 推送、真机 BLE、公网隐私政策 URL、App Store 规格截图（6.9 英寸 1320×2868）、隐私问卷实际提交。
 
 ---
 

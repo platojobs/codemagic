@@ -347,6 +347,178 @@ PG_DELETE_LOG="$(docker exec "$PG_CONTAINER" psql -U "$PG_USER" -d "$PG_DB" -tAc
 [ "$PG_DELETE_LOG" -ge 1 ] || fail "change_log 应有 deleted=true 的 household delete（got=${PG_DELETE_LOG}）"
 log "PASS 真 Postgres 结构变更：转让 owner_user_id / 移除可见性 / 删房 / change_log 实体"
 
+step "推送令牌（真 Postgres）：表结构 / 注册幂等 / inactive 重置 / 跨用户隔离 / change_log 无副作用"
+python3 - "$BASE_URL" >"$TMP_ROOT/artifacts/push-users.json" <<'PY'
+import json
+import sys
+import urllib.error
+import urllib.request
+
+base = sys.argv[1]
+
+
+def call(method, path, token=None, body=None):
+    data = None if body is None else json.dumps(body).encode("utf-8")
+    request = urllib.request.Request(base + "/api/v1/" + path, data=data, method=method)
+    if token:
+        request.add_header("Authorization", "Bearer " + token)
+    if data is not None:
+        request.add_header("Content-Type", "application/json")
+    try:
+        with urllib.request.urlopen(request) as response:
+            raw = response.read()
+            return response.status, (json.loads(raw) if raw else None)
+    except urllib.error.HTTPError as error:
+        raw = error.read()
+        try:
+            payload = json.loads(raw) if raw else None
+        except ValueError:
+            payload = None
+        return error.code, payload
+
+
+owner = call("POST", "auth/anonymous")[1]
+other = call("POST", "auth/anonymous")[1]
+print(json.dumps({
+    "ownerId": owner["userId"],
+    "ownerToken": owner["token"],
+    "otherId": other["userId"],
+    "otherToken": other["token"],
+}))
+PY
+push_owner_id="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["ownerId"])' "$TMP_ROOT/artifacts/push-users.json")"
+push_owner_token="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["ownerToken"])' "$TMP_ROOT/artifacts/push-users.json")"
+push_other_id="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["otherId"])' "$TMP_ROOT/artifacts/push-users.json")"
+push_other_token="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["otherToken"])' "$TMP_ROOT/artifacts/push-users.json")"
+push_token="pg-e2e-token-$(uuidgen | tr '[:upper:]' '[:lower:]')"
+
+# 推送注册不应写入 change_log；先记录两个账号的既有条目数，注册后再比对。
+PUSH_LOG_BEFORE_OWNER="$(docker exec "$PG_CONTAINER" psql -U "$PG_USER" -d "$PG_DB" -tAc \
+    "SELECT count(*) FROM change_log WHERE user_id = '$push_owner_id'::uuid;" | tr -d '[:space:]')"
+PUSH_LOG_BEFORE_OTHER="$(docker exec "$PG_CONTAINER" psql -U "$PG_USER" -d "$PG_DB" -tAc \
+    "SELECT count(*) FROM change_log WHERE user_id = '$push_other_id'::uuid;" | tr -d '[:space:]')"
+
+python3 - "$BASE_URL" "$push_owner_token" "$push_other_token" "$push_token" >"$TMP_ROOT/artifacts/push-ops.json" <<'PY'
+import json
+import sys
+import urllib.error
+import urllib.request
+
+base, owner_token, other_token, token = sys.argv[1:5]
+
+
+def call(method, path, auth=None, body=None):
+    data = None if body is None else json.dumps(body).encode("utf-8")
+    request = urllib.request.Request(base + "/api/v1/" + path, data=data, method=method)
+    if auth:
+        request.add_header("Authorization", "Bearer " + auth)
+    if data is not None:
+        request.add_header("Content-Type", "application/json")
+    try:
+        with urllib.request.urlopen(request) as response:
+            raw = response.read()
+            return response.status, (json.loads(raw) if raw else None)
+    except urllib.error.HTTPError as error:
+        raw = error.read()
+        try:
+            payload = json.loads(raw) if raw else None
+        except ValueError:
+            payload = None
+        return error.code, payload
+
+
+first = call("POST", "push/devices", owner_token, {
+    "platform": "ios", "token": token,
+    "appVersion": "0.27.0", "deviceModel": "iPhone 18 Pro",
+})
+assert first[0] == 200, first
+device_id = first[1]["id"]
+assert first[1]["status"] == "active", first
+
+# 同 (user, token) 幂等 upsert：同一设备 ID，字段被更新，不新增行。
+second = call("POST", "push/devices", owner_token, {
+    "platform": "ios", "token": token,
+    "appVersion": "0.27.1", "deviceModel": "iPhone 18 Pro (2)",
+})
+assert second[0] == 200, second
+assert second[1]["id"] == device_id, second
+assert second[1]["appVersion"] == "0.27.1", second
+assert second[1]["deviceModel"] == "iPhone 18 Pro (2)", second
+
+# 缺 platform / token：400 PUSH_DEVICE_INVALID。
+for index, body in enumerate([
+    {"token": token},
+    {"platform": "ios"},
+]):
+    status, payload = call("POST", "push/devices", owner_token, body)
+    assert status == 400, (index, status, payload)
+    assert payload["error"]["code"] == "PUSH_DEVICE_INVALID", (index, payload)
+
+# 跨用户：同一 token 在另一账号下是独立记录；对方不能停用我的 deviceId。
+other = call("POST", "push/devices", other_token, {"platform": "ios", "token": token})
+assert other[0] == 200, other
+other_id = other[1]["id"]
+assert other_id != device_id, other
+status, _ = call("DELETE", "push/devices/" + device_id, other_token)
+assert status == 404, status
+
+# 停用：204；重复停用仍 204；行保留为 inactive（不硬删）。
+for _ in range(2):
+    status, _ = call("DELETE", "push/devices/" + device_id, owner_token)
+    assert status == 204, status
+
+status, _ = call("DELETE", "push/devices/" + other_id, other_token)
+assert status == 204, status
+
+print(json.dumps({
+    "deviceId": device_id,
+    "otherDeviceId": other_id,
+    "token": token,
+    "appVersion": first[1]["appVersion"],
+}))
+PY
+push_device_id="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["deviceId"])' "$TMP_ROOT/artifacts/push-ops.json")"
+push_other_device_id="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["otherDeviceId"])' "$TMP_ROOT/artifacts/push-ops.json")"
+
+PG_PUSH_TABLE="$(docker exec "$PG_CONTAINER" psql -U "$PG_USER" -d "$PG_DB" -tAc \
+    "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'push_devices';" | tr -d '[:space:]')"
+[ "$PG_PUSH_TABLE" = "1" ] || fail "真库缺少 push_devices 表（got=${PG_PUSH_TABLE}）"
+
+# 幂等：owner 的同一 token 只有 1 行；停用后行仍在且 status=inactive；另一账号独立 1 行。
+PG_PUSH_OWNER_ROWS="$(docker exec "$PG_CONTAINER" psql -U "$PG_USER" -d "$PG_DB" -tAc \
+    "SELECT count(*) FROM push_devices WHERE user_id = '$push_owner_id'::uuid AND token = '$push_token';" | tr -d '[:space:]')"
+[ "$PG_PUSH_OWNER_ROWS" = "1" ] || fail "同一 (user, token) 应只有 1 行（got=${PG_PUSH_OWNER_ROWS}）"
+PG_PUSH_OWNER_STATUS="$(docker exec "$PG_CONTAINER" psql -U "$PG_USER" -d "$PG_DB" -tAc \
+    "SELECT status FROM push_devices WHERE id = '$push_device_id'::uuid;" | tr -d '[:space:]')"
+[ "$PG_PUSH_OWNER_STATUS" = "inactive" ] || fail "DELETE 后应为 inactive 且不硬删（got=${PG_PUSH_OWNER_STATUS}）"
+PG_PUSH_OTHER_ROWS="$(docker exec "$PG_CONTAINER" psql -U "$PG_USER" -d "$PG_DB" -tAc \
+    "SELECT count(*) FROM push_devices WHERE user_id = '$push_other_id'::uuid AND token = '$push_token';" | tr -d '[:space:]')"
+[ "$PG_PUSH_OTHER_ROWS" = "1" ] || fail "跨用户同一 token 应各自 1 行（got=${PG_PUSH_OTHER_ROWS}）"
+
+# inactive 重置：同 token 再次注册恢复 active、沿用同一 deviceId、清空 last_error。
+REPUSH_JSON="$(curl -fsS -X POST "$BASE_URL/api/v1/push/devices" \
+    -H "Authorization: Bearer $push_owner_token" \
+    -H "Content-Type: application/json" \
+    -d "{\"platform\":\"ios\",\"token\":\"$push_token\",\"appVersion\":\"0.27.2\",\"deviceModel\":\"iPhone 18 Pro\"}")"
+REPUSH_ID="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["id"])' "$REPUSH_JSON")"
+[ "$REPUSH_ID" = "$push_device_id" ] || fail "重新注册应沿用同一 deviceId（got=${REPUSH_ID}）"
+PG_PUSH_RESET="$(docker exec "$PG_CONTAINER" psql -U "$PG_USER" -d "$PG_DB" -tAc \
+    "SELECT status || '|' || coalesce(last_error, '<null>') || '|' || app_version FROM push_devices WHERE id = '$push_device_id'::uuid;" | tr -d '[:space:]')"
+[ "$PG_PUSH_RESET" = "active|<null>|0.27.2" ] || fail "inactive 应重置为 active 并清空 last_error（got=${PG_PUSH_RESET}）"
+
+# change_log 无副作用：两个账号条目数应与注册前完全一致，且没有 push 实体。
+PUSH_LOG_BEFORE_TOTAL="$((PUSH_LOG_BEFORE_OWNER + PUSH_LOG_BEFORE_OTHER))"
+PUSH_LOG_AFTER_OWNER="$(docker exec "$PG_CONTAINER" psql -U "$PG_USER" -d "$PG_DB" -tAc \
+    "SELECT count(*) FROM change_log WHERE user_id = '$push_owner_id'::uuid;" | tr -d '[:space:]')"
+PUSH_LOG_AFTER_OTHER="$(docker exec "$PG_CONTAINER" psql -U "$PG_USER" -d "$PG_DB" -tAc \
+    "SELECT count(*) FROM change_log WHERE user_id = '$push_other_id'::uuid;" | tr -d '[:space:]')"
+PUSH_LOG_AFTER_TOTAL="$((PUSH_LOG_AFTER_OWNER + PUSH_LOG_AFTER_OTHER))"
+[ "$PUSH_LOG_AFTER_TOTAL" = "$PUSH_LOG_BEFORE_TOTAL" ] || fail "推送注册不应产生 change_log（before=${PUSH_LOG_BEFORE_TOTAL} after=${PUSH_LOG_AFTER_TOTAL}）"
+PUSH_LOG_ENTITIES="$(docker exec "$PG_CONTAINER" psql -U "$PG_USER" -d "$PG_DB" -tAc \
+    "SELECT count(*) FROM change_log WHERE user_id IN ('$push_owner_id'::uuid, '$push_other_id'::uuid) AND entity IN ('push_device', 'push', 'device_push');" | tr -d '[:space:]')"
+[ "$PUSH_LOG_ENTITIES" = "0" ] || fail "change_log 不应包含 push 实体（got=${PUSH_LOG_ENTITIES}）"
+log "PASS 真 Postgres 推送：表存在 / 同 token 幂等 1 行 / 停用不硬删 / inactive 重置 active / 跨用户独立且互不可停用 / change_log 无新增"
+
 step "匿名登录"
 LOGIN_JSON="$(curl -fsS -X POST "$BASE_URL/api/v1/auth/anonymous")"
 TOKEN="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])' <<<"$LOGIN_JSON")"
