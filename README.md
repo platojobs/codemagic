@@ -29,7 +29,7 @@
 | 首启引导 | **已实现**：3 步（蓝牙 / 通知 / 后台采集），仅首次或未走完时出现，可跳过；步骤与完成标记持久化到 `UserDefaults` |
 | 单元测试 | **416 个用例，0 失败**（`** TEST SUCCEEDED **`，2026-11-06，Xcode 27.2 / iPhone 18 Pro · iOS 27.2 模拟器；v0.23.0 新增 1 个场景指标名映射用例，既有 415 个全部保持） |
 | 模拟器构建 | **通过**（`xcodebuild ... build`，`** BUILD SUCCEEDED **`） |
-| CI | **GitHub Actions 已实际运行 success**：v0.22.0 tag run [42200162903](https://github.com/platojobs/codemagic/actions/runs/42200162903)（success，提交 `a13c561`），并行 `Build & Test`（**415 单测**，`Executed 415 tests, with 0 failures` / `** TEST SUCCEEDED **`）与 `E2E contract`（**432 项，0 SKIP，0 失败**，PJGoIoT 固定在 v0.22.0；本机同套件 430 项，差异来自导出轮询等按响应轮次动态生成的断言）；同 sha 的 `main` run [42200139891](https://github.com/platojobs/codemagic/actions/runs/42200139891) 被 tag 运行的 `concurrency` 规则取消；证据回填后的 `main` run [42202578601](https://github.com/platojobs/codemagic/actions/runs/42202578601) success（提交 `4e9dee5`）；v0.21.0 tag run [42190873586](https://github.com/platojobs/codemagic/actions/runs/42190873586)（402 单测 / 414 项 E2E）为上一基线；`codemagic.yaml` 作为可选替代保留但未验证 |
+| CI | **GitHub Actions 已实际运行 success**：v0.23.0 tag run [42221403125](https://github.com/platojobs/codemagic/actions/runs/42221403125)（success，提交 `20af92f`，ref `v0.23.0`），并行 `Build & Test`（**416 单测**，`Executed 416 tests, with 0 failures` / `** TEST SUCCEEDED **`）与 `E2E contract`（**430 项，0 SKIP，0 失败**，PJGoIoT 固定在 v0.22.0；本机同套件同为 430 项，v0.22.0 的 430 / 432 差异已消除）；同 sha 的 `main` run [42221374575](https://github.com/platojobs/codemagic/actions/runs/42221374575) 被 tag 运行的 `concurrency` 规则取消（按 `github.sha` 去重，属预期）；v0.22.0 tag run [42200162903](https://github.com/platojobs/codemagic/actions/runs/42200162903)（415 单测 / 432 项 E2E）为上一基线；`codemagic.yaml` 作为可选替代保留但未验证 |
 | 真机 BLE / 签名 | **未验证**：本机无真机与 Apple 开发者账号；读数采集与图表需真机 / 可穿戴设备验证（见第 9 节） |
 | 真实后端同步 | **契约已联调**：`scripts/e2e-contract.sh` 对**干净 worktree 的 `PJGoIoT` v0.22.0**（`/tmp/pjgoiot-v022`，`STORE=fixture`）跑 **430 项断言，全部 PASS**，CI 同为 **430 项**（v0.23.0 已消除 v0.22.0 时本机 430 / CI 432 的轮询差异，定位过程见 [docs/consistency.md](docs/consistency.md)）；`scripts/e2e-postgres.sh` 在同一套契约外，另在**真实 Postgres** 直接查库（本版同时修好该脚本过期的导出一致性 / 注销两步，输出见 [docs/e2e-postgres.md](docs/e2e-postgres.md)）；通知权限、后台触发与真机 DST 仍需真机手动验证 |
 | 上架材料 | **已补齐**：`docs/store-listing.md`、`docs/privacy-policy.md`、`docs/app-privacy.md` 与 `codemagic/Resources/PrivacyInfo.xcprivacy`（未使用能力不声明） |
@@ -56,6 +56,13 @@
 | 账号与数据 | [account-data.png](docs/screenshots/account-data.png) | 导出我的数据、注销账号、匿名账号与会话到期日 |
 | 首页（AX 最大字号） | [home-ax.png](docs/screenshots/home-ax.png) | 系统字号调至 AX 档，布局不重叠 |
 | 场景页（AX 最大字号） | [scenes-ax.png](docs/screenshots/scenes-ax.png) | 同上，场景列表在 AX 档下的折行表现 |
+
+seed 的边界（如实记录）：
+
+- 后端设备类型目录只有 **5 种** `deviceType`，因此 12 台设备覆盖这 5 类（不是 12 种不同型号）。
+- iOS 的 `Scenario` 与同步状态没有 `rejected`（`SyncState` 仅 pending / synced / pendingDelete / localOnly，服务端场景也无 `status` 字段），所以「1 个 `rejected` 场景」**无法在 iOS 界面呈现**；4 个场景实际是 2 个定时、1 个指标阈值、1 个绑定已移除设备的 `deviceMissing`。
+- 「2 台离线」用较旧的 `lastSeenAt` 表达；iOS 首页对远程设备统一显示「未连接」，没有独立的在线/离线状态。
+- AX 最大字号下布局不重叠、不溢出，但长文案会按行截断并以省略号收尾，部分固定高度卡片内的文字显示不全。
 
 ---
 
