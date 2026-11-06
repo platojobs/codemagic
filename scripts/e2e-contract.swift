@@ -192,7 +192,8 @@ private func madeDevice(
     advertisedName: String? = nil,
     updatedAt: Date,
     deleted: Bool = false,
-    deviceType: String? = nil
+    deviceType: String? = nil,
+    markedAt: Any? = nil
 ) -> [String: Any] {
     var device: [String: Any] = [
         "id": id,
@@ -212,6 +213,10 @@ private func madeDevice(
     }
     if let deviceType {
         device["deviceType"] = deviceType
+    }
+    // nil=字段省略（保持原值）；NSNull()=显式 null（取消标记）；字符串=RFC3339 标记。
+    if let markedAt {
+        device["markedAt"] = markedAt
     }
     return device
 }
@@ -729,7 +734,8 @@ private func run() -> Int32 {
         "advertisedName=\(text(afterAlias, "advertisedName"))"
     )
 
-    // 3) 设置分组。
+    // 3) 设置分组，同时标记设备：markedAt 必须保留微秒精度。
+    let markedAtMicros = "2026-11-05T08:09:10.123456Z"
     let groupSetPush = pushSeparation(
         madeDevice(
             id: separationID,
@@ -737,15 +743,17 @@ private func run() -> Int32 {
             externalID: separationExternalID,
             mac: separationMAC,
             group: "e2e-separation",
-            updatedAt: separationStart.addingTimeInterval(20)
+            updatedAt: separationStart.addingTimeInterval(20),
+            markedAt: markedAtMicros
         ),
         key: "group-set"
     )
     report.check(groupSetPush.status == 200, "设置分组返回 200", "status=\(groupSetPush.status)")
+    let afterGroupSet = separationDetail()
     report.check(
-        text(separationDetail(), "group") == "e2e-separation",
-        "服务端保存分组",
-        "group=\(text(separationDetail(), "group"))"
+        text(afterGroupSet, "group") == "e2e-separation" && text(afterGroupSet, "markedAt") == markedAtMicros,
+        "服务端保存分组与 markedAt（/my/devices 回读微秒一致）",
+        "group=\(text(afterGroupSet, "group")) markedAt=\(text(afterGroupSet, "markedAt"))"
     )
 
     // 4) 未上报分组（字段省略）必须保持原值。
@@ -766,7 +774,7 @@ private func run() -> Int32 {
         "group=\(text(separationDetail(), "group"))"
     )
 
-    // 5) 显式清除分组：必须上报 "group": ""。
+    // 5) 显式清除分组：必须上报 "group": ""；同时用 null 取消标记。
     let clearPush = pushSeparation(
         madeDevice(
             id: separationID,
@@ -774,16 +782,17 @@ private func run() -> Int32 {
             externalID: separationExternalID,
             mac: separationMAC,
             group: "",
-            updatedAt: separationStart.addingTimeInterval(30)
+            updatedAt: separationStart.addingTimeInterval(30),
+            markedAt: NSNull()
         ),
         key: "group-clear"
     )
     report.check(clearPush.status == 200, "清空分组返回 200", "status=\(clearPush.status)")
     let afterClear = separationDetail()
     report.check(
-        text(afterClear, "group") == "",
-        "显式空串清除云端分组",
-        "group=\(text(afterClear, "group"))"
+        text(afterClear, "group") == "" && afterClear["markedAt"] is NSNull,
+        "显式空串清除云端分组，null 取消标记且回读为 null",
+        "group=\(text(afterClear, "group")) markedAt=\(String(describing: afterClear["markedAt"]))"
     )
     report.check(
         text(afterClear, "advertisedName") == "PJ-Sensor" && text(afterClear, "alias") == "客厅传感器",
@@ -803,7 +812,8 @@ private func run() -> Int32 {
                 externalID: separationExternalID,
                 mac: separationMAC,
                 group: "",
-                updatedAt: separationStart.addingTimeInterval(30)
+                updatedAt: separationStart.addingTimeInterval(30),
+                markedAt: NSNull()
             ),
         ]]
     )
@@ -821,12 +831,13 @@ private func run() -> Int32 {
                     externalID: separationExternalID,
                     mac: separationMAC,
                     group: "",
-                    updatedAt: separationStart.addingTimeInterval(30)
+                    updatedAt: separationStart.addingTimeInterval(30),
+                    markedAt: NSNull()
                 ),
             ]]
         ).status == 200,
         "同内容换幂等键不触发 409",
-        "group 空串同样参与内容比较"
+        "group 空串与 markedAt null 同样参与内容比较"
     )
 
     // MARK: 4. 幂等重放
@@ -850,10 +861,19 @@ private func run() -> Int32 {
     let beforeReplayCount = list((jsonObject(changesBeforeReplay.body) ?? [:])["changes"]).count
     let changesAfterReplay = client.request("GET", "sync/changes?cursor=0&limit=200", token: tokenA)
     let replayChanges = list((jsonObject(changesAfterReplay.body) ?? [:])["changes"])
+    // change_log 的 user_device payload 必须带 markedAt；取该设备最后一条（已用 null 取消）。
+    let separationChange = replayChanges.last { change in(
+        text(change, "entity") == "user_device"
+            && text(change["payload"] as? [String: Any] ?? [:], "externalId") == separationExternalID)
+    }
+    let separationPayload = separationChange?["payload"] as? [String: Any]
     report.check(
-        replayChanges.count == beforeReplayCount,
-        "重放未产生重复变更",
-        "before=\(beforeReplayCount) after=\(replayChanges.count)"
+        replayChanges.count == beforeReplayCount
+            && separationChange != nil
+            && separationPayload?.keys.contains("markedAt") == true
+            && separationPayload?["markedAt"] is NSNull,
+        "重放未产生重复变更，user_device change_log payload 含 markedAt=null",
+        "before=\(beforeReplayCount) after=\(replayChanges.count) markedAt=\(String(describing: separationPayload?["markedAt"]))"
     )
 
     // MARK: 5. LWW 冲突

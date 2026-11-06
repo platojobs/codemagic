@@ -864,6 +864,30 @@ final class SyncEngineTests: XCTestCase {
 
     // MARK: - v0.25.0（契约 0.20.0）：设备标记 markedAt
 
+    /// RFC3339 微秒精度：`...123456Z` 解析后再序列化必须原样返回，避免回传时被截成毫秒。
+    func testDateCodecRoundTripsMicrosecondPrecision() throws {
+        let raw = "2026-11-05T08:09:10.123456Z"
+        let date = try XCTUnwrap(SyncDateCodec.parse(raw))
+        XCTAssertEqual(SyncDateCodec.string(from: date), raw, "微秒必须完整往返")
+
+        // 3 位 / 无小数 / 时区偏移同样归一为 UTC 6 位，且数值不变。
+        XCTAssertEqual(
+            SyncDateCodec.string(from: try XCTUnwrap(SyncDateCodec.parse("2026-11-05T08:09:10.123Z"))),
+            "2026-11-05T08:09:10.123000Z"
+        )
+        XCTAssertEqual(
+            SyncDateCodec.string(from: try XCTUnwrap(SyncDateCodec.parse("2026-11-05T16:09:10+08:00"))),
+            "2026-11-05T08:09:10.000000Z"
+        )
+
+        // 微秒级差异不能被抹平：这两个时间相差 1µs，往返后仍不相等。
+        let a = try XCTUnwrap(SyncDateCodec.parse("2026-11-05T08:09:10.123456Z"))
+        let b = try XCTUnwrap(SyncDateCodec.parse("2026-11-05T08:09:10.123457Z"))
+        XCTAssertNotEqual(a, b)
+        XCTAssertEqual(SyncDateCodec.string(from: a), "2026-11-05T08:09:10.123456Z")
+        XCTAssertEqual(SyncDateCodec.string(from: b), "2026-11-05T08:09:10.123457Z")
+    }
+
     /// 三态解码：字段缺省保持原值；`null` / `""` 取消；RFC3339 时间标记。
     func testRemoteDeviceMarkedAtDecodesContractThreeStates() throws {
         let base = """

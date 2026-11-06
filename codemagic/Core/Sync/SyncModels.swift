@@ -17,26 +17,58 @@ struct AnonymousSession: Equatable {
     }
 }
 
-/// RFC 3339 时间解析 / 序列化。服务端可能带或不带毫秒，解析两者都接受。
+/// RFC3339 编解码：保留**微秒**精度（6 位小数），兼容服务端带或不带小数。
+///
+/// `ISO8601DateFormatter` / `DateFormatter` 的分数秒只保留毫秒，服务端按微秒做字段级 LWW，
+/// 因此这里手动拆分小数部分：解析时把 1–6 位小数换算为微秒后再加到整秒；
+/// 序列化时按微秒四舍五入并固定输出 6 位，保证 `2026-11-05T08:09:10.123456Z` 完整往返。
 enum SyncDateCodec {
+    private static let baseFormatters: [ISO8601DateFormatter] = {
+        let plain = ISO8601DateFormatter()
+        plain.formatOptions = [.withInternetDateTime]
+        return [plain]
+    }()
+
     static func parse(_ raw: String) -> Date? {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
 
-        let withFraction = ISO8601DateFormatter()
-        withFraction.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = withFraction.date(from: trimmed) { return date }
+        // 仅在小数点后、时区标识之前读取数字；时区前的 '-'（如 2026-11-05）不参与拆分。
+        var baseText = trimmed
+        var fractionMicros = 0.0
+        if let dot = trimmed.firstIndex(of: ".") {
+            let afterDot = trimmed[trimmed.index(after: dot)...]
+            let digits = afterDot.prefix { $0.isNumber }
+            let rest = afterDot.dropFirst(digits.count)
+            if !digits.isEmpty {
+                let padded = digits.prefix(6) + String(repeating: "0", count: max(0, 6 - digits.count))
+                fractionMicros = Double(Int(padded) ?? 0) / 1_000_000
+                baseText = String(trimmed[..<dot]) + String(rest)
+            }
+        }
 
-        let plain = ISO8601DateFormatter()
-        plain.formatOptions = [.withInternetDateTime]
-        return plain.date(from: trimmed)
+        for formatter in baseFormatters {
+            if let base = formatter.date(from: baseText) {
+                return base.addingTimeInterval(fractionMicros)
+            }
+        }
+        return nil
     }
 
     static func string(from date: Date) -> String {
-        let formatter = ISO8601DateFormatter()
+        let interval = date.timeIntervalSince1970
+        var wholeSeconds = interval.rounded(.down)
+        var micros = Int(((interval - wholeSeconds) * 1_000_000).rounded())
+        if micros >= 1_000_000 {
+            micros -= 1_000_000
+            wholeSeconds += 1
+        }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = TimeZone(secondsFromGMT: 0)
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter.string(from: date)
+        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
+        let base = formatter.string(from: Date(timeIntervalSince1970: wholeSeconds))
+        return base + String(format: ".%06dZ", micros)
     }
 }
 

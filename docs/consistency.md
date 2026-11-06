@@ -580,8 +580,9 @@ Android 自 v0.22.0 起把服务端 `SCENE_*` 4xx 视为终态；iOS v0.24.0 对
 - **LWW 门控**：以设备整体 `updatedAt` 为准，服务端比较前按**微秒截断**。客户端 `updatedAt` 落后时返回 `conflict(reason=server_newer)` 携带 `server` 版本，走既有冲突路径（以服务端为准并提示「另一台设备改过这条」），本地旧标记不覆盖云端新值。
 - **增量同步**：`entity=user_device` 的 `payload` 含 `markedAt`，未标记为 `null`；本地落地为 `nil`，并清除待上报标记。
 - **本地持久化（迁移 v17）**：`saved_devices` 增加 `marked_at REAL`（`nil` = 未标记）与 `marked_at_patch TEXT`（`absent` / `clear` / `set`）。`PRAGMA table_info` 判列、`PRAGMA user_version = 17`，可重复执行；`markSynced` 归零 patch；换号重传时逐设备携带本机标记（未标记按 `absent` 省略，不写 `null` 覆盖新账号）。
+- **时间精度（v0.30.0）**：`SyncDateCodec` 手动拆分小数，RFC3339 解析 / 序列化保留**微秒**（固定 6 位），`...123456Z` 完整往返；`...123Z`、无小数、`+08:00` 归一为 UTC 6 位且数值不变。避免 Android 微秒写入后 iOS 回传被截成毫秒，导致服务端字段级 LWW 误判并多写 `change_log`。
 - **界面口径**：设备管理列表 / 首页卡片对已标记设备显示「已标记」；仅写本机、尚未推送成功时显示「已标记 · 待同步」，**不得显示成已同步**。设备详情「标记」行可标记 / 取消标记，未同步时后缀「待同步」。
-- **测试**：三态解码（缺省 / `null` / `""` / 时间）、push 三态编码（省略 / `null` / RFC3339）、标记与取消实际进入 `devices[]`、旧 `updatedAt` 冲突以服务端为准、增量落地与 `null` 清除、换号后逐设备重传且不串、详情待同步展示。
+- **测试**：单测覆盖三态解码（缺省 / `null` / `""` / 时间）、push 三态编码（省略 / `null` / RFC3339）、标记与取消实际进入 `devices[]`、旧 `updatedAt` 冲突以服务端为准、增量落地与 `null` 清除、换号后逐设备重传且不串、详情待同步展示、微秒往返不丢精度。e2e 在既有断言内（项数仍 460）覆盖：带微秒 `markedAt` push 后 `/my/devices` 回读一致、`null` 取消后回读为 `null`、`entity=user_device` 的 `change_log` payload 含 `markedAt`、幂等内容比较包含该字段。
 
 ## 4. 错误码
 

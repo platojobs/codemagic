@@ -4,6 +4,7 @@
 
 | Tag | MARKETING_VERSION | Build | 日期 | 对齐后端 |
 | --- | --- | --- | --- | --- |
+| `v0.30.0` | 0.30.0 | 39 | 2026-11-07 | PJGoIoT v0.25.0（无后端契约变更；RFC3339 编解码保留微秒、`markedAt` 纳入既有 e2e 断言且项数仍 460） |
 | `v0.29.0` | 0.29.0 | 38 | 2026-11-07 | PJGoIoT v0.25.0（openapi 0.20.0；设备标记 `markedAt` 三态进 `devices[]` 字段级 LWW、迁移 v17、增量落地、列表/详情标记状态与待同步提示） |
 | `v0.28.0` | 0.28.0 | 37 | 2026-11-07 | PJGoIoT v0.23.0（无后端契约变更；6.9 英寸 1320×2868 与 iPad 13 英寸 2064×2752 整组截图导出、APNs 令牌隐私申报与二进制对齐、新增隐私清单一致性单测） |
 | `v0.27.0` | 0.27.0 | 36 | 2026-11-07 | PJGoIoT v0.23.0（无后端契约变更；重截「我的」含推送注册行、真 Postgres 重跑并断言 `push_devices` 幂等 / `inactive` 重置 / 跨用户隔离 / `change_log` 无新增、补 App Store 上架材料与隐私营养标签） |
@@ -43,6 +44,20 @@
 | `v0.1.0` | — | 1 | 2026-11-05 | — |
 
 ---
+
+## v0.30.0（build 39）
+
+**主题：RFC3339 微秒精度 + `markedAt` e2e 覆盖**
+
+- **微秒编解码**：`SyncDateCodec` 不再依赖 `ISO8601DateFormatter` / `DateFormatter` 的分数秒（二者只保留毫秒），改为手动拆分小数：解析时把 1–6 位小数换算为微秒后加到整秒，序列化时按微秒四舍五入并固定输出 6 位。`2026-11-05T08:09:10.123456Z` 完整往返；`...123Z`、无小数、`+08:00` 均归一为 UTC 6 位且数值不变。Android 用微秒写入后，iOS 换号重传 / 离线补传不会再把它截成毫秒，服务端字段级 LWW 不再误判为新值。
+- **单测**：新增 `testDateCodecRoundTripsMicrosecondPrecision`（往返、3 位补零、时区偏移、1µs 差异不相等），合计 **457 个 0 失败**。
+- **e2e（项数不变 460）**：在既有 push / sync 断言内扩展，不新增条目：
+  - push 带 `markedAt="2026-11-05T08:09:10.123456Z"` 与 `group` 后，`GET /my/devices/ios/{externalId}` 回读 `group` 与 `markedAt` 一致（含微秒）。
+  - push `markedAt: null` 后回读为 `null`（与 `group: ""` 同一断言）。
+  - `GET /sync/changes` 中 `entity=user_device` 的最后一条 `payload` 含 `markedAt`，且取消后为 `null`（与「重放未产生重复变更」同一断言）。
+  - 同内容幂等重放 / 换键不 409 的断言覆盖 `markedAt` 参与内容比较（缺省与 `null` 不同）。
+- **验证**：后端 `PJGoIoT` v0.25.0 干净 worktree，`e2e-contract.sh` **460 项 0 失败**；`e2e-postgres.sh` 真 Postgres 同样 PASS；构建 `BUILD SUCCEEDED`。
+- **未验证**：真实 APNs 推送、真机 BLE、Android 端同时在线的标记冲突表现。
 
 ## v0.29.0（build 38）
 
