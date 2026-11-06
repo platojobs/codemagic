@@ -45,6 +45,7 @@
 - **首屏关系**：目录请求不在 App 启动路径上，也不阻塞首页；产品 / 市场打开时先同步读 SQLite 缓存渲染已有内容，再异步刷新，刷新完成后就地替换，不切空白页。首次安装无缓存时才显示页内加载态。
 - **能力对齐**：本地解析器按目录的 `characteristicUuid` 判断能否解析（16 位与 128 位 UUID 都归一化比较），不再用 key 名称猜测。能解析的展示「指标 · 单位」；解析不了的如实标注「当前版本不支持」；目录对 NUS 声明空 `metrics` 时按透传设备处理，保留客户端逐行解析能力。限制文案优先使用目录 `limitations`。
 - 单测 **356 个，0 失败**（新增 12 个：`200` 首次落库、`304` 命中缓存并刷新使用时间、`ETag` 变化触发更新、断网有缓存回退、断网无缓存错误、`304` 无缓存异常、SQLite 缓存往返、`v12→v13` 迁移（`PRAGMA table_info` 判列）、目录新增类型界面表现、指标与解析能力不一致标注、NUS 透传）。E2E fixture **337 项全 PASS**（新增目录匿名 200、字段完整性、UUID 归一化、NUS 空指标、`ETag` / `Last-Modified` / `Cache-Control` 与两种条件请求 `304`；条件请求绕过 `URLCache` 以免掩盖服务端行为）。
+- **CI**：tag `v0.19.0` run [42172416077](https://github.com/platojobs/codemagic/actions/runs/42172416077) success（`Build & Test` 356 单测 + `E2E contract` 337 项，PJGoIoT 固定 v0.18.0）；同 sha 的 `main` run 被 tag 并发组取消，回填提交重新触发 `main`。
 
 ---
 
