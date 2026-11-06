@@ -209,8 +209,53 @@ final class HomeViewModelTests: XCTestCase {
     }
 }
 
-/// 家庭管理房间分区的回归：房间行数与分区头「管理」入口。
+/// 首页布局与家庭管理房间分区的回归：名称 / 状态分行、分区头复用、底部留白、房间行数。
 final class HomeLayoutTests: XCTestCase {
+    /// 名称过长时最多两行，状态词必须完整可见，不再和名称挤在同一行被省略号吃掉。
+    func testDeviceCardShowsFullStatusUnderLongName() {
+        let cell = DeviceCardCell(frame: CGRect(x: 0, y: 0, width: 179, height: 164))
+        let device = SavedDevice(
+            peripheralID: UUID(),
+            advertisedName: "客厅环境传感器",
+            remark: "客厅环境传感器一号机"
+        )
+        cell.configure(device: device, isConnected: false, readingText: "电量 66 %", rssi: -70, onTap: {})
+        cell.layoutIfNeeded()
+        cell.contentView.layoutIfNeeded()
+
+        let nameLabel = firstLabel(in: cell, text: device.displayName)
+        XCTAssertNotNil(nameLabel, "找到设备名标签")
+        XCTAssertEqual(nameLabel?.numberOfLines, 2, "设备名最多两行")
+
+        guard let statusLabel = firstLabel(in: cell, text: L10n.t("home.status.disconnected")) else {
+            return XCTFail("找到状态标签")
+        }
+        XCTAssertGreaterThan(statusLabel.bounds.height, 0)
+        XCTAssertGreaterThanOrEqual(
+            statusLabel.bounds.width,
+            statusLabel.intrinsicContentSize.width - 0.5,
+            "状态独占一行后不应被截断"
+        )
+    }
+
+    /// 分区头复用时会替换旧头视图，不能把上一个分区的标题叠在下面。
+    func testHomeSectionHeaderReplacesPreviousTitleWhenReused() {
+        let header = HomeSectionHeaderView(frame: CGRect(x: 0, y: 0, width: 370, height: 40))
+        header.configure(title: "快捷场景")
+        header.configure(title: "书房 · 2", collapsed: false, onToggle: {})
+        let headers = header.subviews.compactMap { $0 as? SectionHeaderView }
+        XCTAssertEqual(headers.count, 1, "复用后只保留一个分区头")
+    }
+
+    /// 悬浮 Tab 的重叠量要扣掉滚动视图已自动获得的 safe-area 补偿，只补差额。
+    func testBottomOcclusionDeductsAutomaticInset() {
+        XCTAssertEqual(BottomOcclusion.inset(overlap: 83, automaticInset: 83, spacing: 24), 24)
+        XCTAssertEqual(BottomOcclusion.inset(overlap: 83, automaticInset: 34, spacing: 24), 73)
+        XCTAssertEqual(BottomOcclusion.inset(overlap: -10, automaticInset: 0, spacing: 24), 24)
+        XCTAssertEqual(BottomOcclusion.inset(overlap: 83, automaticInset: 100, spacing: 24), 24)
+        XCTAssertEqual(BottomOcclusion.inset(overlap: 0, automaticInset: 0, spacing: 0), 0)
+    }
+
     /// 家庭房间分区只统计真实房间；「管理」入口移到分区头，不再占一行。
     func testHouseholdRoomSectionCountsOnlyRealRooms() {
         XCTAssertEqual(HouseholdRoomSection.rowCount(roomCount: 3), 3)

@@ -62,6 +62,12 @@ final class HomeDashboardViewController: UIViewController {
         applyBottomOcclusionInset(to: collectionView)
     }
 
+    override func viewSafeAreaInsetsDidChange() {
+        super.viewSafeAreaInsetsDidChange()
+        // Tab 在首次布局之后才挂上时，safe area 会再变一次，这里重算底部留白，避免沿用初始值。
+        applyBottomOcclusionInset(to: collectionView)
+    }
+
     override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
         super.traitCollectionDidChange(previousTraitCollection)
         guard previousTraitCollection?.preferredContentSizeCategory
@@ -278,11 +284,12 @@ final class HomeDashboardViewController: UIViewController {
                 layoutSection.boundarySupplementaryItems = [makeHeader()]
                 return layoutSection
             }
+            // 名称与状态各占一行，卡片留出两行名称的高度（164pt），状态不会被省略号吃掉。
             let item = NSCollectionLayoutItem(
-                layoutSize: NSCollectionLayoutSize(widthDimension: .fractionalWidth(1), heightDimension: .absolute(140))
+                layoutSize: NSCollectionLayoutSize(widthDimension: .fractionalWidth(1), heightDimension: .absolute(164))
             )
             let group = NSCollectionLayoutGroup.horizontal(
-                layoutSize: NSCollectionLayoutSize(widthDimension: .fractionalWidth(1), heightDimension: .absolute(140)),
+                layoutSize: NSCollectionLayoutSize(widthDimension: .fractionalWidth(1), heightDimension: .absolute(164)),
                 subitem: item,
                 count: 2
             )

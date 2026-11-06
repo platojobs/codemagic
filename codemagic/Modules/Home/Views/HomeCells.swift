@@ -24,10 +24,15 @@ final class DeviceCardCell: UICollectionViewCell {
 
         nameLabel.applyFont(AppText.body.font(weight: .semibold))
         nameLabel.textColor = Palette.textPrimary
-        nameLabel.numberOfLines = 1
+        // 名称单独占行，最多两行；过长的名称才省略，不再和状态抢同一行的宽度。
+        nameLabel.numberOfLines = 2
+        nameLabel.lineBreakMode = .byTruncatingTail
 
         statusLabel.applyFont(AppText.caption.font(weight: .medium))
-        statusLabel.textAlignment = .right
+        statusLabel.textAlignment = .natural
+        statusLabel.numberOfLines = 1
+        // 状态（未连接 / 已连接 / 离线）必须完整可读，排在名称下一行且不被挤压。
+        statusLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
 
         readingLabel.applyFont(AppText.numericM.font())
         readingLabel.textColor = Palette.textPrimary
@@ -39,10 +44,9 @@ final class DeviceCardCell: UICollectionViewCell {
         signalView.translatesAutoresizingMaskIntoConstraints = false
 
         let top = UIStackView(arrangedSubviews: [nameLabel, statusLabel])
-        top.axis = .horizontal
-        top.spacing = Layout.space8
-        top.alignment = .center
-        statusLabel.setContentHuggingPriority(.required, for: .horizontal)
+        top.axis = .vertical
+        top.spacing = Layout.space4
+        top.alignment = .fill
 
         let bottom = UIStackView(arrangedSubviews: [signalView, timeLabel])
         bottom.axis = .horizontal
@@ -323,19 +327,12 @@ final class HomeErrorCell: UICollectionViewCell {
 /// 分区头（UICollectionReusableView 包装 `SectionHeaderView`），房间分区支持点击展开 / 收起。
 final class HomeSectionHeaderView: UICollectionReusableView {
     static let reuseIdentifier = "HomeSectionHeaderView"
-    private let header = SectionHeaderView(title: "")
+    /// 当前展示的头视图；复用时会替换，不能只移除初始那一个，否则旧标题会叠在下面。
+    private var header: SectionHeaderView?
     private var onToggle: (() -> Void)?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        addSubview(header)
-        header.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            header.topAnchor.constraint(equalTo: topAnchor),
-            header.leadingAnchor.constraint(equalTo: leadingAnchor),
-            header.trailingAnchor.constraint(equalTo: trailingAnchor),
-            header.bottomAnchor.constraint(equalTo: bottomAnchor),
-        ])
         addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(handleTap)))
     }
 
@@ -367,7 +364,7 @@ final class HomeSectionHeaderView: UICollectionReusableView {
     }
 
     private func rebuild(title: String, trailing: UIView?) {
-        header.removeFromSuperview()
+        header?.removeFromSuperview()
         let replacement = SectionHeaderView(title: title, trailing: trailing)
         replacement.translatesAutoresizingMaskIntoConstraints = false
         addSubview(replacement)
@@ -377,5 +374,6 @@ final class HomeSectionHeaderView: UICollectionReusableView {
             replacement.trailingAnchor.constraint(equalTo: trailingAnchor),
             replacement.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
+        header = replacement
     }
 }

@@ -349,6 +349,17 @@ extension UIView {
     }
 }
 
+/// 悬浮 Tab 的底部留白计算：独立成纯函数，避免各页面各自算错或漏算。
+enum BottomOcclusion {
+    /// - Parameters:
+    ///   - overlap: 悬浮 Tab 与滚动视图可见区域的重叠高度。
+    ///   - automaticInset: 滚动视图已自动获得的 safe-area 底部补偿。
+    ///   - spacing: Tab 之上额外保留的最小留白。
+    static func inset(overlap: CGFloat, automaticInset: CGFloat, spacing: CGFloat) -> CGFloat {
+        max(0, overlap - max(0, automaticInset)) + max(0, spacing)
+    }
+}
+
 extension UIViewController {
     /// 底部滚动留白：把最后一项抬到 Tab 之上，并额外留 `spacing`。
     /// iOS 26+ 的悬浮 Tab 不一定计入 `safeAreaInsets`，因此用视图坐标算实际遮挡量，
@@ -361,9 +372,9 @@ extension UIViewController {
             return
         }
         let tabFrame = view.convert(tabBar.bounds, from: tabBar)
-        let overlap = max(0, scrollView.frame.maxY - tabFrame.minY)
-        let automatic = max(0, scrollView.adjustedContentInset.bottom - scrollView.contentInset.bottom)
-        let bottom = max(0, overlap - automatic) + spacing
+        let overlap = scrollView.frame.maxY - tabFrame.minY
+        let automatic = scrollView.adjustedContentInset.bottom - scrollView.contentInset.bottom
+        let bottom = BottomOcclusion.inset(overlap: overlap, automaticInset: automatic, spacing: spacing)
         if abs(scrollView.contentInset.bottom - bottom) > 0.5 {
             scrollView.contentInset.bottom = bottom
             scrollView.scrollIndicatorInsets.bottom = bottom
