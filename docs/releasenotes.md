@@ -50,7 +50,7 @@
 - **导出流程**：创建后展示「处理中」，轮询 2.5s 起、×1.4、封顶 5s；ready 后下载到临时目录并调 `UIActivityViewController`，分享关闭即删；下载 410 自动重新查询任务换新链接并提示「下载链接已刷新」，只自动重试一次；取消 / 失败保留可重试状态。
 - **UI 约束**：UIKit 纯代码、iOS 15；中英双语；`UIFontMetrics` 动态字号；操作行 48pt 触达；`accessibilityLabel`；颜色 / 间距 / 字号全部来自 `DesignTokens`。
 - 单测 **364 个，0 失败**（新增 8 个：删除令牌申请与 `DELETE /me` 只带 `X-Deletion-Token`、409/403/404/410 分流、异步导出 DTO / 相对 URL 解析 / 下载 410·403、轮询退避 `[2.5, 3.5, 4.9]`、410 自动刷新一次、409 → 转让后同一令牌成功、删除后业务表计数归零 + 目录缓存清空 + 重启不复活的存库验证）。E2E fixture **367 项全 PASS**（后端 v0.19.0 干净 worktree：令牌申请 / 401 / 旧令牌作废 / 400 / 403、删除 204 / 旧 Bearer 401 / 重放 404、导出 202 → pending/ready → 下载 200 → 重放 410 → 错令牌 403 → 换新链接再下载、409 → 转让后同一令牌 204）。
-- **CI**：结果待回填（tag `v0.20.0` 与 `main` 触发后补充 run ID）。
+- **CI**：tag `v0.20.0` run [42179059627](https://github.com/platojobs/codemagic/actions/runs/42179059627) success（`Build & Test` 364 单测 / `E2E contract` 367 项）；同 sha 的 main run 被 tag 并发规则取消，证据回填提交触发新的 main 运行。
 
 ---
 
