@@ -54,6 +54,7 @@
 - **界面**：设备管理列表与首页卡片显示「已标记」；先写本机、尚未同步时显示「已标记 · 待同步」，不显示成已同步。设备详情新增「标记」行，点击标记 / 取消标记，未同步时明确标注「待同步」。
 - **测试 / 构建**：新增 7 个单测（三态解码、push 三态编码、标记与取消走 push、旧 `updatedAt` 冲突、增量落地与清除、换号隔离、详情待同步展示），合计 **456 个 0 失败**，构建 `BUILD SUCCEEDED`。
 - **e2e**：后端 `PJGoIoT` v0.25.0 干净 worktree，`scripts/e2e-contract.sh` **460 项 0 失败**；`scripts/e2e-postgres.sh` 真实 Postgres 同为 **460 项 0 失败**，推送表 / 幂等 / `inactive` 重置 / 跨用户隔离 / `change_log` 无新增断言保持通过。设备标记未新增 e2e 断言（项数不变），由单测覆盖。
+- **CI**：main run [42308604344](https://github.com/platojobs/codemagic/actions/runs/42308604344) success（456 单测 / 460 项 E2E）；tag run [42309057258](https://github.com/platojobs/codemagic/actions/runs/42309057258) success（同为 456 / 460）；tag `v0.29.0`（tagger platojobs），已发布 tag 未移动。
 - **未验证**：真实 APNs 推送、真机 BLE 与多端（Android）同时在线的标记冲突表现。
 
 ## v0.28.0（build 37）
