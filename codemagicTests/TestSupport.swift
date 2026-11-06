@@ -223,6 +223,75 @@ func makeScannedDevice(
     ScannedDevice(peripheralID: peripheralID, name: name, rssi: rssi, lastSeenAt: lastSeenAt, isSaved: false)
 }
 
+// MARK: - Scene Fixtures
+
+func makeSceneReference(
+    externalID: String = "SCENE-EXT-1",
+    platform: String = SavedDevice.iosPlatform
+) -> SceneDeviceReference {
+    SceneDeviceReference(platform: platform, externalID: externalID)
+}
+
+func makeScene(
+    id: UUID = UUID(),
+    name: String = "测试场景",
+    enabled: Bool = true,
+    cooldownSeconds: Int = 300,
+    trigger: SceneTrigger? = nil,
+    actions: [SceneAction] = [.notify(title: "场景触发", body: "{device}")],
+    remoteID: String? = nil,
+    version: Int64 = 0,
+    deviceMissing: Bool = false,
+    createdAt: Date = Date(timeIntervalSince1970: 1_000),
+    updatedAt: Date = Date(timeIntervalSince1970: 1_000),
+    deletedAt: Date? = nil,
+    syncState: SyncState = .pending
+) -> Scene {
+    Scene(
+        id: id,
+        remoteID: remoteID,
+        name: name,
+        enabled: enabled,
+        cooldownSeconds: cooldownSeconds,
+        trigger: trigger ?? .deviceOffline(device: makeSceneReference(), offlineSeconds: 300),
+        actions: actions,
+        version: version,
+        deviceMissing: deviceMissing,
+        createdAt: createdAt,
+        updatedAt: updatedAt,
+        deletedAt: deletedAt,
+        syncState: syncState
+    )
+}
+
+func makeRemoteScene(
+    id: String,
+    name: String = "测试场景",
+    enabled: Bool = true,
+    cooldownSeconds: Int = 300,
+    trigger: SceneTrigger? = nil,
+    actions: [SceneAction] = [.notify(title: "场景触发", body: "{device}")],
+    version: Int64 = 1,
+    deviceMissing: Bool = false,
+    createdAt: Date? = Date(timeIntervalSince1970: 1_000),
+    updatedAt: Date = Date(timeIntervalSince1970: 1_000),
+    deletedAt: Date? = nil
+) -> RemoteScene {
+    RemoteScene(
+        id: id,
+        name: name,
+        enabled: enabled,
+        cooldownSeconds: cooldownSeconds,
+        trigger: trigger ?? .deviceOffline(device: makeSceneReference(), offlineSeconds: 300),
+        actions: actions,
+        version: version,
+        deviceMissing: deviceMissing,
+        createdAt: createdAt,
+        updatedAt: updatedAt,
+        deletedAt: deletedAt
+    )
+}
+
 /// 使用独立 UserDefaults suite，避免污染真实设置。
 func makeSettingsStore() -> (store: SettingsStore, suiteName: String) {
     let suiteName = "codemagic.tests.\(UUID().uuidString)"

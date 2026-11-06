@@ -2148,7 +2148,7 @@ private func run() -> Int32 {
         "diagnostics": "e2e diagnostics",
         "context": [
             "platform": "ios",
-            "appVersion": "0.20.0",
+            "appVersion": "0.21.0",
             "buildType": "debug",
             "osVersion": "15.5",
             "deviceModel": "iPhone15,3",
@@ -2213,6 +2213,204 @@ private func run() -> Int32 {
         !otherItems.contains { text($0, "feedbackId") == feedbackID },
         "其他账号看不到该反馈",
         "items=\(otherItems.count)"
+    )
+
+    // MARK: 11. 场景（CRUD / 字段级 LWW / deviceMissing / 软删）
+
+    report.section("11. 场景：CRUD / 字段级 LWW / deviceMissing / 软删与 change_log")
+    guard let sceneAccountA = anonymousAccount("scene-a"),
+          let sceneAccountB = anonymousAccount("scene-b")
+    else {
+        print("\n场景链路所需账号创建失败。")
+        return 1
+    }
+    let sceneTokenA = sceneAccountA.token
+    let sceneTokenB = sceneAccountB.token
+
+    // 场景创建要求引用的设备真实存在；先推一台设备，稍后删除以验证 deviceMissing。
+    let sceneDeviceID = UUID().uuidString.lowercased()
+    let sceneDeviceExternalID = sceneDeviceID.uppercased()
+    let sceneDevice = madeDevice(
+        id: sceneDeviceID,
+        platform: "ios",
+        externalID: sceneDeviceExternalID,
+        mac: nil,
+        advertisedName: "场景测试设备",
+        updatedAt: Date(timeIntervalSinceNow: -120)
+    )
+    let sceneDevicePush = client.request(
+        "POST",
+        "sync/push",
+        token: sceneTokenA,
+        idempotencyKey: "e2e-scene-device-\(UUID().uuidString.lowercased())",
+        json: ["clientId": "ios-e2e-scene", "devices": [sceneDevice]]
+    )
+    report.check(
+        sceneDevicePush.status == 200,
+        "场景前置：推送设备成功",
+        "status=\(sceneDevicePush.status) body=\(bodyText(sceneDevicePush.body))"
+    )
+
+    let sceneBody: [String: Any] = [
+        "name": "e2e 离线场景",
+        "enabled": true,
+        "cooldownSeconds": 120,
+        "trigger": [
+            "kind": "device_offline",
+            "device": ["platform": "ios", "externalId": sceneDeviceExternalID],
+            "offlineSeconds": 120,
+        ],
+        "actions": [
+            ["kind": "notify", "title": "设备离线", "body": "{device} 已离线"],
+            ["kind": "log", "message": "记录 {device}", "level": "warn"],
+        ],
+    ]
+    let createSceneResponse = client.request("POST", "scenes", token: sceneTokenA, json: sceneBody)
+    let createdScene = jsonObject(createSceneResponse.body) ?? [:]
+    let sceneID = text(createdScene, "id")
+    report.check(createSceneResponse.status == 201, "POST /scenes 返回 201", "status=\(createSceneResponse.status) body=\(createdScene)")
+    report.check(!sceneID.isEmpty, "POST /scenes 返回场景 id")
+    report.check(createdScene["version"] as? NSNumber == 1, "新场景版本为 1", "version=\(text(createdScene, "version"))")
+    report.check(createdScene["enabled"] as? Bool == true, "enabled 回显 true")
+    report.check((createdScene["cooldownSeconds"] as? NSNumber)?.intValue == 120, "cooldownSeconds 回显 120")
+    report.check(createdScene["deviceMissing"] as? Bool == false, "设备存在时 deviceMissing=false")
+
+    let scheduleBody: [String: Any] = [
+        "name": "e2e 定时场景",
+        "trigger": [
+            "kind": "schedule",
+            "timeOfDay": "08:30",
+            "timezone": "Asia/Shanghai",
+            "daysOfWeek": [1, 3],
+        ],
+        "actions": [["kind": "mark_device", "mark": "已检查"]],
+    ]
+    let createSchedule = client.request("POST", "scenes", token: sceneTokenA, json: scheduleBody)
+    let scheduleScene = jsonObject(createSchedule.body) ?? [:]
+    let scheduleID = text(scheduleScene, "id")
+    report.check(createSchedule.status == 201, "POST /scenes 定时场景返回 201", "status=\(createSchedule.status) body=\(scheduleScene)")
+    report.check(scheduleScene["deviceMissing"] as? Bool == false, "无设备触发条件 deviceMissing=false")
+
+    let listScenes = client.request("GET", "scenes", token: sceneTokenA)
+    let sceneItems = list((jsonObject(listScenes.body) ?? [:])["items"])
+    report.check(listScenes.status == 200, "GET /scenes 返回 200", "status=\(listScenes.status)")
+    report.check(sceneItems.count == 2, "列表返回本人 2 个场景（无分页）", "count=\(sceneItems.count)")
+    report.check(sceneItems.contains { text($0, "id") == sceneID }, "列表包含刚创建场景")
+    report.check(sceneItems.contains { text($0, "id") == scheduleID }, "列表包含定时场景")
+
+    // 删除设备后，场景保留但读取时 deviceMissing=true。
+    let deletedDevice = madeDevice(
+        id: sceneDeviceID,
+        platform: "ios",
+        externalID: sceneDeviceExternalID,
+        mac: nil,
+        advertisedName: "场景测试设备",
+        updatedAt: Date(),
+        deleted: true
+    )
+    let deleteDevicePush = client.request(
+        "POST",
+        "sync/push",
+        token: sceneTokenA,
+        idempotencyKey: "e2e-scene-device-delete-\(UUID().uuidString.lowercased())",
+        json: ["clientId": "ios-e2e-scene", "devices": [deletedDevice]]
+    )
+    report.check(deleteDevicePush.status == 200, "场景前置：删除设备成功", "status=\(deleteDevicePush.status)")
+
+    let sceneAfterDeviceDelete = client.request("GET", "scenes/\(sceneID)", token: sceneTokenA)
+    let missingScene = jsonObject(sceneAfterDeviceDelete.body) ?? [:]
+    report.check(sceneAfterDeviceDelete.status == 200, "设备删除后场景仍可读取（200）", "status=\(sceneAfterDeviceDelete.status)")
+    report.check(missingScene["deviceMissing"] as? Bool == true, "设备删除后 deviceMissing=true", "body=\(missingScene)")
+    report.check(text(missingScene, "name") == "e2e 离线场景", "设备删除不级联删场景")
+
+    // 字段级 LWW：新名字生效，旧 enabled 被忽略；随后旧补丁不改变版本。
+    // 服务端时间戳含纳秒，而 rfc3339 只有秒级精度；额外留出余量，避免同秒写入被判为不新。
+    let newerTime = Date().addingTimeInterval(60)
+    let olderTime = newerTime.addingTimeInterval(-3600)
+    let lwwPatch: [String: Any] = [
+        "name": ["value": "e2e 改名", "updatedAt": rfc3339(newerTime)],
+        "enabled": ["value": false, "updatedAt": rfc3339(olderTime)],
+    ]
+    let lwwResponse = client.request("PUT", "scenes/\(sceneID)", token: sceneTokenA, json: lwwPatch)
+    let lwwScene = jsonObject(lwwResponse.body) ?? [:]
+    report.check(lwwResponse.status == 200, "PUT /scenes 返回 200", "status=\(lwwResponse.status)")
+    report.check(text(lwwScene, "name") == "e2e 改名", "较新的 name 被应用", "name=\(text(lwwScene, "name"))")
+    report.check(lwwScene["enabled"] as? Bool == true, "较旧的 enabled 被字段级 LWW 忽略")
+    report.check((lwwScene["version"] as? NSNumber)?.intValue == 2, "至少一个字段应用后 version+1", "version=\(text(lwwScene, "version"))")
+    report.check(lwwScene["deviceMissing"] as? Bool == true, "PUT 后仍返回实时 deviceMissing")
+
+    let stalePatch: [String: Any] = [
+        "name": ["value": "e2e 过期改名", "updatedAt": rfc3339(olderTime)],
+    ]
+    let staleSceneResponse = client.request("PUT", "scenes/\(sceneID)", token: sceneTokenA, json: stalePatch)
+    let staleScene = jsonObject(staleSceneResponse.body) ?? [:]
+    report.check(staleSceneResponse.status == 200, "过期补丁仍返回 200（静默不应用）", "status=\(staleSceneResponse.status)")
+    report.check(text(staleScene, "name") == "e2e 改名", "过期 name 不覆盖新值")
+    report.check((staleScene["version"] as? NSNumber)?.intValue == 2, "无字段应用时 version 不变", "version=\(text(staleScene, "version"))")
+
+    let newerEnabledPatch: [String: Any] = [
+        "enabled": ["value": false, "updatedAt": rfc3339(newerTime.addingTimeInterval(1))],
+    ]
+    let enabledResponse = client.request("PUT", "scenes/\(sceneID)", token: sceneTokenA, json: newerEnabledPatch)
+    let enabledScene = jsonObject(enabledResponse.body) ?? [:]
+    report.check(enabledResponse.status == 200, "PUT enabled 返回 200", "status=\(enabledResponse.status)")
+    report.check(enabledScene["enabled"] as? Bool == false, "较新的 enabled 被应用")
+    report.check((enabledScene["version"] as? NSNumber)?.intValue == 3, "第二个字段应用后 version=3", "version=\(text(enabledScene, "version"))")
+    report.check(text(enabledScene, "name") == "e2e 改名", "其他字段未被覆盖")
+
+    // 跨用户统一 404。
+    let crossGet = client.request("GET", "scenes/\(sceneID)", token: sceneTokenB)
+    report.check(crossGet.status == 404, "跨用户 GET 返回 404", "status=\(crossGet.status)")
+    let crossPut = client.request("PUT", "scenes/\(sceneID)", token: sceneTokenB, json: newerEnabledPatch)
+    report.check(crossPut.status == 404, "跨用户 PUT 返回 404", "status=\(crossPut.status)")
+    let crossDelete = client.request("DELETE", "scenes/\(sceneID)", token: sceneTokenB)
+    report.check(crossDelete.status == 404, "跨用户 DELETE 返回 404", "status=\(crossDelete.status)")
+
+    // 非法触发条件 / 动作种类重复。
+    let badTriggerBody = sceneBody.merging(["trigger": ["kind": "rssi_below", "device": ["platform": "ios", "externalId": sceneDeviceExternalID]]]) { _, new in new }
+    let badTrigger = client.request("POST", "scenes", token: sceneTokenA, json: badTriggerBody)
+    report.check(badTrigger.status == 400, "rssi_below 缺 rssiThreshold 返回 400", "status=\(badTrigger.status)")
+    report.check(errorCode(badTrigger.body) == "SCENE_TRIGGER_INVALID", "错误码 SCENE_TRIGGER_INVALID", "code=\(errorCode(badTrigger.body))")
+
+    var duplicateActionBody = scheduleBody
+    duplicateActionBody["actions"] = [
+        ["kind": "notify", "title": "重复一", "body": "内容"],
+        ["kind": "notify", "title": "重复二", "body": "内容"],
+    ]
+    let duplicateAction = client.request("POST", "scenes", token: sceneTokenA, json: duplicateActionBody)
+    report.check(duplicateAction.status == 400, "动作种类重复返回 400", "status=\(duplicateAction.status)")
+    report.check(errorCode(duplicateAction.body) == "SCENE_ACTION_INVALID", "错误码 SCENE_ACTION_INVALID", "code=\(errorCode(duplicateAction.body))")
+
+    // 软删：DELETE 204，随后 GET/PUT 都是 404，列表不再返回。
+    let deleteScene = client.request("DELETE", "scenes/\(sceneID)", token: sceneTokenA)
+    report.check(deleteScene.status == 204, "DELETE /scenes 返回 204", "status=\(deleteScene.status)")
+    let getDeleted = client.request("GET", "scenes/\(sceneID)", token: sceneTokenA)
+    report.check(getDeleted.status == 404, "已软删场景 GET 返回 404", "status=\(getDeleted.status)")
+    let putDeleted = client.request("PUT", "scenes/\(sceneID)", token: sceneTokenA, json: stalePatch)
+    report.check(putDeleted.status == 404, "已软删场景 PUT 返回 404", "status=\(putDeleted.status)")
+    let listAfterDelete = client.request("GET", "scenes", token: sceneTokenA)
+    let remainingScenes = list((jsonObject(listAfterDelete.body) ?? [:])["items"])
+    report.check(!remainingScenes.contains { text($0, "id") == sceneID }, "列表不再返回已软删场景")
+    report.check(remainingScenes.contains { text($0, "id") == scheduleID }, "未删除的定时场景仍在列表")
+
+    // change_log：scene 实体的 upsert 与 delete（tombstone 带 deletedAt）。
+    let sceneChanges = list((jsonObject(client.request(
+        "GET", "sync/changes?cursor=0&limit=500", token: sceneTokenA
+    ).body) ?? [:])["changes"]).filter { text($0, "entity") == "scene" }
+    report.check(sceneChanges.count >= 3, "change_log 包含场景变更", "count=\(sceneChanges.count)")
+    report.check(
+        sceneChanges.contains {
+            text($0, "op") == "upsert" && text($0["payload"] as? [String: Any] ?? [:], "id") == sceneID
+        },
+        "change_log 包含场景 upsert"
+    )
+    let sceneDeleteChange = sceneChanges.first {
+        text($0, "op") == "delete" && text($0["payload"] as? [String: Any] ?? [:], "id") == sceneID
+    }
+    report.check(sceneDeleteChange != nil, "change_log 包含场景 delete tombstone")
+    report.check(
+        !text(sceneDeleteChange?["payload"] as? [String: Any] ?? [:], "deletedAt").isEmpty,
+        "场景 tombstone 携带 deletedAt"
     )
 
     // MARK: 汇总

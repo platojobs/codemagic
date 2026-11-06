@@ -399,7 +399,8 @@ final class HomeDashboardViewController: UIViewController {
             ruleStore: environment.ruleStore,
             settingsStore: environment.settingsStore,
             ruleEvaluator: RuleEvaluator(),
-            ruleAlertCoordinator: environment.ruleAlertCoordinator
+            ruleAlertCoordinator: environment.ruleAlertCoordinator,
+            sceneEngine: environment.sceneEngine
         )
         let scanner = HomeViewController(viewModel: scanViewModel)
         scanner.title = L10n.t("home.scan.action")

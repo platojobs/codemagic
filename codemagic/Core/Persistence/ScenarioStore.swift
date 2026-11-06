@@ -1,6 +1,7 @@
 import Foundation
 
 /// 场景存储：仅本机 SQLite 表，无 sync_state，不参与云端同步。
+/// v14 之后同表还存放服务端场景（`kind = automation`），这里只读 `manual` 行。
 final class ScenarioStore {
     private let database: SQLiteDatabase
 
@@ -10,7 +11,7 @@ final class ScenarioStore {
 
     func fetchAll() throws -> [Scenario] {
         let rows = try database.query(
-            "SELECT * FROM scenarios ORDER BY created_at ASC;"
+            "SELECT * FROM scenarios WHERE kind = 'manual' AND deleted_at IS NULL ORDER BY created_at ASC;"
         )
         return rows.compactMap(Self.makeScenario)
     }
@@ -18,11 +19,24 @@ final class ScenarioStore {
     func upsert(_ scenario: Scenario) throws {
         let payload = try JSONEncoder().encode(scenario.actions)
         let json = String(data: payload, encoding: .utf8) ?? "[]"
+        // 用 UPDATE 再 INSERT，避免 INSERT OR REPLACE 把 v14 新增的同步列重置为默认值。
         try database.execute(
             """
-            INSERT OR REPLACE INTO scenarios
-            (id, name, actions, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?);
+            UPDATE scenarios SET name = ?, actions = ?, updated_at = ?
+            WHERE id = ? AND kind = 'manual';
+            """,
+            [
+                .text(scenario.name),
+                .text(json),
+                .double(scenario.updatedAt.timeIntervalSince1970),
+                .text(scenario.id.uuidString),
+            ]
+        )
+        try database.execute(
+            """
+            INSERT OR IGNORE INTO scenarios
+            (id, kind, name, actions, created_at, updated_at, enabled, cooldown_seconds, sync_state)
+            VALUES (?, 'manual', ?, ?, ?, ?, 1, 0, 'localOnly');
             """,
             [
                 .text(scenario.id.uuidString),
@@ -35,7 +49,10 @@ final class ScenarioStore {
     }
 
     func delete(id: UUID) throws {
-        try database.execute("DELETE FROM scenarios WHERE id = ?;", [.text(id.uuidString)])
+        try database.execute(
+            "DELETE FROM scenarios WHERE id = ? AND kind = 'manual';",
+            [.text(id.uuidString)]
+        )
     }
 
     private static func makeScenario(from row: SQLRow) -> Scenario? {

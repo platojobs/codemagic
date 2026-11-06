@@ -11,6 +11,7 @@ final class ReadingsIngestor {
     private let ruleStore: DeviceRuleStore?
     private let ruleEvaluator: RuleEvaluator?
     private let ruleAlertCoordinator: RuleAlertCoordinator?
+    private let sceneEngine: SceneEngine?
     private let now: () -> Date
 
     /// 某个设备新增读数后回调（详情页据此刷新），在主线程调用。
@@ -23,6 +24,7 @@ final class ReadingsIngestor {
         ruleStore: DeviceRuleStore? = nil,
         ruleEvaluator: RuleEvaluator? = nil,
         ruleAlertCoordinator: RuleAlertCoordinator? = nil,
+        sceneEngine: SceneEngine? = nil,
         now: @escaping () -> Date = Date.init
     ) {
         self.readingsStore = readingsStore
@@ -31,6 +33,7 @@ final class ReadingsIngestor {
         self.ruleStore = ruleStore
         self.ruleEvaluator = ruleEvaluator
         self.ruleAlertCoordinator = ruleAlertCoordinator
+        self.sceneEngine = sceneEngine
         self.now = now
     }
 
@@ -77,6 +80,7 @@ final class ReadingsIngestor {
         if !saved.isEmpty {
             onSaved?(device.id)
             evaluateReadingRules(device: device, readings: saved)
+            sceneEngine?.evaluateReadings(saved, device: device)
         }
         return saved
     }

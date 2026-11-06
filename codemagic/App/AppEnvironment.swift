@@ -34,6 +34,11 @@ final class AppEnvironment {
     let accountDeletionService: AccountDeletionService
     let scenarioStore: ScenarioStore
     let scenarioExecutor: ScenarioExecutor
+    /// 服务端场景：本地存储、同步、执行与定时调度。
+    let sceneStore: SceneStore
+    let sceneSyncService: SceneSyncServicing
+    let sceneEngine: SceneEngine
+    let sceneScheduler: SceneScheduler
     /// 房间：接入家庭后以服务端为准；离线 / 未同步时保留本机数据。
     let roomStore: RoomStore
     let householdStore: HouseholdStore
@@ -71,6 +76,7 @@ final class AppEnvironment {
         roomStore = RoomStore(database: resolved.database)
         householdStore = HouseholdStore(database: resolved.database)
         pendingAssignmentStore = DeviceAssignmentPendingStore(database: resolved.database)
+        sceneStore = SceneStore(database: resolved.database)
         self.settingsStore = settingsStore
         let notifications: LocalNotificationServing = UserNotificationService.shared
         notificationService = notifications
@@ -120,6 +126,12 @@ final class AppEnvironment {
                 logStore: scanLogStore
             )
             householdService = coordinator
+            let sceneSync = SceneSyncService(
+                api: SceneAPIClient(configuration: configuration),
+                store: sceneStore,
+                logStore: scanLogStore
+            )
+            sceneSyncService = sceneSync
             syncEngine = SyncEngine(
                 api: SyncAPIClient(configuration: configuration),
                 tokenStore: sessionTokenStore,
@@ -127,7 +139,8 @@ final class AppEnvironment {
                 deviceStore: savedDeviceStore,
                 readingsStore: readingsStore,
                 logStore: scanLogStore,
-                householdService: coordinator
+                householdService: coordinator,
+                sceneSync: sceneSync
             )
         } else {
             apiConfiguration = nil
@@ -157,6 +170,12 @@ final class AppEnvironment {
                 logStore: scanLogStore
             )
             householdService = coordinator
+            let sceneSync = SceneSyncService(
+                api: UnavailableSceneAPI(),
+                store: sceneStore,
+                logStore: scanLogStore
+            )
+            sceneSyncService = sceneSync
             syncEngine = SyncEngine(
                 api: UnavailableSyncAPI(),
                 tokenStore: sessionTokenStore,
@@ -164,12 +183,22 @@ final class AppEnvironment {
                 deviceStore: savedDeviceStore,
                 readingsStore: readingsStore,
                 logStore: scanLogStore,
-                householdService: coordinator
+                householdService: coordinator,
+                sceneSync: sceneSync
             )
             if startupWarning == nil {
                 startupWarning = L10n.f("app.env.productsUnavailable", AppError.configuration("").code)
             }
         }
+
+        sceneEngine = SceneEngine(
+            store: sceneStore,
+            deviceStore: savedDeviceStore,
+            logStore: scanLogStore,
+            notifications: UserNotificationService.shared,
+            now: { Date() }
+        )
+        sceneScheduler = SceneScheduler(notifications: UserNotificationService.shared)
 
         readingsIngestor = ReadingsIngestor(
             readingsStore: readingsStore,
@@ -177,7 +206,8 @@ final class AppEnvironment {
             logStore: scanLogStore,
             ruleStore: ruleStore,
             ruleEvaluator: RuleEvaluator(),
-            ruleAlertCoordinator: ruleAlertCoordinator
+            ruleAlertCoordinator: ruleAlertCoordinator,
+            sceneEngine: sceneEngine
         )
         pairingService = PairingService(
             api: accountAPI,
@@ -232,6 +262,15 @@ final class AppEnvironment {
         )
 
         LaunchMetrics.mark("environment-init")
+
+        sceneSyncService.onScenesChanged = { [weak self] in
+            guard let self else { return }
+            let scenes = (try? self.sceneStore.fetchAll()) ?? []
+            self.sceneScheduler.reschedule(scenes: scenes)
+        }
+        // 启动时按本地场景重建定时通知；网络同步完成后会再次触发。
+        let initialScenes = (try? sceneStore.fetchAll()) ?? []
+        sceneScheduler.reschedule(scenes: initialScenes)
 
         // 7 天保留清理与首帧无关，放到后台队列，避免占用启动时的主线程。
         let cutoff = Date().addingTimeInterval(-7 * 24 * 60 * 60)

@@ -170,6 +170,9 @@ final class SQLiteDatabase {
         if version < 13 {
             try migrateToVersion13()
         }
+        if version < 14 {
+            try migrateToVersion14()
+        }
     }
 
     /// v1：五张业务表，均含 `id / updated_at / deleted_at / sync_state`。
@@ -590,6 +593,77 @@ final class SQLiteDatabase {
         script += "PRAGMA user_version = 13;"
         try executeScript(script)
     }
+
+    /// v14：`scenarios` 表接入服务端场景。
+    ///
+    /// - 旧行保留：`kind` 默认 `manual`，仍由 `ScenarioStore` 读取，继续「仅本机」；
+    ///   新格式场景写 `kind = 'automation'`，由 `SceneStore` 读写并参与同步。
+    /// - 同步字段：`remote_id / version / sync_state / deleted_at / device_missing / last_run_at`。
+    /// - LWW：5 个字段各一列时间戳（`name / enabled / cooldown / trigger / actions`），
+    ///   与设备元数据的「字段级最后写入者胜出」语义一致；`last_synced_at` 用于判断哪些字段是本地脏字段。
+    /// - 可重复执行：先 `PRAGMA table_info` 判列，缺列才 `ALTER`，旧数据原样保留。
+    private func migrateToVersion14() throws {
+        let columns = Set(try performQuery("PRAGMA table_info(scenarios);", [])
+            .compactMap { $0.text("name") })
+        var script = ""
+        if columns.isEmpty {
+            // 某些旧库（例如只迁移到 v7 的库）从未建过 scenarios，直接建完整表。
+            script += """
+            CREATE TABLE IF NOT EXISTS scenarios (
+                id TEXT PRIMARY KEY NOT NULL,
+                name TEXT NOT NULL,
+                actions TEXT NOT NULL,
+                created_at REAL NOT NULL,
+                updated_at REAL NOT NULL,
+                kind TEXT NOT NULL DEFAULT 'manual',
+                remote_id TEXT,
+                version INTEGER NOT NULL DEFAULT 0,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                cooldown_seconds INTEGER NOT NULL DEFAULT 300,
+                trigger TEXT,
+                sync_state TEXT NOT NULL DEFAULT 'localOnly',
+                deleted_at REAL,
+                device_missing INTEGER NOT NULL DEFAULT 0,
+                last_synced_at REAL,
+                last_run_at REAL,
+                name_updated_at REAL,
+                enabled_updated_at REAL,
+                cooldown_updated_at REAL,
+                trigger_updated_at REAL,
+                actions_updated_at REAL
+            );
+            """
+        } else {
+            func add(_ name: String, _ definition: String) {
+                guard !columns.contains(name) else { return }
+                script += "ALTER TABLE scenarios ADD COLUMN \(name) \(definition);\n"
+            }
+            add("kind", "TEXT NOT NULL DEFAULT 'manual'")
+            add("remote_id", "TEXT")
+            add("version", "INTEGER NOT NULL DEFAULT 0")
+            add("enabled", "INTEGER NOT NULL DEFAULT 1")
+            add("cooldown_seconds", "INTEGER NOT NULL DEFAULT 300")
+            add("trigger", "TEXT")
+            add("sync_state", "TEXT NOT NULL DEFAULT 'localOnly'")
+            add("deleted_at", "REAL")
+            add("device_missing", "INTEGER NOT NULL DEFAULT 0")
+            add("last_synced_at", "REAL")
+            add("last_run_at", "REAL")
+            add("name_updated_at", "REAL")
+            add("enabled_updated_at", "REAL")
+            add("cooldown_updated_at", "REAL")
+            add("trigger_updated_at", "REAL")
+            add("actions_updated_at", "REAL")
+        }
+        script += """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_scenarios_remote
+            ON scenarios(remote_id) WHERE remote_id IS NOT NULL;
+        CREATE INDEX IF NOT EXISTS idx_scenarios_kind ON scenarios(kind, deleted_at);
+        PRAGMA user_version = 14;
+        """
+        try executeScript(script)
+    }
+
     /// 迁移脚本包含多条语句，必须用 sqlite3_exec 一次性执行；
     /// sqlite3_prepare_v2 只会预处理第一条语句。
     private func executeScript(_ script: String) throws {

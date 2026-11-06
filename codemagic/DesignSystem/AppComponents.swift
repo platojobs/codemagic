@@ -225,6 +225,25 @@ final class StatusChipView: UIView {
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
+
+    /// 复用 Chip（例如同步状态在待上传 / 已同步之间切换）。
+    func set(text: String, kind: Kind) {
+        label.text = text
+        switch kind {
+        case .success:
+            backgroundColor = Palette.successBg
+            label.textColor = Palette.success
+        case .warning:
+            backgroundColor = Palette.warningBg
+            label.textColor = Palette.warning
+        case .danger:
+            backgroundColor = Palette.dangerBg
+            label.textColor = Palette.danger
+        case .neutral:
+            backgroundColor = Palette.surfaceSunken
+            label.textColor = Palette.textSecondary
+        }
+    }
 }
 
 // MARK: - 可点卡片

@@ -12,6 +12,7 @@ final class SmartViewController: UIViewController {
         case rule(DeviceRule)
         case trigger(ScanLogEntry)
         case scenario(Scenario)
+        case scene(Scene)
         case emptyRules
         case emptyScenarios
         case error(String)
@@ -72,6 +73,7 @@ final class SmartViewController: UIViewController {
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
+        environment.sceneEngine.refreshMissingFlags()
         viewModel.reload()
     }
 
@@ -87,6 +89,7 @@ final class SmartViewController: UIViewController {
         tableView.estimatedRowHeight = Layout.row2
         tableView.register(RuleCell.self, forCellReuseIdentifier: RuleCell.reuseIdentifier)
         tableView.register(ScenarioCell.self, forCellReuseIdentifier: ScenarioCell.reuseIdentifier)
+        tableView.register(SceneAutomationCell.self, forCellReuseIdentifier: SceneAutomationCell.reuseIdentifier)
         tableView.register(TriggerCell.self, forCellReuseIdentifier: TriggerCell.reuseIdentifier)
         tableView.register(RecommendedEntryCell.self, forCellReuseIdentifier: RecommendedEntryCell.reuseIdentifier)
         tableView.register(StateCell.self, forCellReuseIdentifier: StateCell.reuseIdentifier)
@@ -124,7 +127,8 @@ final class SmartViewController: UIViewController {
     }
 
     private func updateAddAccessibility() {
-        navigationItem.rightBarButtonItem?.accessibilityLabel = mode == .automation ? L10n.t("smart.newRule") : L10n.t("smart.newScenario")
+        navigationItem.rightBarButtonItem?.accessibilityLabel =
+            mode == .automation ? L10n.t("smart.newRule") : L10n.t("smart.newCloudScene")
     }
 
     // MARK: - Data
@@ -147,10 +151,17 @@ final class SmartViewController: UIViewController {
             }
             return sections
         case .scenario:
-            if viewModel.scenarios.isEmpty {
+            var sections: [(String, [Row])] = []
+            if !viewModel.scenes.isEmpty {
+                sections.append((L10n.t("smart.section.cloudScenes"), viewModel.scenes.map { .scene($0) }))
+            }
+            if !viewModel.scenarios.isEmpty {
+                sections.append((L10n.t("smart.section.localScenarios"), viewModel.scenarios.map { .scenario($0) }))
+            }
+            if sections.isEmpty {
                 return [(L10n.t("smart.mode.scenarios"), [.emptyScenarios])]
             }
-            return [(L10n.t("smart.mode.scenarios"), viewModel.scenarios.map { .scenario($0) })]
+            return sections
         }
     }
 
@@ -170,8 +181,52 @@ final class SmartViewController: UIViewController {
             }
             present(UINavigationController(rootViewController: editor), animated: true)
         case .scenario:
-            presentScenarioEditor(nil)
+            presentSceneChooser()
         }
+    }
+
+    /// 场景模式的新增入口：推荐新建服务端场景，同时保留「仅本机」兼容旧用法。
+    private func presentSceneChooser() {
+        let sheet = UIAlertController(
+            title: L10n.t("smart.sceneChooserTitle"),
+            message: L10n.t("smart.sceneChooserMessage"),
+            preferredStyle: .actionSheet
+        )
+        sheet.addAction(UIAlertAction(title: L10n.t("smart.newCloudScene"), style: .default) { [weak self] _ in
+            self?.presentSceneEditor(nil)
+        })
+        sheet.addAction(UIAlertAction(title: L10n.t("smart.newLocalScenario"), style: .default) { [weak self] _ in
+            self?.presentScenarioEditor(nil)
+        })
+        sheet.addAction(UIAlertAction(title: L10n.t("common.cancel"), style: .cancel))
+        if let popover = sheet.popoverPresentationController {
+            popover.barButtonItem = navigationItem.rightBarButtonItem
+        }
+        present(sheet, animated: true)
+    }
+
+    private func presentSceneEditor(_ scene: Scene?) {
+        let editor = SceneEditorViewController(scene: scene, devices: viewModel.savedDevices) { [weak self] updated in
+            guard let self else { return }
+            let fields: Set<SceneFieldKey>
+            if let scene {
+                fields = Self.changedFields(from: scene, to: updated)
+            } else {
+                fields = Set(SceneFieldKey.allCases)
+            }
+            self.viewModel.saveScene(updated, editedFields: fields)
+        }
+        present(UINavigationController(rootViewController: editor), animated: true)
+    }
+
+    private static func changedFields(from old: Scene, to new: Scene) -> Set<SceneFieldKey> {
+        var fields: Set<SceneFieldKey> = []
+        if old.name != new.name { fields.insert(.name) }
+        if old.enabled != new.enabled { fields.insert(.enabled) }
+        if old.cooldownSeconds != new.cooldownSeconds { fields.insert(.cooldownSeconds) }
+        if old.trigger != new.trigger { fields.insert(.trigger) }
+        if old.actions != new.actions { fields.insert(.actions) }
+        return fields
     }
 
     /// 推荐规则入口：只使用设备真实出现过的指标，一键写入现有 readingThreshold 规则。
@@ -279,6 +334,21 @@ extension SmartViewController: UITableViewDataSource {
             }
             return cell
 
+        case .scene(let scene):
+            guard let cell = tableView.dequeueReusableCell(
+                withIdentifier: SceneAutomationCell.reuseIdentifier, for: indexPath
+            ) as? SceneAutomationCell else { return UITableViewCell() }
+            cell.configure(
+                scene: scene,
+                deviceMissing: viewModel.isDeviceMissing(scene),
+                deviceName: viewModel.sceneDeviceName(scene),
+                nextFire: viewModel.nextFireText(for: scene)
+            ) { [weak self] isOn in
+                guard isOn != scene.enabled else { return }
+                self?.viewModel.toggleScene(id: scene.id)
+            }
+            return cell
+
         case .emptyRules:
             guard let cell = tableView.dequeueReusableCell(
                 withIdentifier: StateCell.reuseIdentifier, for: indexPath
@@ -301,9 +371,9 @@ extension SmartViewController: UITableViewDataSource {
                 symbol: "sparkles",
                 title: L10n.t("home.noScenarios"),
                 message: L10n.t("smart.emptyScenariosMessage"),
-                actionTitle: L10n.t("smart.newScenario")
+                actionTitle: L10n.t("smart.newCloudScene")
             ) { [weak self] in
-                self?.presentScenarioEditor(nil)
+                self?.presentSceneChooser()
             }
             return cell
 
@@ -343,6 +413,8 @@ extension SmartViewController: UITableViewDelegate {
             presentRecommendedRules()
         case .scenario(let scenario):
             presentScenarioEditor(scenario)
+        case .scene(let scene):
+            presentSceneEditor(scene)
         default:
             break
         }
@@ -362,6 +434,14 @@ extension SmartViewController: UITableViewDelegate {
         case .scenario(let scenario):
             let action = UIContextualAction(style: .destructive, title: L10n.t("common.delete")) { [weak self] _, _, completion in
                 self?.confirmDeleteScenario(scenario)
+                completion(true)
+            }
+            return UISwipeActionsConfiguration(actions: [action])
+        case .scene(let scene):
+            let action = UIContextualAction(style: .destructive, title: L10n.t("common.delete")) { [weak self] _, _, completion in
+                self?.confirm(title: L10n.f("smart.deleteScenarioTitle", scene.name)) { [weak self] in
+                    self?.viewModel.deleteScene(id: scene.id)
+                }
                 completion(true)
             }
             return UISwipeActionsConfiguration(actions: [action])
@@ -392,6 +472,25 @@ extension SmartViewController: UITableViewDelegate {
                     self?.confirmDeleteScenario(scenario)
                 }
                 return UIMenu(children: [run, edit, delete])
+            }
+        case .scene(let scene):
+            return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
+                let edit = UIAction(
+                    title: L10n.t("scenario.editor.editTitle"),
+                    image: UIImage(systemName: SymbolName.edit)
+                ) { _ in
+                    self?.presentSceneEditor(scene)
+                }
+                let delete = UIAction(
+                    title: L10n.t("smart.deleteScenarioAction"),
+                    image: UIImage(systemName: SymbolName.delete),
+                    attributes: .destructive
+                ) { [weak self] _ in
+                    self?.confirm(title: L10n.f("smart.deleteScenarioTitle", scene.name)) {
+                        self?.viewModel.deleteScene(id: scene.id)
+                    }
+                }
+                return UIMenu(children: [edit, delete])
             }
         default:
             return nil

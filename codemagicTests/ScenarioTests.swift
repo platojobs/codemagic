@@ -40,27 +40,68 @@ final class ScenarioTests: XCTestCase {
         XCTAssertTrue(try store.fetchAll().isEmpty)
     }
 
-    func testScenarioTableIsLocalOnly() throws {
+    func testScenarioTableCarriesSceneSyncColumns() throws {
         let columns = try testDatabase.database.query("PRAGMA table_info(scenarios);")
         let names = Set(columns.compactMap { $0.text("name") })
-        XCTAssertEqual(names, ["id", "name", "actions", "created_at", "updated_at"])
-        XCTAssertFalse(names.contains("sync_state"), "场景不得参与同步")
-        XCTAssertFalse(names.contains("deleted_at"), "场景不做云端软删除")
+        XCTAssertTrue(names.contains("kind"), "需要区分手动场景与服务端场景")
+        XCTAssertTrue(names.contains("remote_id"), "服务端场景必须能写回 remoteId")
+        XCTAssertTrue(names.contains("sync_state"), "服务端场景参与同步")
+        XCTAssertTrue(names.contains("deleted_at"), "服务端场景支持软删同步")
+        XCTAssertTrue(names.contains("name_updated_at"), "5 个字段各带 LWW 时间戳")
+        XCTAssertEqual(columns.count, 21)
     }
 
-    func testMigrationFromVersion5CreatesScenarioTable() throws {
+    func testMigrationFromVersion5AddsSceneColumnsAndPreservesLegacyRows() throws {
         let path = testDatabase.directory.appendingPathComponent("migration.sqlite").path
         let legacy = try SQLiteDatabase(path: path)
+        let legacyID = UUID().uuidString
         try legacy.execute("DROP TABLE IF EXISTS scenarios;")
+        try legacy.execute("""
+        CREATE TABLE scenarios (
+            id TEXT PRIMARY KEY NOT NULL,
+            name TEXT NOT NULL,
+            actions TEXT NOT NULL,
+            created_at REAL NOT NULL,
+            updated_at REAL NOT NULL
+        );
+        """)
+        try legacy.execute(
+            "INSERT INTO scenarios (id, name, actions, created_at, updated_at) VALUES (?, ?, ?, ?, ?);",
+            [
+                .text(legacyID),
+                .text("旧的手动场景"),
+                .text("[]"),
+                .double(1_000),
+                .double(1_000),
+            ]
+        )
         try legacy.execute("PRAGMA user_version = 5;")
         legacy.close()
 
         let migrated = try SQLiteDatabase(path: path)
         defer { migrated.close() }
-        XCTAssertEqual(try migrated.query("PRAGMA user_version;").first?.integer("user_version"), 13)
-        XCTAssertEqual(try ScenarioStore(database: migrated).fetchAll().count, 0)
+        XCTAssertEqual(try migrated.query("PRAGMA user_version;").first?.integer("user_version"), 14)
+
         let columns = try migrated.query("PRAGMA table_info(scenarios);")
-        XCTAssertEqual(columns.count, 5)
+        XCTAssertEqual(columns.count, 21)
+        XCTAssertEqual(Set(columns.compactMap { $0.text("name") }), [
+            "id", "name", "actions", "created_at", "updated_at",
+            "kind", "remote_id", "version", "enabled", "cooldown_seconds", "trigger",
+            "sync_state", "deleted_at", "device_missing", "last_synced_at", "last_run_at",
+            "name_updated_at", "enabled_updated_at", "cooldown_updated_at",
+            "trigger_updated_at", "actions_updated_at",
+        ])
+
+        // 旧数据不丢：仍由手动场景存储读取，且没有混入服务端场景列表。
+        let manual = try ScenarioStore(database: migrated).fetchAll()
+        XCTAssertEqual(manual.count, 1)
+        XCTAssertEqual(manual.first?.name, "旧的手动场景")
+        let row = try XCTUnwrap(
+            migrated.query("SELECT * FROM scenarios WHERE id = ?;", [.text(legacyID)]).first
+        )
+        XCTAssertEqual(row.text("kind"), "manual")
+        XCTAssertEqual(row.text("sync_state"), "localOnly")
+        XCTAssertTrue(try SceneStore(database: migrated).fetchAll(includeDeleted: true).isEmpty)
     }
 
     // MARK: - Executor

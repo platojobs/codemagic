@@ -12,13 +12,13 @@
 
 | 项 | 结果 |
 | --- | --- |
-| 版本 | **v0.20.0**（`MARKETING_VERSION 0.20.0`，`CURRENT_PROJECT_VERSION 28`，tag `v0.20.0`：账号删除改为两步一次性令牌，数据导出改为异步任务 + 一次性下载链接；「我的」新增「账号与数据」区域；删除后本地业务表、凭据、缓存（含 v13 目录缓存）、URL 缓存与反馈草稿全部清空；契约对齐 `PJGoIoT` v0.19.0 / openapi 0.15.0） |
+| 版本 | **v0.21.0**（`MARKETING_VERSION 0.21.0`，`CURRENT_PROJECT_VERSION 29`，tag `v0.21.0`：场景接入服务端，支持 `GET /scenes` 基线、`POST` / `PUT`（5 字段级 LWW）/ `DELETE` 软删与 `change_log` 的 `scene` 实体；本地 `scenarios` 迁移 **v14** 增加 `kind` / `remote_id` / `version` / 5 个字段级时间戳 / `sync_state` / `deleted_at` / `device_missing`，旧手动场景原样保留；首次接入逐条上传并写回 `remoteId`，离线编辑 pending 补传；服务端场景由本地 `RuleEngine` / `SceneScheduler` 真实执行（离线、RSSI、指标连续条数、按 IANA 时区与 `daysOfWeek` 的定时通知，含 DST）；`deviceMissing` 列表标注「设备已移除」，执行时跳过并记失败日志；契约对齐 `PJGoIoT` v0.20.0 / openapi 0.16.0） |
 | 五模块（首页 / 智能 / 产品 / 市场 / 我的） | 已实现，纯代码 UIKit，真实数据路径；设备管理并入首页，规则与场景集中在「智能」 |
 | CoreBluetooth 扫描 + 连接 | 已实现（`CBCentralManager`，真实 RSSI） |
 | BLE 读数采集 | 已实现：连接后订阅心率 `0x2A37`、电量 `0x2A19`、温度 `0x2A6E`、Nordic UART TX `6E400003-…`；各特征独立解析器，失败静默丢弃并写本地日志 |
 | 设备类型目录（v0.19.0） | **服务端为唯一事实源**：类型清单、展示名、GATT 服务、指标（`key` / `unit` / `characteristicUuid`）、限制与兼容性均来自 `GET /catalog/device-types`；本地只保留 SQLite 单行缓存（原始 JSON + `ETag` / `Last-Modified`），无第二份常量清单。下次请求带条件头，304 复用缓存并刷新 `last_used_at`；断网有缓存时展示缓存并标注「目录更新时间 / 离线缓存」，无缓存才给错误与重试。目录声明的指标按特征 UUID 与本地解析器对齐，解析不了的标注「当前版本不支持」；目录对 NUS 声明空指标时按透传处理 |
 | 长周期读数图表 | 已实现：1 小时 / 24 小时 / 7 天 / 30 天区间切换（映射 `1m` / `1h` / `1h` / `1d`），X 轴按桶 `start` 真实时间比例定位，缺口断线，`avg` 折线 + `min`–`max` 区间带，Y 轴自适应并带单位；**v0.11.0 支持点选 / 长按桶查看 start–end、min/max/avg/last 与条数（本地时区），点空白取消，Y 轴不变，并给出无障碍摘要** |
-| 本地持久化 | 已实现（SQLite3，含同步字段；迁移 **v13** 新增 `device_catalog_cache`（单行原始 JSON + `etag` / `last_modified` / `fetched_at` / `last_used_at`，`PRAGMA table_info` 判列可重复执行）；迁移 **v12** 为 `feedback_drafts` 增加 `status` / `last_error` / `remote_id` / `next_retry_at`（`PRAGMA table_info` 判列可重复执行，旧行保留并默认 `pending`）；迁移 **v11** 新增 `feedback_drafts`；迁移 **v10** 为 `households` 增加 `room_count`（服务端真实房间数，不本地计数）；v9 新增 `households`（`id` / `remote_id` / `name` / `is_personal` / `role` / `member_count` / `device_count`）与 `device_assignment_pending`（设备归属上报队列），为 `rooms` 启用 `remote_id` 并增加 `household_id` / `sync_state` / `deleted`，为 `saved_devices` 增加 `household_id` / `remote_room_id` / `remote_household_id`；v8 新增 `rooms` 表与可空 `room_id`，v7 为 `rules` 加指标阈值字段，v6 新增仅本机的 `scenarios` 表；v5 新增 `readings` 表，本地保留 7 天；v4 区分 `advertised_name` 与用户别名并记录三态 patch） |
+| 本地持久化 | 已实现（SQLite3，含同步字段；迁移 **v14** 为 `scenarios` 增加 `kind` / `remote_id` / `version` / 字段级时间戳 / `sync_state` / `deleted_at` / `device_missing` 等列，旧手动场景保留；迁移 **v13** 新增 `device_catalog_cache`（单行原始 JSON + `etag` / `last_modified` / `fetched_at` / `last_used_at`，`PRAGMA table_info` 判列可重复执行）；迁移 **v12** 为 `feedback_drafts` 增加 `status` / `last_error` / `remote_id` / `next_retry_at`（`PRAGMA table_info` 判列可重复执行，旧行保留并默认 `pending`）；迁移 **v11** 新增 `feedback_drafts`；迁移 **v10** 为 `households` 增加 `room_count`（服务端真实房间数，不本地计数）；v9 新增 `households`（`id` / `remote_id` / `name` / `is_personal` / `role` / `member_count` / `device_count`）与 `device_assignment_pending`（设备归属上报队列），为 `rooms` 启用 `remote_id` 并增加 `household_id` / `sync_state` / `deleted`，为 `saved_devices` 增加 `household_id` / `remote_room_id` / `remote_household_id`；v8 新增 `rooms` 表与可空 `room_id`，v7 为 `rules` 加指标阈值字段，v6 新增仅本机的 `scenarios` 表；v5 新增 `readings` 表，本地保留 7 天；v4 区分 `advertised_name` 与用户别名并记录三态 patch） |
 | 家庭（v0.15.0） | **已接入后端**：`GET /households` 的 `memberCount` / `deviceCount` / `roomCount` 全部使用服务端真实数字；「我的 → 家庭管理」按角色裁剪入口：owner 可签发 / 撤销邀请码、移除成员、改家庭名、退出家庭，member 只能查看与退出。成员支持左滑 / 点击移除（二次确认并说明对方设备回其个人家庭）；owner 还有其他成员时退出前置提示「请先转让所有权或移除其他成员」，服务端 409 同一文案。邀请码列表只展示哈希前缀 / 状态 / 过期时间并可撤销，绝无明文。房间支持拖拽与上下移动排序，整段提交 `PUT /rooms/order`；409（`ROOM_SET_MISMATCH` 或 v0.13.0 的 `CONFLICT`）自动重新 GET 并提示「房间列表已变化，已刷新」。设备归属仍走独立 `PATCH /my/devices/{platform}/{externalId}`；退出 / 被移除后本地设备回落个人家庭、房间脱钩保留并标注未同步 |
 | 本地化（v0.12.0） | **已实现**：全部界面文案走 `L10n.t` / `L10n.f`，资源为 `Resources/zh-Hans.lproj/Localizable.strings` 与 `en.lproj/Localizable.strings`；工程 `knownRegions` 含 `zh-Hans`，`CFBundleLocalizations = [en, zh-Hans]`，设置跟随系统语言；术语双语见第 11 节；单测强制扫描 View / ViewModel 源码不得硬编码中文，并校验两语言 key 集合与占位符一致 |
 | 动态字体（v0.12.0） | **已实现**：字号统一走 `AppText`（`UIFontMetrics` 缩放）+ `applyFont(_:)`（`adjustsFontForContentSizeCategory = true`）；表格行高自适应；图表 Y 轴左侧留白随字号测量增长，超大字号缩为 3 个刻度且不与绘图区重叠 |
@@ -27,11 +27,11 @@
 | 同步 | **已实现**：匿名登录、增量拉取、批量推送（设备 ≤100/批 + 读数 ≤200/批、幂等键含读数）、冲突提示、tombstone、Keychain token、前后台 / BGTask 触发、断网累积补传；后台唤醒仅做受限推送（不拉增量、不建号、≥15 分钟间隔）；**410 `RESYNC_REQUIRED` 自动全量重同步（pending 不丢）**，503 `TIMEOUT` 指数退避 |
 | 自绘 RSSI + 自绘折线图 + 代码组装空状态 | 已实现（读数图表纯 `draw(_:)`，无第三方图表库） |
 | 首启引导 | **已实现**：3 步（蓝牙 / 通知 / 后台采集），仅首次或未走完时出现，可跳过；步骤与完成标记持久化到 `UserDefaults` |
-| 单元测试 | **364 个用例，0 失败**（`** TEST SUCCEEDED **`，2026-11-06，Xcode 27.2 / iPhone 18 Pro · iOS 27.2 模拟器；新增 8 个：删除令牌申请 / `DELETE /me` 只用 `X-Deletion-Token`、409/403/404/410 分流、异步导出 DTO 与相对 `downloadUrl` 解析、下载 410/403、轮询退避 `[2.5, 3.5, 4.9]`、410 自动刷新一次、409 → 转让后同一令牌成功、删除后 9 张业务表计数归零 + 目录缓存清空 + 重启不复活的迁移验证；既有 356 个用例全部保持） |
+| 单元测试 | **402 个用例，0 失败**（`** TEST SUCCEEDED **`，2026-11-06，Xcode 27.2 / iPhone 18 Pro · iOS 27.2 模拟器；新增 38 个：首次全量上传与写回 `remoteId`、孤儿内容签名认领、字段级 LWW（两端改不同字段都保留）、离线 pending 补传、软删同步与 `change_log` tombstone、基线缺失、`deviceMissing` 跳过 + 失败日志、RSSI / 指标连续条数 / 冷却、定时下一次触发含跨 DST、占位符渲染、SQLite v14 迁移与旧数据保留；既有 364 个用例全部保持） |
 | 模拟器构建 | **通过**（`xcodebuild ... build`，`** BUILD SUCCEEDED **`） |
 | CI | **GitHub Actions 已实际运行 success**：v0.20.0 tag run [42179059627](https://github.com/platojobs/codemagic/actions/runs/42179059627)（success，提交 `64c1e3f`），并行 `Build & Test`（**364 单测**）与 `E2E contract`（**367 项，0 SKIP**，PJGoIoT 固定在 v0.19.0）；同 sha 的 `main` run [42179025115](https://github.com/platojobs/codemagic/actions/runs/42179025115) 被 tag 并发规则取消；证据回填后的 `main` run [42179940342](https://github.com/platojobs/codemagic/actions/runs/42179940342) success（提交 `3df5143`）；v0.19.0 tag run [42172416077](https://github.com/platojobs/codemagic/actions/runs/42172416077)（356 单测 / 337 项 E2E）与 `main` run [42173051288](https://github.com/platojobs/codemagic/actions/runs/42173051288) 为上一基线；`codemagic.yaml` 作为可选替代保留但未验证 |
 | 真机 BLE / 签名 | **未验证**：本机无真机与 Apple 开发者账号；读数采集与图表需真机 / 可穿戴设备验证（见第 9 节） |
-| 真实后端同步 | **契约已联调**：`scripts/e2e-contract.sh` 对**干净 worktree 的 `PJGoIoT` v0.19.0**（`/tmp/pjgoiot-v019`，`STORE=fixture`）跑 **367 项断言，全部 PASS**（新增删除令牌申请 / 401 / 旧令牌作废 / 400 缺令牌 / 403 错令牌、`DELETE /me` 204 / 旧 Bearer 401 / 重放 404、异步导出 202 → pending/ready 轮询 → 一次性下载 200 → 重放 410 → 错令牌 403 → 重新查询换新链接可再下载、owner 家庭有成员 409 → 转让后同一令牌 204）；`scripts/e2e-postgres.sh` 在同一套契约外，另在**真实 Postgres** 直接查库；输出见 [docs/e2e-postgres.md](docs/e2e-postgres.md)；App 内删除 / 导出与分享 UI 仍需真机手动验证 |
+| 真实后端同步 | **契约已联调**：`scripts/e2e-contract.sh` 对**干净 worktree 的 `PJGoIoT` v0.20.0**（`/tmp/pjgoiot-v020`，`STORE=fixture`）跑 **414 项断言，全部 PASS**（新增场景链路：`POST /scenes` 201、`GET /scenes` 列表、字段级 LWW `PUT`（旧补丁不应用、新补丁推进版本）、跨用户 404、缺失 `rssiThreshold` / 重复动作 400、设备删除后 `deviceMissing=true`、`DELETE /scenes/{id}` 204 与软删后 GET/PUT 404、`change_log` 的 `scene` upsert + delete tombstone 含 `deletedAt`）；`scripts/e2e-postgres.sh` 在同一套契约外，另在**真实 Postgres** 直接查库；输出见 [docs/e2e-postgres.md](docs/e2e-postgres.md)；通知权限、后台触发与真机 DST 仍需真机手动验证 |
 | 上架材料 | **已补齐**：`docs/store-listing.md`、`docs/privacy-policy.md`、`docs/app-privacy.md` 与 `codemagic/Resources/PrivacyInfo.xcprivacy`（未使用能力不声明） |
 
 ---
@@ -57,11 +57,22 @@
 - **指标阈值（v0.11.0）**：条件为「指标（温度 / 湿度 / 电量 / 心率 / CO₂）+ 比较符（`>` / `<` / `>=` / `<=`）+ 阈值 + 连续 N 条（1–5，默认 1）」，阈值与单位成对展示（`℃` / `%` / `bpm` / `ppm`）。判定接在 `ReadingsIngestor` 落库之后、复用同一 `RuleEvaluator` 与 `RuleAlertCoordinator`，不另起链路；命中写入「智能 → 最近触发」（触发值、阈值、时间、设备），恢复只在确实发过触发通知后补一条。
 - **推荐规则（v0.12.0）**：「智能 → 自动化」首段新增「推荐规则」入口。模板只根据该设备**真实出现过的指标**生成（温度 > 30℃、湿度 > 70%、电量 < 20%、心率 > 120、CO₂ > 1000ppm），不列出设备没有的指标；一键添加立即写入本地并出现在规则列表，复用 v0.11.0 的 `readingThreshold` 规则结构，不新建模型。无设备显示「还没有设备」+ 连接引导；有设备但无读数显示「连接到设备并采集到读数后可创建推荐规则」。
 - **阈值告警通知（v0.6.0 起）**：首次命中请求通知授权，命中发本地通知、恢复发「已恢复」；节流窗口 1 / 5 / 30 分钟（默认 5，同一设备同一规则只报一次）；点击通知进入设备详情。
-- **场景（v0.8.0，仅本机）**：见「场景」小节。
+- **场景（v0.21.0）**：服务端场景 + 仅本机手动场景，见下节。
 
-### 场景（v0.8.0，仅本机）
-- 场景是**真实可执行动作**的组合，只允许：连接指定设备、断开指定设备、开始后台采集、停止后台采集、静音告警 10 / 30 / 60 分钟、立即同步。
-- CRUD 存于 SQLite `scenarios` 表（迁移 v6），**不参与云同步**，界面明确标注「仅本机」；编辑页说明「场景仅保存在本机，不随账号同步」。
+### 场景（v0.21.0：服务端场景 + 仅本机手动场景）
+
+**服务端场景（v0.21.0）**
+- 数据源是 `GET /scenes`（本人全部场景，无分页）；`POST` / `GET` / `PUT` / `DELETE` 走服务端，跨用户与已软删统一 404。列表在「智能 → 场景」的「服务端场景」分区；本机新建 / 改名 / 停用先落 SQLite 并标「待同步」，联网后补传。
+- **触发条件**：`device_offline`（设备 + 离线秒数 60–86400）、`rssi_below`（设备 + 阈值 -100–0）、`metric_threshold`（设备 + 目录声明的设备类型与指标 + `lt/lte/gt/gte` + 阈值 + 连续 1–30 条）、`schedule`（`HH:MM` + IANA 时区 + 可选 `daysOfWeek`，1=周一）。
+- **动作**：1–4 个且种类不重复——`notify`（title / body）、`log`（message + `info|warn`）、`mark_device`（mark）。
+- **执行**：触发条件映射到本地 `RuleEngine` / `SceneEngine`（离线、RSSI、指标连续条数），到点执行通知 / 日志 / 标记并受 `cooldownSeconds` 限制；定时触发用 `SceneScheduleCalculator.nextFire` 按 IANA 时区与 ISO 星期计算，通知使用带 `timeZone` 的日历组件重复注册，跨 DST 由系统与计算器共同保证。
+- **占位符**：`notify` / `log` 文本支持 `{device}`、`{metric}`、`{value}`；缺失上下文替换为 `—`，未知占位符原样保留（见 `docs/consistency.md` 3.14）。
+- **deviceMissing**：场景引用的设备不存在时，列表行标注「设备已移除」，执行时跳过该场景并写一条失败日志（冷却窗口内不重复刷日志），不级联禁用或删除场景。
+- **同步与 LWW**：5 个字段各自保存 `updatedAt`，推送只发本地脏字段；服务端按字段比较时间戳，因此两端改不同字段都会保留。首次接入把本机已有 automation 场景逐条 `POST`，成功后写回 `remoteId` 与版本；无服务端幂等键，重试时先 `GET /scenes` 用内容签名认领孤儿场景，再决定 `POST` 还是 `PUT`。
+
+**仅本机手动场景（v0.8.0 保留）**
+- 手动场景是**真实可执行动作**的组合，只允许：连接指定设备、断开指定设备、开始后台采集、停止后台采集、静音告警 10 / 30 / 60 分钟、立即同步。
+- 存于同一 `scenarios` 表（`kind='manual'`，迁移 v14 后仍默认 `sync_state='localOnly'`），**不参与云同步**，界面明确标注「仅本机场景」；编辑页说明「场景仅保存在本机，不随账号同步」。该动作集合无法无损映射到服务端 3 类动作，因此不做静默改写或上传。
 - 一键执行按顺序逐个动作，任一动作失败**不阻断后续**，结束后汇总「成功 N / 失败 M」并逐条给出原因；执行中显示进度浮层（当前动作 + 已完成状态）。
 - 动作语义：连接前校验蓝牙权限与设备存在、已连接则返回失败原因；断开要求当前已连接；后台采集重复开启 / 未开启即停止均给出明确提示；静音校验 10/30/60 且告警未被关闭、未处于静音；同步复用现有 `SyncEngine` 并返回真实推送/拉取条数。
 
@@ -151,7 +162,7 @@ Config/
 scripts/
 ├── e2e-contract.sh         # 启动本地 fixture 服务 + 运行联调 runner（CI 的 e2e-contract job 复用）
 └── e2e-contract.swift      # 独立 Swift 可执行 runner，真实 URLSession 直连 localhost
-codemagicTests/             # 364 个 XCTest 用例（设计令牌审计 / 场景执行 / 迁移 v9 / 家庭与邀请码 / 黄金读数 / 图表几何 / 节流退避 / 通知 / 删除令牌与异步导出 / 接管码 / 后台推送 / 首启持久化与术语审计）
+codemagicTests/             # 402 个 XCTest 用例（设计令牌审计 / 场景执行 / 场景同步与 LWW / 定时 DST / 迁移 v14 / 家庭与邀请码 / 黄金读数 / 图表几何 / 节流退避 / 通知 / 删除令牌与异步导出 / 接管码 / 后台推送 / 首启持久化与术语审计）
 docs/
 ├── architecture.md
 ├── consistency.md
@@ -319,7 +330,7 @@ cd /path/to/codemagic
 
 数据库位置：`Application Support/com.platojobs.codemagic/codemagic.sqlite`。磁盘库失败时回退内存库，并在「我的」页提示。
 
-迁移：`PRAGMA user_version` 线性递增。v1 建五张表；**v2（v0.2.0）** 为 `saved_devices` 增加 `platform`（默认 `ios`）与 `external_id`，由 `peripheral_id` 大写回填，并建立 `(platform, external_id) WHERE deleted_at IS NULL` 唯一索引；**v3（v0.3.3）** 增加 `device_type TEXT`（可空，旧库升级后为 `NULL`，由云端详情回填）；**v4（v0.3.6）** 增加 `advertised_name TEXT`（由历史 `name` 回填广播名）与 `alias_patch` / `advertised_name_patch` / `group_patch`（`absent` / `clear` / `set` 三态）；**v5（v0.4.0）** 新增 `readings` 表（`id` 主键、`device_id`、`metric`、`value`、`unit`、`recorded_at`、`sync_state`），并按 `(device_id, metric, recorded_at DESC)` 建索引，支撑最近 60 点查询与 7 天清理；**v6（v0.8.0）** 新增本地 `scenarios` 表（`id` / `name` / `actions` JSON / `created_at` / `updated_at`），**不含 `sync_state` / `deleted_at` / `platform` / `external_id`，不参与同步**；**v8（v0.13.0）** 新增本地 `rooms` 表（`id` / `name` / `sort_order` / `remote_id` / `created_at` / `updated_at`）并为 `saved_devices` 增加可空 `room_id`（NULL = 未分配），原 `group_name` 保留为兼容字段；**v9（v0.14.0）** 新增 `households`（`id` / `remote_id` / `name` / `is_personal` / `role`）与 `device_assignment_pending`，`rooms` 启用 `remote_id` 并增加 `household_id` / `sync_state` / `deleted`（离线墓碑），`saved_devices` 增加 `household_id` / `remote_room_id` / `remote_household_id`；全部条件 ALTER，旧库升级后无需重装或清数据，房间与归属不丢。
+迁移：`PRAGMA user_version` 线性递增。v1 建五张表；**v2（v0.2.0）** 为 `saved_devices` 增加 `platform`（默认 `ios`）与 `external_id`，由 `peripheral_id` 大写回填，并建立 `(platform, external_id) WHERE deleted_at IS NULL` 唯一索引；**v3（v0.3.3）** 增加 `device_type TEXT`（可空，旧库升级后为 `NULL`，由云端详情回填）；**v4（v0.3.6）** 增加 `advertised_name TEXT`（由历史 `name` 回填广播名）与 `alias_patch` / `advertised_name_patch` / `group_patch`（`absent` / `clear` / `set` 三态）；**v5（v0.4.0）** 新增 `readings` 表（`id` 主键、`device_id`、`metric`、`value`、`unit`、`recorded_at`、`sync_state`），并按 `(device_id, metric, recorded_at DESC)` 建索引，支撑最近 60 点查询与 7 天清理；**v6（v0.8.0）** 新增本地 `scenarios` 表（`id` / `name` / `actions` JSON / `created_at` / `updated_at`），**不含 `sync_state` / `deleted_at` / `platform` / `external_id`，不参与同步**；**v8（v0.13.0）** 新增本地 `rooms` 表（`id` / `name` / `sort_order` / `remote_id` / `created_at` / `updated_at`）并为 `saved_devices` 增加可空 `room_id`（NULL = 未分配），原 `group_name` 保留为兼容字段；**v9（v0.14.0）** 新增 `households`（`id` / `remote_id` / `name` / `is_personal` / `role`）与 `device_assignment_pending`，`rooms` 启用 `remote_id` 并增加 `household_id` / `sync_state` / `deleted`（离线墓碑），`saved_devices` 增加 `household_id` / `remote_room_id` / `remote_household_id`；全部条件 ALTER，旧库升级后无需重装或清数据，房间与归属不丢；**v14（v0.21.0）** 为 `scenarios` 增加 `kind`（`manual` / `automation`）、`remote_id`、`version`、`enabled`、`cooldown_seconds`、`trigger`、`sync_state`、`deleted_at`、`device_missing`、`last_synced_at`、`last_run_at` 与 5 个字段级时间戳（`name/enabled/cooldown/trigger/actions_updated_at`），并按 `remote_id` 建唯一索引；旧行保留为 `kind='manual'`、`sync_state='localOnly'`，缺失 `scenarios` 表的旧库直接建完整表（`PRAGMA table_info` 判列，可重复执行）。
 
 ---
 
@@ -418,6 +429,16 @@ HTTP/1.1 410 Gone
 
 客户端口径：设备归属与 `sync/push` 解耦（避免 LWW 覆盖），失败进 `device_assignment_pending`；403 / 404 为终态并转为可读文案；删除家庭后服务端把设备回落到个人家庭并清空 `roomId`，客户端按下一轮拉取对齐。契约由 `scripts/e2e-contract.sh` 第 9 节覆盖。
 
+### 7.7 场景（v0.21.0，契约对齐 PJGoIoT v0.20.0 / openapi 0.16.0）
+
+| 接口 | 方法 | 说明 |
+| --- | --- | --- |
+| `/api/v1/scenes` | `GET` / `POST` | `GET` 一次返回本人全部场景 `{items}`，无分页；`POST` 201 返回完整场景（`id` / `version=1` / `deviceMissing`） |
+| `/api/v1/scenes/{id}` | `GET` / `PUT` / `DELETE` | `GET` 读取时实时计算 `deviceMissing`；`PUT` 200 返回完整场景，body 为 5 个字段各自 `{value, updatedAt}` 的子集，按字段 LWW（无字段应用时 version 不变）；`DELETE` 204 软删，tombstone 进 `change_log` |
+| `/api/v1/sync/changes` | `GET` | 新增 `entity=scene`：upsert 携带完整场景，delete 携带 `deletedAt`；未知 entity 仍忽略且游标推进 |
+
+约束：跨用户与已软删统一 404；创建时引用的设备必须属于本人且存在（否则 400 `SCENE_DEVICE_NOT_FOUND`），设备被删后场景保留并在读取时返回 `deviceMissing=true`；触发条件 4 种、动作 1–4 个且种类不重复；无服务端幂等键，客户端以 `GET /scenes` + 内容签名认领孤儿场景后再决定 `POST` / `PUT`。占位符口径见 `docs/consistency.md` 3.19，定时计算与 DST 见 `docs/consistency.md` 3.19。契约由 `scripts/e2e-contract.sh` 第 11 节覆盖（414 项全 PASS，后端 v0.20.0 干净 worktree）。
+
 ---
 
 ## 8. 持续集成
@@ -476,8 +497,10 @@ HTTP/1.1 410 Gone
 
 - 模拟器无真实蓝牙，状态为 `unsupported`；产品 / 市场 / 详情依赖网络，需运行包含 readings 链路的本地 Go 服务或已更新的 mock。
 - 已实现 GATT 服务发现与四个读数特征的 notify 订阅；**未实现特征写入 / OTA**，GATT 元数据仍来自 catalog。
-- 契约已用本地 fixture 服务端到端验证（299 项断言 PASS，后端 `PJGoIoT` v0.15.0 / openapi 0.11.0，含家庭 v0.12.0 / v0.13.0 / v0.14.0 / v0.15.0 链路）；同一套件在本地真实 Postgres 栈重跑同样 299 项 PASS，并直接 `psql` 校验邀请码只存哈希、成员行清理、转让后 `owner_user_id`、删房后 `household_rooms`、`change_log` 结构实体；410 / series / metrics / export / 注销亦由 `scripts/e2e-postgres.sh` 跑通（不进 CI）。App 内的 Keychain token、BGTask 调度、后台 BLE 采集与真实网络环境仍需真机验证。
-- 后端 `PJGoIoT` 已打 tag **v0.15.0**（`isSelf` / 所有权转让 / 家庭与房间结构变更进 `change_log`，openapi 0.11.0；v0.13.0 起成员移除 / 退出 / 邀请码列表与撤销 / 房间整段排序）；iOS 按该契约实现。CI 显式 checkout 后端 tag `v0.15.0`（`ref: v0.15.0`），299 项 E2E 全 PASS；若 checkout 到旧后端，e2e 相关分支会明确 SKIP。
+- 契约已用本地 fixture 服务端到端验证（414 项断言 PASS，后端 `PJGoIoT` v0.20.0 / openapi 0.16.0，含家庭 v0.12.0–v0.15.0、账号删除 / 导出 v0.19.0、场景 CRUD / 字段级 LWW / `deviceMissing` v0.20.0 链路）；同一套件在本地真实 Postgres 栈重跑同样 PASS，并直接 `psql` 校验邀请码只存哈希、成员行清理、转让后 `owner_user_id`、删房后 `household_rooms`、`change_log` 结构实体；410 / series / metrics / export / 注销亦由 `scripts/e2e-postgres.sh` 跑通（不进 CI）。App 内的 Keychain token、BGTask 调度、后台 BLE 采集与真实网络环境仍需真机验证。
+- 后端 `PJGoIoT` 已打 tag **v0.20.0**（服务端场景 CRUD / 字段级 LWW / `deviceMissing` / `scene` change_log，openapi 0.16.0；v0.19.0 两步删除令牌与异步导出；v0.15.0 起家庭与房间结构变更进 `change_log`）；iOS 按该契约实现。CI 显式 checkout 后端 tag `v0.20.0`（`ref: v0.20.0`），414 项 E2E 全 PASS；若 checkout 到旧后端，e2e 相关分支会明确 SKIP。
+- [ ] 真机：场景本地通知的权限申请 / 拒绝降级、点击通知跳转，以及跨 DST（春季跳过 / 秋季重复）与多时区的长期触发准确性。
+- [ ] 真机 + 真实后端：断网编辑场景后恢复网络的 pending 补传、字段级 LWW 在两端时钟偏移下的实际表现、设备删除后的「设备已移除」与执行跳过日志。
 - [ ] 真机 + 两个真实账号：创建家庭 / 邀请码领取 / 成员共享 / member 403 / 跨家庭 404 的界面表现（服务端契约已由 E2E 覆盖，App 端需实际走查）。
 - [ ] 真机：家庭切换后的首页 / 房间管理刷新、邀请码倒计时与复制、离线房间「未同步」标注。
 - [ ] 真机 + 两个真实账号：成员行「转让所有权 / 移除成员」的互斥与本人行隐藏、二次确认文案、转让后角色与入口即时更新、403 / 404 / 409 提示与刷新。
@@ -490,6 +513,7 @@ HTTP/1.1 410 Gone
 
 ## 10. 版本记录
 
+- `v0.21.0`：场景接入服务端（`MARKETING_VERSION 0.21.0` / build 29，tag `v0.21.0`）。`GET /scenes` 作为基线，`POST` / `GET` / `PUT`（`name` / `enabled` / `cooldownSeconds` / `trigger` / `actions` 五字段 LWW）/ `DELETE`（204 软删）接入；`change_log` 的 `scene` 实体走现有 upsert / delete，未知 entity 仍忽略并推进游标。SQLite 迁移 **v14** 为 `scenarios` 增加 `kind` / `remote_id` / `version` / 字段级时间戳 / `sync_state` / `deleted_at` / `device_missing` 等列，旧手动场景保留为「仅本机」；首次接入逐条上传并写回 `remoteId`，离线编辑 pending 补传，重试先查基线认领孤儿避免重复创建。服务端场景由本地引擎执行：离线 / RSSI / 指标连续条数映射现有判定，定时按 IANA 时区与 ISO `daysOfWeek` 计算下一次触发（含跨 DST），通知文本支持 `{device}` / `{metric}` / `{value}`。`deviceMissing` 在列表标注「设备已移除」，执行时跳过并写失败日志。新增单测 38 个（共 **402** 个，0 失败），E2E **414** 项全 PASS（fixture，后端 v0.20.0 干净 worktree）；后端 `PJGoIoT` v0.20.0（openapi 0.16.0）。
 - `v0.20.0`：账号删除两步令牌 + 异步数据导出（`MARKETING_VERSION 0.20.0` / build 28，tag `v0.20.0`）。「我的」新增独立「账号与数据」区域：**导出**改为 `POST /me/export`（202 异步任务）→ 轮询 `GET /me/export/{id}`（2.5s 起 ×1.4 封顶 5s）→ ready 后一次性链接下载（无 Bearer）→ 临时文件 + `UIActivityViewController`，分享关闭即删；410 自动重新查询任务换新链接并提示，只自动重试一次。**删除**改为 `POST /me/deletion-request` 取得 10 分钟一次性令牌 → 二次确认（写明设备 / 读数 / 场景 / 家庭关系 / 反馈永久删除）→ `DELETE /me` 仅带 `X-Deletion-Token`；409 如实提示「请先转让所有权或移除成员」并给家庭页入口与同一令牌重试，403 提示重新申请，404 视为已删除，网络失败保留可重试状态。成功后断 BLE → 清 Keychain → 清 9 张业务表（含 v13 `device_catalog_cache`、`feedback_drafts`、`scenarios`）→ 清同步元数据 / `URLCache` / 导出临时文件 → `.accountDeleted` 通知重建五个 Tab，重启不复活。新增单测 8 个（共 **364** 个，0 失败），E2E **367** 项全 PASS（fixture，后端 v0.19.0 干净 worktree）；后端 `PJGoIoT` v0.19.0（openapi 0.15.0）。
 - `v0.15.0`：家庭管理补齐 —— 成员移除 / 退出 / 邀请码管理 / 房间整段排序与真实计数（`MARKETING_VERSION 0.15.0` / build 23，tag `v0.15.0`）。SQLite 迁移 **v10** 为 `households` 条件补 `room_count`，`memberCount` / `deviceCount` / `roomCount` 全部来自 `GET /households`，不再本地计数。新增后端 v0.13.0（openapi 0.9.0）接口：`DELETE /households/{id}/members/{userId}`（owner 移除成员 204，对方访问家庭 404、设备回个人家庭、房间清空）；`POST /households/{id}/leave`（204，owner 还有其他成员时 409，界面与服务端统一为「请先转让所有权或移除其他成员」，**机读判断只看状态与端点，不解析 message**）；`GET /households/{id}/invitations`（只含 `codeHashPrefix` / `status` / `attempts` / `expiresAt`，模型无 `code` 字段，绝不显示明文）与 `DELETE .../invitations/{invitationId}`（撤销后 claim 404）；`PUT /households/{id}/rooms/order`（整段提交，缺项 / 多项 / 重复 409，客户端自动重新 GET 并提示「房间列表已变化，已刷新」；v0.13.0 返回 `CONFLICT`、后续版本 `ROOM_SET_MISMATCH`，两者都识别）。家庭管理 UI 增加成员左滑 / 点击移除（二次确认说明设备回落）、退出家庭、邀请码列表 + 撤销、owner 改名；owner / member 入口按角色裁剪（member 看不到签发 / 撤销邀请码、移除成员、改家庭名）。房间管理新增「排序」拖拽模式与左滑上移 / 下移，本地未同步房间不参与整段提交。退出 / 被移除后本地设备回落个人家庭、房间脱钩保留并标「未同步」。新增单测 10 个（共 **303** 个，0 失败），E2E **260** 项全 PASS（fixture，后端 v0.13.0）；真 Postgres 同契约 + 直接查库（邀请码只存 64 位哈希、移除后成员行删除、退出清理）。
 - `v0.14.0`：家庭接入后端 —— 家庭归属、成员共享与房间服务端化（`MARKETING_VERSION 0.14.0` / build 22，tag `v0.14.0`）。SQLite 迁移 **v9** 新增 `households`（`id` 复用远端 UUID / `remote_id` / `name` / `is_personal` / `role`）与 `device_assignment_pending`；`rooms.remote_id` 真正启用并增加 `household_id` / `sync_state` / `deleted`；`saved_devices` 增加 `household_id` / `remote_room_id` / `remote_household_id`，条件 ALTER，旧库不丢房间与归属。登录后 `GET /households` 落库并持久化当前家庭，切换家庭按该家庭拉设备与房间；首次接入把本机未归属房间按 `sort_order` 推服务端，服务端同名房间**认领**本地房间而非重复创建，失败保留 `pending` 重试，**不静默丢弃**；服务端已删除家庭的房间脱钩保留、不自动搬入其他家庭。设备归属独立走 `PATCH /my/devices/{platform}/{externalId}` 三态（缺失 / 空串 / 非空），不塞进 push，失败进 pending 队列。新增「我的 → 家庭管理」（当前家庭与角色、成员列表、创建家庭、8 位一次性邀请码 + 服务端倒计时 / 复制 / 过期重生成、输入码加入）、首页多家庭切换、member 只读与 403 可读降级、跨家庭 404、离线「未同步」标注。新增单测 9 个（共 **293** 个，0 失败），E2E **224** 项全 PASS（新增家庭链路）。后端 `PJGoIoT` v0.12.0（openapi 0.8.0）。

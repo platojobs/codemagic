@@ -43,6 +43,8 @@ final class HomeViewModel {
     private let settingsStore: SettingsStore
     private let ruleEvaluator: RuleEvaluator
     private let ruleAlertCoordinator: RuleAlertCoordinator?
+    /// 服务端场景执行引擎（离线 / RSSI 条件）。
+    private let sceneEngine: SceneEngine?
     /// 超过该时长未再次出现的设备视为已离开扫描范围，用于触发「断开」规则。
     private let staleInterval: TimeInterval
 
@@ -64,6 +66,7 @@ final class HomeViewModel {
         settingsStore: SettingsStore,
         ruleEvaluator: RuleEvaluator,
         ruleAlertCoordinator: RuleAlertCoordinator? = nil,
+        sceneEngine: SceneEngine? = nil,
         staleInterval: TimeInterval = 10
     ) {
         self.bluetooth = bluetooth
@@ -74,6 +77,7 @@ final class HomeViewModel {
         self.settingsStore = settingsStore
         self.ruleEvaluator = ruleEvaluator
         self.ruleAlertCoordinator = ruleAlertCoordinator
+        self.sceneEngine = sceneEngine
         self.staleInterval = staleInterval
     }
 
@@ -282,6 +286,8 @@ final class HomeViewModel {
 
     private func evaluateRules(referenceDate: Date) {
         let observed = liveDevices.mapValues { $0.rssi }
+        // 服务端场景与本地规则共用同一次扫描快照；场景不依赖本地规则是否为空。
+        sceneEngine?.evaluateScans(observedRSSI: observed, at: referenceDate)
         let events = ruleEvaluator.evaluate(
             rules: rules,
             devices: savedDevices,

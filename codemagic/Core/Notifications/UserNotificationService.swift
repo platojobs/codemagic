@@ -3,10 +3,12 @@ import UserNotifications
 /// 基于 `UNUserNotificationCenter` 的本地通知实现。
 ///
 /// 通知只用于阈值告警与恢复提示；点击通知携带 `deviceID`，由 SceneDelegate 路由到设备详情。
-final class UserNotificationService: LocalNotificationServing {
+final class UserNotificationService: LocalNotificationServing, SceneNotificationServing {
     static let shared = UserNotificationService()
 
     static let deviceIDKey = "codemagic.deviceID"
+    static let sceneIDKey = SceneNotificationKeys.sceneID
+    static let sceneIdentifierPrefix = "scene-"
 
     private let center: UNUserNotificationCenter
 
@@ -56,5 +58,44 @@ final class UserNotificationService: LocalNotificationServing {
         ].joined(separator: "-")
         let request = UNNotificationRequest(identifier: identifier, content: content, trigger: nil)
         center.add(request, withCompletionHandler: completion)
+    }
+
+    // MARK: - Scene
+
+    func scheduleScene(_ request: SceneNotificationRequest, completion: ((Error?) -> Void)? = nil) {
+        let content = UNMutableNotificationContent()
+        content.title = request.title
+        content.body = request.body
+        content.sound = .default
+        content.userInfo = request.userInfo
+
+        let trigger: UNNotificationTrigger?
+        if let components = request.repeatComponents {
+            trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: true)
+        } else if let fireDate = request.fireDate {
+            trigger = UNTimeIntervalNotificationTrigger(
+                timeInterval: max(fireDate.timeIntervalSinceNow, 1),
+                repeats: false
+            )
+        } else {
+            trigger = nil
+        }
+        let notification = UNNotificationRequest(
+            identifier: request.identifier,
+            content: content,
+            trigger: trigger
+        )
+        center.add(notification, withCompletionHandler: completion)
+    }
+
+    func cancelSceneNotifications(completion: (() -> Void)? = nil) {
+        center.getPendingNotificationRequests { [weak self] requests in
+            guard let self else { return }
+            let identifiers = requests
+                .map(\.identifier)
+                .filter { $0.hasPrefix(Self.sceneIdentifierPrefix) }
+            self.center.removePendingNotificationRequests(withIdentifiers: identifiers)
+            DispatchQueue.main.async { completion?() }
+        }
     }
 }

@@ -9,12 +9,15 @@ enum SyncState: String, Codable, CaseIterable {
     case synced
     /// 本地删除，等待同步删除操作。
     case pendingDelete
+    /// 仅存在本机、不参与云端同步（例如旧版本留下的手动场景）。
+    case localOnly
 
     var title: String {
         switch self {
         case .pending: return L10n.t("sync.state.pending")
         case .synced: return L10n.t("sync.state.synced")
         case .pendingDelete: return L10n.t("sync.state.pendingDelete")
+        case .localOnly: return L10n.t("sync.state.localOnly")
         }
     }
 }

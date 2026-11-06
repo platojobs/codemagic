@@ -82,6 +82,127 @@ final class ScenarioCell: UITableViewCell {
     }
 }
 
+/// 服务端场景行：触发条件、状态、设备缺失标注与启停开关。
+final class SceneAutomationCell: UITableViewCell {
+    static let reuseIdentifier = "SceneAutomationCell"
+
+    private let container = UIView()
+    private let nameLabel = UILabel()
+    private let triggerLabel = UILabel()
+    private let detailLabel = UILabel()
+    private let syncChip = StatusChipView(text: "", kind: .neutral)
+    private let missingChip = StatusChipView(text: L10n.t("scene.deviceMissing"), kind: .danger)
+    private let toggle = UISwitch()
+    private var onToggle: ((Bool) -> Void)?
+
+    override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
+        super.init(style: style, reuseIdentifier: reuseIdentifier)
+        selectionStyle = .default
+        backgroundColor = .clear
+        contentView.backgroundColor = .clear
+        let selected = UIView()
+        selected.backgroundColor = Palette.overlayPressed
+        selected.layer.cornerRadius = Radius.card
+        selectedBackgroundView = selected
+
+        container.styleAsCardSurface()
+        container.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(container)
+        NSLayoutConstraint.activate([
+            container.topAnchor.constraint(equalTo: contentView.topAnchor, constant: Layout.space4),
+            container.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: Layout.pageMargin),
+            container.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -Layout.pageMargin),
+            container.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -Layout.space4),
+        ])
+
+        nameLabel.applyFont(AppText.body.font(weight: .semibold))
+        nameLabel.textColor = Palette.textPrimary
+        nameLabel.numberOfLines = 1
+
+        triggerLabel.applyFont(AppText.caption.font())
+        triggerLabel.textColor = Palette.textSecondary
+        triggerLabel.numberOfLines = 2
+
+        detailLabel.applyFont(AppText.footnote.font())
+        detailLabel.textColor = Palette.textTertiary
+        detailLabel.numberOfLines = 2
+
+        toggle.addTarget(self, action: #selector(toggleChanged), for: .valueChanged)
+        toggle.accessibilityLabel = L10n.t("scene.cell.toggleA11y")
+        toggle.translatesAutoresizingMaskIntoConstraints = false
+        toggle.widthAnchor.constraint(equalToConstant: Layout.buttonH).isActive = true
+
+        let chips = UIStackView(arrangedSubviews: [syncChip, missingChip])
+        chips.axis = .horizontal
+        chips.spacing = Layout.space4
+        chips.alignment = .center
+
+        let titleRow = UIStackView(arrangedSubviews: [nameLabel, chips])
+        titleRow.axis = .horizontal
+        titleRow.spacing = Layout.space8
+        titleRow.alignment = .center
+
+        let text = UIStackView(arrangedSubviews: [titleRow, triggerLabel, detailLabel])
+        text.axis = .vertical
+        text.spacing = Layout.space4
+
+        let stack = UIStackView(arrangedSubviews: [text, toggle])
+        stack.axis = .horizontal
+        stack.spacing = Layout.space12
+        stack.alignment = .center
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: container.topAnchor, constant: Layout.space12),
+            stack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: Layout.space16),
+            stack.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -Layout.space16),
+            stack.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -Layout.space12),
+            container.heightAnchor.constraint(greaterThanOrEqualToConstant: Layout.buttonH),
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    func configure(
+        scene: Scene,
+        deviceMissing: Bool,
+        deviceName: String?,
+        nextFire: String?,
+        onToggle: @escaping (Bool) -> Void
+    ) {
+        nameLabel.text = scene.name
+        triggerLabel.text = scene.trigger.title
+        var details: [String] = [scene.actionSummary]
+        if let deviceName {
+            details.append(L10n.f("scene.cell.device", deviceName))
+        }
+        if let nextFire {
+            details.append(L10n.f("scene.cell.nextFire", nextFire))
+        }
+        detailLabel.text = details.joined(separator: L10n.t("common.semicolonSeparator"))
+        missingChip.isHidden = !deviceMissing
+        let pending = scene.syncState == .pending || scene.syncState == .pendingDelete
+        syncChip.isHidden = !pending && scene.remoteID != nil
+        syncChip.set(text: pending ? L10n.t("scene.sync.pending") : L10n.t("scene.sync.synced"), kind: pending ? .warning : .success)
+        toggle.isOn = scene.enabled
+        toggle.isEnabled = !deviceMissing
+        self.onToggle = onToggle
+        accessibilityLabel = L10n.f(
+            "scene.cell.a11y",
+            scene.name,
+            scene.trigger.title,
+            deviceMissing ? L10n.t("scene.deviceMissing") : L10n.f("scene.cell.enabledState", scene.enabled ? L10n.t("common.on") : L10n.t("common.off"))
+        )
+    }
+
+    @objc private func toggleChanged() {
+        onToggle?(toggle.isOn)
+    }
+}
+
 /// 最近触发行：规则名称、设备与相对时间。
 final class TriggerCell: UITableViewCell {
     static let reuseIdentifier = "TriggerCell"

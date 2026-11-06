@@ -186,7 +186,7 @@ final class PersistenceTests: XCTestCase {
         )
         XCTAssertEqual(events.count, 1)
         XCTAssertTrue(events[0].message.contains("-80 dBm"))
-        XCTAssertEqual(try migrated.query("PRAGMA user_version;").first?.integer("user_version"), 13)
+        XCTAssertEqual(try migrated.query("PRAGMA user_version;").first?.integer("user_version"), 14)
     }
 
     func testRecentDevicesSortedByLastSeen() throws {
@@ -266,7 +266,7 @@ final class PersistenceTests: XCTestCase {
         XCTAssertEqual(loaded.syncKey, "android:\(externalID)")
 
         let version = try testDatabase.database.query("PRAGMA user_version;").first?.integer("user_version")
-        XCTAssertEqual(version, 13)
+        XCTAssertEqual(version, 14)
     }
 
     func testDeviceTypeColumnRoundTrip() throws {
@@ -336,7 +336,7 @@ final class PersistenceTests: XCTestCase {
         XCTAssertEqual(device.groupPatch, .absent)
 
         let version = try migrated.query("PRAGMA user_version;").first?.integer("user_version")
-        XCTAssertEqual(version, 13)
+        XCTAssertEqual(version, 14)
     }
 
     func testAdvertisedNameAndPatchStatesRoundTrip() throws {

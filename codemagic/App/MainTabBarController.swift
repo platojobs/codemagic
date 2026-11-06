@@ -67,7 +67,12 @@ final class MainTabBarController: UITabBarController {
                     savedDeviceStore: environment.savedDeviceStore,
                     scanLogStore: environment.scanLogStore,
                     scenarioStore: environment.scenarioStore,
-                    executor: environment.scenarioExecutor
+                    sceneStore: environment.sceneStore,
+                    sceneScheduler: environment.sceneScheduler,
+                    executor: environment.scenarioExecutor,
+                    requestSync: { [weak environment] in
+                        environment?.syncEngine.sync(completion: nil)
+                    }
                 ),
                 environment: environment
             ),

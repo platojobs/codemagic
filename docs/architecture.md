@@ -44,7 +44,7 @@ codemagic/
 Config/
 ├── Debug.xcconfig              # BASE_URL → 本地 Go 服务
 └── Release.xcconfig            # BASE_URL → 线上（当前为与 Android 共用的 mock）
-codemagicTests/                 # XCTest 单元测试（364 个用例）
+codemagicTests/                 # XCTest 单元测试（402 个用例）
 scripts/                        # e2e-contract.sh + 独立 Swift 联调 runner（CI 的 e2e-contract job 复用）
 docs/
 ├── architecture.md             # 本文件
@@ -177,6 +177,29 @@ SyncEngine
 - 本地清理顺序先断 BLE，再单事务清业务表，避免清理后 notify 继续写回读数；`.accountDeleted` 通知让 `MainTabBarController` 重建五个 Tab，清除内存中的旧设备与读数。
 - 导出轮询采用退避而非每秒请求；`AccountExportService.cancel()` 用 generation 标记让旧回调失效，避免取消后仍弹分享。
 
+### 6.3 场景同步与执行（v0.21.0）
+
+```
+SyncEngine.runSync
+  ├─ prepareScenes：GET /scenes 基线 → 逐条 applyRemote；基线缺失的已同步场景软删
+  ├─ pull：change_log 的 entity=scene → SceneSyncService.apply（upsert / delete tombstone）
+  ├─ pushScenes：SceneStore.fetchPending 串行
+  │    ├─ pendingDelete + remoteId → DELETE /scenes/{id}
+  │    ├─ remoteId 为空 →（必要时先 GET /scenes 按内容签名认领孤儿）→ POST /scenes
+  │    └─ remoteId 非空 → PUT 只含脏字段（5 字段各自 {value, updatedAt}）
+  └─ 场景数累加进同步结果；失败保留 pending，不阻断设备主链路
+```
+
+- **本地表**：`scenarios` 用 `kind` 区分 `manual`（v0.8.0 手动动作组，不上传）与 `automation`（服务端场景）；`remoteId` / `version` / `syncState` / `deletedAt` / `deviceMissing` / 5 个字段级时间戳由 `SceneStore` 单点维护。
+- **LWW**：保存时只推进被编辑字段的 `updatedAt`；推送只发 `fieldUpdatedAt > lastSyncedAt` 的字段；拉取 pending 场景时脏字段保留本地、其余采用远端，非脏字段时间戳回落到旧同步基线，避免时钟超前导致反复推送。
+- **幂等**：服务端无幂等键；`remoteId` 为空时先拉基线，用 `name/enabled/cooldown/trigger/actions` 排序 JSON 的内容签名唯一匹配并认领，再决定 `POST` 还是 `PUT`。
+- **执行**：`SceneEngine` 复用 `SavedDeviceStore` / `ScanLogStore` / `ReadingsIngestor`：
+  - `evaluateScans` 处理 `device_offline` / `rssi_below`（状态机避免重复触发），`evaluateReadings` 处理 `metric_threshold` 的连续条数；
+  - `fire` 统一检查 `enabled` / 软删 / 冷却，执行 `notify`（本地通知）/ `log`（扫描日志）/ `mark_device`（标记日志），最后写 `lastRunAt`；
+  - 设备按 `(platform, externalId)` 解析，找不到即 `deviceMissing`：列表标注、执行跳过并写失败日志，不级联禁用。
+- **定时**：`SceneScheduleCalculator` 用 IANA `timeZone` + `Calendar.nextDate(.nextTime, .first)` 计算下一次触发（ISO 星期映射到 Calendar weekday），`SceneScheduler` 以带 `timeZone` 的重复日历组件注册通知，跨 DST 不漂移。
+- **占位符**：`SceneTemplate.render` 在提交通知 / 日志前替换 `{device}` / `{metric}` / `{value}`，缺失为 `—`，未知原样保留。
+
 ## 7. 持久化（SQLite）
 
 选型理由：同步字段（`id / updatedAt / deletedAt / syncState`）需要逐列控制；schema 以 SQL 明示，便于与 Android Room 表逐列对照；不依赖 `.xcdatamodeld` 编辑器，CI 与代码评审都更直接。
@@ -184,7 +207,7 @@ SyncEngine
 - 数据库文件：`Application Support/com.platojobs.codemagic/codemagic.sqlite`。
 - 打开参数：`READWRITE | CREATE | FULLMUTEX`；迁移使用 `PRAGMA user_version`，多语句脚本用 `sqlite3_exec`。
 - 所有读写串行在一个专用队列；软删除保留行以便后续同步。
-- 迁移版本：v1 建五张表；v2（v0.2.0）给 `saved_devices` 增加 `platform` / `external_id`，并由 `peripheral_id` 大写回填；v3（v0.3.3）增加 `device_type TEXT`（可空，供 `PushDevice` 使用）；**v4（v0.3.6）** 增加 `advertised_name TEXT`（由历史 `name` 回填广播名）与 `alias_patch` / `advertised_name_patch` / `group_patch`（`absent` / `clear` / `set`），后者在 `markSynced` 成功后归零。
+- 迁移版本：v1 建五张表；v2（v0.2.0）给 `saved_devices` 增加 `platform` / `external_id`，并由 `peripheral_id` 大写回填；v3（v0.3.3）增加 `device_type TEXT`（可空，供 `PushDevice` 使用）；**v4（v0.3.6）** 增加 `advertised_name TEXT`（由历史 `name` 回填广播名）与 `alias_patch` / `advertised_name_patch` / `group_patch`（`absent` / `clear` / `set`），后者在 `markSynced` 成功后归零；**v14（v0.21.0）** 给 `scenarios` 增加 `kind` / `remote_id` / `version` / `enabled` / `cooldown_seconds` / `trigger` / `sync_state` / `deleted_at` / `device_missing` / `last_synced_at` / `last_run_at` 与 5 个字段级时间戳，`PRAGMA table_info` 判列后条件 ALTER，缺失该表的旧库直接建完整表；旧行保持 `kind='manual'`、`sync_state='localOnly'`。
 - 名称语义：`advertised_name` 由扫描写入，`remark`（用户别名）由编辑写入，互不覆盖；展示名回落顺序 alias → advertisedName → deviceType。`PushDevice` 用 `Patch<String>` 三态编码，absent 省略键、clear 编 `""`；幂等键取规范化 JSON，absent 字段不参与哈希。
 - 5 张表：`saved_devices`、`rules`、`scan_logs`、`recent_devices`、`device_info_cache`。
 - 磁盘库打开失败时回退 `:memory:`，应用仍可启动，「我的」页显示 `DB-001` 启动提示。

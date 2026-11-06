@@ -171,7 +171,7 @@ final class SupportTests: XCTestCase {
         )
         XCTAssertEqual(
             try migrated.query("PRAGMA user_version;").first?.integer("user_version"),
-            13
+            14
         )
         let store = FeedbackStore(database: migrated)
         let legacy = try XCTUnwrap(store.fetch(id: "legacy-id"))
@@ -186,7 +186,7 @@ final class SupportTests: XCTestCase {
         defer { reopened.close() }
         XCTAssertEqual(
             try reopened.query("PRAGMA user_version;").first?.integer("user_version"),
-            13
+            14
         )
         XCTAssertEqual(try FeedbackStore(database: reopened).count(), 1)
     }

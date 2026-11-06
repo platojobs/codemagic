@@ -4,6 +4,7 @@
 
 | Tag | MARKETING_VERSION | Build | 日期 | 对齐后端 |
 | --- | --- | --- | --- | --- |
+| `v0.21.0` | 0.21.0 | 29 | 2026-11-06 | PJGoIoT v0.20.0（openapi 0.16.0；服务端场景 CRUD / 字段级 LWW / `deviceMissing` / `scene` change_log） |
 | `v0.20.0` | 0.20.0 | 28 | 2026-11-06 | PJGoIoT v0.19.0（openapi 0.15.0；两步删除令牌、异步导出任务与一次性下载链接） |
 | `v0.19.0` | 0.19.0 | 27 | 2026-11-06 | PJGoIoT v0.18.0（openapi 0.14.0；`GET /catalog/device-types` 成为设备类型目录唯一事实源，条件请求 / 304 / 离线缓存） |
 | `v0.18.0` | 0.18.0 | 26 | 2026-11-06 | PJGoIoT v0.16.0（openapi 0.12.0；`POST /feedback` / `GET /feedback/mine` 真链路、幂等与限流） |
@@ -31,6 +32,27 @@
 | `v0.3.0` | 0.3.0 | 4 | 2026-11-05 | 0.3.0 |
 | `v0.2.0` | 0.2.0 | 3 | 2026-11-05 | 0.2.0 |
 | `v0.1.0` | — | 1 | 2026-11-05 | — |
+
+---
+
+## v0.21.0（build 29）
+
+**主题：场景接入服务端 —— 自动化配置跨设备同步，同时由本地引擎真实执行**
+
+- **契约（PJGoIoT v0.20.0 / openapi 0.16.0）**：
+  - `GET /scenes` 一次返回本人全部场景（`{items}`，无分页）；`POST /scenes` 201；`GET / PUT / DELETE /scenes/{id}` 200 / 200 / 204（软删）。
+  - `PUT` 为字段级 LWW：body 只包含要改的字段，每个字段 `{value, updatedAt}`；粒度是 `name` / `enabled` / `cooldownSeconds` / `trigger` / `actions` 五个字段。
+  - 跨用户与已软删统一 404；创建时引用的设备必须属于本人且存在（`SCENE_DEVICE_NOT_FOUND`）；读取时实时返回 `deviceMissing`，设备删除不级联删场景。
+  - `change_log` 新增 `entity=scene`：upsert 携带完整场景，delete 携带 `deletedAt`；未知 entity 仍忽略并推进游标。
+- **本地存储（迁移 v14）**：`scenarios` 增加 `kind`（`manual` / `automation`）、`remote_id`（唯一索引）、`version`、`enabled`、`cooldown_seconds`、`trigger`、`sync_state`（`localOnly / pending / synced / pendingDelete`）、`deleted_at`、`device_missing`、`last_synced_at`、`last_run_at` 及 5 个字段级时间戳；`PRAGMA table_info` 判列 + 条件 ALTER，缺失表的旧库直接建完整表。v0.8.0 的手动场景保留为 `kind='manual'`、`sync_state='localOnly'`，不上传、不静默丢失。
+- **首次接入与离线**：本机已有 automation 场景逐条 `POST`，成功后写回 `remoteId` 与版本；首次上传前 `GET /scenes` 做基线，重试时按内容签名唯一认领之前响应丢失的孤儿场景，避免重复创建（服务端无幂等键）。断网时新建 / 改名 / 停用 / 删除先落本地 pending，联网后串行补传；已上传场景删除为 `pendingDelete` 并 `DELETE`，`PUT` 404 视为远端已删直接收敛。
+- **字段级 LWW**：本地保存时只推进被编辑字段的时间戳；拉取时若本地 pending，脏字段保留本地、非脏字段采用远端值，非脏字段时间戳回落到旧同步基线，避免服务端时钟超前造成反复推送。因此「两端改不同字段」都会保留。
+- **执行引擎**：服务端场景接入现有 `RuleEngine` / `ReadingsIngestor`——`device_offline`、`rssi_below`、`metric_threshold`（含 1–30 连续条数）复用现有判定与冷却；`notify` 走本地通知、`log` 写扫描日志、`mark_device` 写标记日志。`deviceMissing` 场景执行时跳过并记一条失败日志（冷却窗口内不重复），不静默失效。
+- **定时与 DST**：`SceneScheduleCalculator` 用 IANA `timezone` 与 ISO `daysOfWeek`（1=周一）计算下一次触发；春季不存在的本地时间顺延、秋季重复时间取第一次；通知按星期注册带 `timeZone` 的重复日历组件，不按 86400 秒漂移。
+- **占位符**：`notify` / `log` 文本支持 `{device}` / `{metric}` / `{value}`；缺失上下文替换 `—`，未知占位符原样保留（约定见 `docs/consistency.md` 3.19）。
+- **UI**：「智能 → 场景」分为「服务端场景」与「仅本机场景」；场景行显示触发条件、动作 / 设备、下次触发、待同步 / 已同步状态，设备缺失标注「设备已移除」；编辑器支持 4 类触发条件、冷却与 1–4 个不重复动作。UIKit 纯代码、iOS 15、中英双语、`UIFontMetrics`、48pt 触达、`accessibilityLabel`、仅 `DesignTokens`。
+- 单测 **402 个，0 失败**（新增 38 个：首次全量上传与写回 remoteId、orphan 认领、LWW 两端不同字段都保留、离线 pending 补传、软删同步与 change_log tombstone、基线缺失、deviceMissing 跳过 + 失败日志 + 标记刷新、RSSI / 指标连续条数 / 冷却、定时下一次触发含跨 DST、占位符渲染、SQLite v14 迁移与旧数据保留）。E2E fixture **414 项全 PASS**（后端 v0.20.0 干净 worktree：场景 CRUD、字段级 LWW、跨用户 404、非法触发 / 重复动作 400、设备删除后的 `deviceMissing`、软删后 GET/PUT 404、`change_log` upsert + tombstone）。
+- **CI**：tag `v0.21.0` 与 `main` 运行结果待回填。
 
 ---
 

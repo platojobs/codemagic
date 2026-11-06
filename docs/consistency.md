@@ -512,6 +512,30 @@ iOS 用例固化在 `codemagicTests/ReadingsGoldenTests.swift`；新增特征或
 - **离线**：保留本机房间与设备，房间 `local / pending` 与设备 pending 归属在首页与房间管理标注「未同步」；恢复网络后由 `prepareForSync` 补报，不丢数据。
 - **契约**：openapi 0.9.0（后端 v0.13.0）；E2E 第 9 节覆盖创建家庭 → 邀请码 → 领取 → 成员可见设备 → member 403 → 跨家庭 404 → 归属三态 → 删除家庭级联，以及 v0.15.0 的成员移除 404、owner 退出 409→移除后可退出、邀请码列表无明文 / 撤销后 404、整段重排成功与 409。
 
+### 3.18 服务端场景（v0.21.0，openapi 0.16.0）
+
+- **契约**：`GET /scenes` 一次返回本人全部场景（无分页，`{items}`）；`POST /scenes` 201、`GET/PUT/DELETE /scenes/{id}` 200/200/204；跨用户与已软删统一 404。`PUT` body 是 5 个字段的子集，每个字段 `{value, updatedAt}`，服务端按字段比较时间戳（字段级 LWW）；没有字段更新时 version 不变。
+- **表结构（迁移 v14）**：`scenarios` 增加 `kind TEXT NOT NULL DEFAULT 'manual'`、`remote_id TEXT`（唯一索引，仅非空）、`version INTEGER`、`enabled INTEGER`、`cooldown_seconds INTEGER`、`trigger TEXT`、`sync_state TEXT NOT NULL DEFAULT 'localOnly'`（`localOnly` / `pending` / `synced` / `pendingDelete`）、`deleted_at REAL`、`device_missing INTEGER`、`last_synced_at REAL`、`last_run_at REAL`，以及 5 个字段级时间戳 `name_updated_at` / `enabled_updated_at` / `cooldown_updated_at` / `trigger_updated_at` / `actions_updated_at`。
+- **两类场景不混用**：`kind='manual'` 是 v0.8.0 的手动动作组，只在本机执行、**不上传**；`kind='automation'` 是服务端场景。旧行迁移后保持 `kind='manual'`、`sync_state='localOnly'`；服务端场景读取只查 `kind='automation'`，手动场景只查 `kind='manual'` 且 `deleted_at IS NULL`。
+- **脏字段判定**：`fieldUpdatedAt[field] > lastSyncedAt`。保存只有被编辑字段推进时间戳；拉取时若本地是 pending，**脏字段保留本地**、非脏字段采用远端值，且非脏字段时间戳回落到旧同步基线，保证不会被服务端超前时钟误判为脏。
+- **首次接入（不静默丢弃）**：本机已有 `kind='automation'` 场景逐条 `POST /scenes`；成功后 `markCreated` 写回 `remoteId` 与 `version`。首次上传前 `GET /scenes` 做基线，若发现内容签名（`name/enabled/cooldown/trigger/actions` 排序 JSON）唯一匹配的远端场景（上次 POST 响应丢失），**认领**该场景而不是重复创建。
+- **幂等**：服务端无 Idempotency-Key；同一场景重复上传时，先看本地 `remote_id`：为空则先 `GET /scenes` 认领孤儿再 `POST`，非空则 `PUT`。`PUT` 404 视为远端已删，直接 `markDeleteSynced`，不重试。
+- **拉取与软删**：`GET /scenes` 是基线，基线中没有的已同步场景本地软删（`markRemoteMissing`），但本地仍有未推送编辑时不判死；`change_log` 的 `entity='scene'` upsert 走 `applyRemote`、delete 走 tombstone 软删（缺失 `deletedAt` 时用 `serverTimestamp` 补）。未知 entity 仍忽略且游标推进。
+- **deviceMissing**：服务端读取时实时计算；本地另按 `(platform, externalId)` 解析设备，列表行标注「设备已移除」，执行时跳过并写 `category='rule'`、`level='warning'` 的失败日志（冷却窗口内不重复），同时更新 `device_missing` 本地缓存。设备删除**不级联删除场景**。
+- **离线**：新建 / 改名 / 停用 / 删除先落本地并标 pending（已上传场景删除为 `pendingDelete`，未上传场景物理删除）；恢复网络后串行补传：`pendingDelete` → DELETE、`remote_id` 为空 → POST、有 `remote_id` → 只 PUT 脏字段。
+
+### 3.19 场景占位符与定时计算（v0.21.0）
+
+- **占位符（`notify` title/body、`log` message）**：支持 `{device}`、`{metric}`、`{value}`。
+  - `{device}` 优先取设备别名 `alias`，否则广播名；设备缺失时为 `—`。
+  - `{metric}` 取指标显示名（温度 / 湿度 / 电量 / 心率 / CO₂）；`schedule` / 离线 / RSSI 条件下为 `—`。
+  - `{value}` 取触发值：RSSI 为整数 dBm、指标为实际读数、离线与定时为 `—`。
+  - 未识别占位符（如 `{foo}`）**原样保留**；空串 / 仅空白按缺失处理。渲染在通知提交前完成，无需服务端参与。
+- **定时下一次触发**：输入 `timeOfDay HH:MM`、IANA `timezone`、可选 `daysOfWeek`（1=周一），使用 `Calendar(identifier: .gregorian)` + 指定 `TimeZone` 与 `nextDate(after:matching:matchingPolicy:.nextTime, repeatedTimePolicy:.first)`：
+  - ISO 星期 → Calendar `weekday`：`7` → `1`（周日），其余 `iso + 1`。
+  - 春季 DST 跳过的本地时间（如 `02:30`）顺延到下一个有效时刻；秋季重复时刻取**第一次**；跨 DST 的周期任务由带 `timeZone` 的 `UNCalendarNotificationTrigger(repeats: true)` 按本地日历重复，不按 86400 秒漂移。
+  - 无 `daysOfWeek` 为每日一条，否则每个星期一条；只有包含 `notify` 动作的 enabled 且未删除场景才注册，注册前先取消 `scene-` 前缀的旧请求。
+
 ## 4. 错误码
 
 客户端错误码用于日志、空状态副标题与问题反馈，**两端含义一致**：

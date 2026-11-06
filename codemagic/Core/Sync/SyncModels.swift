@@ -229,6 +229,8 @@ struct SyncChange: Decodable, Equatable {
     let householdChange: HouseholdChangePayload?
     /// `room` 实体的结构变更 payload（后端 v0.15.0 起）。
     let roomChange: RoomChangePayload?
+    /// `scene` 实体的完整快照（后端 v0.20.0 / 契约 0.16.0 起）。
+    let sceneChange: RemoteScene?
     let serverTimestamp: Date?
 
     private enum CodingKeys: String, CodingKey {
@@ -250,6 +252,7 @@ struct SyncChange: Decodable, Equatable {
             ?? RemoteDevice(id: "", externalID: "", updatedAt: Date(timeIntervalSince1970: 0))
         householdChange = try? container.decode(HouseholdChangePayload.self, forKey: .payload)
         roomChange = try? container.decode(RoomChangePayload.self, forKey: .payload)
+        sceneChange = try? container.decode(RemoteScene.self, forKey: .payload)
         serverTimestamp = SyncDateCodec.parse(
             (try? container.decodeIfPresent(String.self, forKey: .serverTs)) ?? ""
         )
@@ -263,6 +266,7 @@ struct SyncChange: Decodable, Equatable {
         payload: RemoteDevice,
         householdChange: HouseholdChangePayload? = nil,
         roomChange: RoomChangePayload? = nil,
+        sceneChange: RemoteScene? = nil,
         serverTimestamp: Date? = nil
     ) {
         self.seq = seq
@@ -272,6 +276,7 @@ struct SyncChange: Decodable, Equatable {
         self.payload = payload
         self.householdChange = householdChange
         self.roomChange = roomChange
+        self.sceneChange = sceneChange
         self.serverTimestamp = serverTimestamp
     }
 
@@ -280,6 +285,7 @@ struct SyncChange: Decodable, Equatable {
             || payload.deletedAt != nil
             || householdChange?.deleted == true
             || roomChange?.deleted == true
+            || sceneChange?.deletedAt != nil
     }
 
     var isDeviceEntity: Bool {
@@ -294,6 +300,7 @@ enum SyncEntity {
     static let legacyDevice = "device"
     static let household = "household"
     static let room = "room"
+    static let scene = "scene"
 }
 
 struct SyncChangesPage: Decodable, Equatable {

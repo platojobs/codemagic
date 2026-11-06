@@ -42,6 +42,8 @@ final class SyncEngine {
     private let logStore: ScanLogStore
     /// 家庭 / 房间 / 设备归属协调器；未配置时退化为纯设备同步（老版本行为）。
     private let householdService: HouseholdService?
+    /// 服务端场景同步；未配置时场景只保留本地。
+    private let sceneSync: SceneSyncServicing?
     private let now: () -> Date
     private let pageLimit: Int
     private let maxPages: Int
@@ -65,6 +67,7 @@ final class SyncEngine {
         readingsStore: ReadingsStore,
         logStore: ScanLogStore,
         householdService: HouseholdService? = nil,
+        sceneSync: SceneSyncServicing? = nil,
         pageLimit: Int = 200,
         maxPages: Int = 10,
         now: @escaping () -> Date = Date.init
@@ -76,6 +79,7 @@ final class SyncEngine {
         self.readingsStore = readingsStore
         self.logStore = logStore
         self.householdService = householdService
+        self.sceneSync = sceneSync
         // 服务端 changes 上限 500，客户端自己收敛，避免越界 400。
         self.pageLimit = APILimits.clamp(pageLimit, to: APILimits.changes)
         self.maxPages = maxPages
@@ -89,7 +93,7 @@ final class SyncEngine {
         let pending = (try? deviceStore.pendingCount()) ?? 0
         status.userID = metadataStore.userID ?? tokenStore.load()?.userID
         status.lastSyncAt = metadataStore.lastSyncAt
-        status.pendingCount = pending
+        status.pendingCount = pending + (sceneSync?.pendingCount() ?? 0)
         status.isSyncing = isSyncing
         status.needsRelogin = metadataStore.reloginRequired
         status.sessionExpiresAt = metadataStore.sessionExpiresAt
@@ -281,34 +285,81 @@ final class SyncEngine {
         // 先拉家庭 / 房间并补报上次失败的归属，再做增量拉取；家庭接口失败不阻断设备同步。
         prepareHouseholds(token: session.token) { [weak self] in
             guard let self else { return }
-            self.pull(
-                cursor: self.metadataStore.cursor,
-                token: session.token,
-                page: 0,
-                summary: summary,
-                hasResynced: false
-            ) { [weak self] pullResult in
-                guard let self else { return }
-                switch pullResult {
-                case .failure(let error):
-                    self.finish(.failure(error), completion: completion)
-                case .success(let summary):
-                    self.pushPending(
-                        token: session.token,
-                        summary: summary
-                    ) { [weak self] pushResult in
-                        guard let self else { return }
-                        switch pushResult {
-                        case .failure(let error):
-                            self.finish(.failure(error), completion: completion)
-                        case .success(let finalSummary):
-                            self.flushAssignments(token: session.token) {
-                                self.metadataStore.lastSyncAt = self.now()
-                                self.finish(.success(finalSummary), completion: completion)
+            self.prepareScenes(token: session.token) {
+                self.pull(
+                    cursor: self.metadataStore.cursor,
+                    token: session.token,
+                    page: 0,
+                    summary: summary,
+                    hasResynced: false
+                ) { pullResult in
+                    switch pullResult {
+                    case .failure(let error):
+                        self.finish(.failure(error), completion: completion)
+                    case .success(let summary):
+                        self.pushPending(
+                            token: session.token,
+                            summary: summary
+                        ) { pushResult in
+                            switch pushResult {
+                            case .failure(let error):
+                                self.finish(.failure(error), completion: completion)
+                            case .success(let finalSummary):
+                                self.pushScenes(token: session.token, summary: finalSummary) { sceneResult in
+                                    switch sceneResult {
+                                    case .failure(let error):
+                                        self.finish(.failure(error), completion: completion)
+                                    case .success(let withScenes):
+                                        self.flushAssignments(token: session.token) {
+                                            self.metadataStore.lastSyncAt = self.now()
+                                            self.finish(.success(withScenes), completion: completion)
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
                 }
+            }
+        }
+    }
+
+    /// `GET /scenes` 基线。失败不阻断设备同步：增量拉取仍会带回场景变更，
+    /// 推送阶段也会再次尝试上传；401 由后续拉取统一处理。
+    private func prepareScenes(token: String, completion: @escaping () -> Void) {
+        guard let sceneSync else {
+            completion()
+            return
+        }
+        sceneSync.prepare(token: token) { [weak self] result in
+            if case .failure(let error) = result {
+                self?.recordLog(
+                    L10n.f("scene.sync.baselineFailed", error.code, error.message),
+                    level: .warning
+                )
+            }
+            completion()
+        }
+    }
+
+    /// 场景推送在设备推送之后：即使场景接口失败，设备与读数也已落库。
+    private func pushScenes(
+        token: String,
+        summary: Summary,
+        completion: @escaping (Result<Summary, AppError>) -> Void
+    ) {
+        guard let sceneSync else {
+            completion(.success(summary))
+            return
+        }
+        sceneSync.pushPending(token: token) { result in
+            switch result {
+            case .failure(let error):
+                completion(.failure(error))
+            case .success(let count):
+                var summary = summary
+                summary.pushed += count
+                completion(.success(summary))
             }
         }
     }
@@ -435,6 +486,12 @@ final class SyncEngine {
                 if householdService.applyRoomChange(payload) == .needsBaseline {
                     needsHouseholdBaseline = true
                 }
+                pulled += 1
+                continue
+
+            case SyncEntity.scene:
+                guard let sceneSync else { continue }
+                _ = try sceneSync.apply(change)
                 pulled += 1
                 continue
 
