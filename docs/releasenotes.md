@@ -4,6 +4,7 @@
 
 | Tag | MARKETING_VERSION | Build | 日期 | 对齐后端 |
 | --- | --- | --- | --- | --- |
+| `v0.25.0` | 0.25.0 | 33 | 2026-11-06 | PJGoIoT v0.22.0（无后端契约变更；家庭房间分区去掉「房间」导航行、首页底部留白与设备卡名称/状态分行） |
 | `v0.24.0` | 0.24.0 | 32 | 2026-11-06 | PJGoIoT v0.22.0（无后端契约变更；场景 `rejected` 终态对齐 Android、429 退避持久化、首页 chip 与 AX 布局、成员可读名、底部 inset、房间列表一致性、seed 读数差异化） |
 | `v0.23.0` | 0.23.0 | 31 | 2026-11-06 | PJGoIoT v0.22.0（无后端契约变更；e2e 断言项数稳定化 430 ↔ 430、真实界面截图归档、场景指标名映射） |
 | `v0.22.0` | 0.22.0 | 30 | 2026-11-06 | PJGoIoT v0.22.0（openapi 0.17.0；`/auth/refresh`·`/auth/logout`·`/sessions`·`SCENE_*` 错误码·导出失败原因·反馈详情/关闭·`GET /my/devices/{mac}`） |
@@ -35,6 +36,18 @@
 | `v0.3.0` | 0.3.0 | 4 | 2026-11-05 | 0.3.0 |
 | `v0.2.0` | 0.2.0 | 3 | 2026-11-05 | 0.2.0 |
 | `v0.1.0` | — | 1 | 2026-11-05 | — |
+
+---
+
+## v0.25.0（build 33）
+
+**主题：修看图发现的三处 UI 问题 —— 房间列表多出的导航行、首页底部留白、设备卡名称与状态截断**
+
+- **家庭房间列表多出的「房间」行**：那不是空名房间，而是「前往房间管理」的导航入口（`room.manage` = 「房间」），一直占房间分区的第 0 行，所以家庭管理显示 4 行、房间管理只有 3 个房间。v0.25.0 把入口移到分区头右侧的「管理」按钮，房间分区行数只等于真实房间数（`HouseholdRoomSection.rowCount`），两页项数 / 名称完全一致。分区头用 `UIButton.Configuration` + `AppText.caption`，满足 44pt 触达。
+- **首页底部留白**：`applyBottomOcclusionInset` 实际已在 `viewDidLayoutSubviews` 调用，且没有被其他 `contentInset` 赋值覆盖。用可访问性树实测：滚到底时最后一张设备卡 `maxY = 759`、悬浮 Tab 顶边 `791`，相隔 32pt，Tab 下方没有残片。`home.png` 的「露出」是截图停在页面顶部时，iOS 26 悬浮玻璃 Tab 把中段内容透出来，属系统样式。仍然做了两处加固：把计算抽成纯函数 `BottomOcclusion.inset(overlap:automaticInset:spacing:)` 并补单测；首页增加 `viewSafeAreaInsetsDidChange` 重算，避免 Tab 晚挂载时沿用初始值。新增 `home-bottom.png` 作为滚到底的证据。
+- **设备卡名称 / 状态截断**：原来名称与状态在同一个横向 `UIStackView` 里，长名称把状态挤成「未…」。改为纵向两行：名称最多两行、超长才省略；状态独占一行、`textAlignment = .natural`，不参与名称截断。卡片高度从 140 调到 164，给两行名称留足空间。
+- **顺带修复**：`HomeSectionHeaderView` 复用时只移除了初始头视图，替换后的头视图没被记录下来，导致旧标题叠在新标题下面（滚到底时「书房 · 2」上方还有一层「快捷场景」）。改为用 `header` 可变引用记录当前头视图。
+- **测试**：单测 **426 个，0 失败**（新增 5 个：设备卡长名称下状态完整、分区头复用只保留一个、`BottomOcclusion` 扣除自动 inset、房间分区行数、分区头「管理」入口可触发）；e2e 本机 **430 项，0 失败**，与 CI 一致；重截 `home`、`home-bottom`（新增）、`households`、`households-bottom`、`rooms`、`home-ax`。
 
 ---
 
