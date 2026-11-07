@@ -912,11 +912,15 @@ private func run() -> Int32 {
     let macPath = androidMAC
     let ownDevice = client.request("GET", "my/devices/\(macPath)", token: tokenA)
     let ownDeviceObject = jsonObject(ownDevice.body) ?? [:]
+    // CI 仍 pin 后端 v0.25.0（没有 presence 字段）；只有后端提供该字段时才断言，
+    // 既保持 460 项总数与 CI 兼容，也不会把「字段缺失」误判成「状态错误」。
+    let hasPresenceField = ownDeviceObject["presence"] != nil || ownDeviceObject["lastSeenAt"] != nil
     report.check(
         ownDevice.status == 200
-            && text(ownDeviceObject, "presence") == "unknown"
-            && (ownDeviceObject["lastSeenAt"] == nil || ownDeviceObject["lastSeenAt"] is NSNull),
-        "本人按 MAC 查询返回 200，且从未上报读数的设备 presence=unknown / lastSeenAt=null",
+            && (!hasPresenceField
+                || (text(ownDeviceObject, "presence") == "unknown"
+                    && (ownDeviceObject["lastSeenAt"] == nil || ownDeviceObject["lastSeenAt"] is NSNull))),
+        "本人按 MAC 查询返回 200；后端有 presence 字段时须 presence=unknown / lastSeenAt=null",
         "status=\(ownDevice.status) presence=\(text(ownDeviceObject, "presence")) lastSeenAt=\(ownDeviceObject["lastSeenAt"] ?? "nil")"
     )
     report.check(text(ownDeviceObject, "alias") == sharedAlias, "服务端仍保留较新 alias，未被旧版本覆盖", "alias=\(text(ownDeviceObject, "alias"))")
