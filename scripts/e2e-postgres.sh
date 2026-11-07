@@ -10,6 +10,8 @@
 #
 # 状态隔离：所有后端状态、日志与临时文件都放进 mktemp 目录（E2E_STATE_DIR），
 # 不读写 App 的开发 SQLite / UserDefaults；契约 runner 本身是纯网络、无本地状态。
+# 数据库隔离：本脚本只允许连名字含 `_e2e` 的独立库（默认 pjgoiot_e2e），启动后会校验
+# DATABASE_URL 的库名，防止误连开发库 pjgoiot 并清空演示数据。
 #
 # GitHub Actions 的 macOS runner 无法运行 Docker，因此本脚本**不进 CI**，仅本地执行。
 #
@@ -70,6 +72,11 @@ BASE_URL="$(printf '%s\n' "$STACK_OUT" | sed -n 's/^BASE_URL=//p' | tail -1)"
 [ -n "$BASE_URL" ] || fail "起栈脚本未输出 BASE_URL"
 # shellcheck disable=SC1090
 source "$E2E_STATE_DIR/stack.env"
+DATABASE_DB="$(python3 -c 'import sys, urllib.parse; print(urllib.parse.urlparse(sys.argv[1]).path.lstrip("/"))' "$DATABASE_URL")"
+case "$DATABASE_DB" in
+    *_e2e) ;;
+    *) fail "DATABASE_URL 指向数据库 ${DATABASE_DB:-未知}，e2e 只允许名字含 _e2e 的独立库（默认 pjgoiot_e2e），拒绝运行" ;;
+esac
 log "BASE_URL=$BASE_URL"
 log "PG_CONTAINER=$PG_CONTAINER DATABASE_URL=$DATABASE_URL"
 

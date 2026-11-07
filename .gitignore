@@ -130,3 +130,6 @@ xcuserdata/
 *.hmap
 *.ipa
 *.dSYM.zip
+
+# 临时截图产物（不入库）
+.screenshots/

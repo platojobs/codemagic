@@ -606,7 +606,17 @@ Android 自 v0.22.0 起把服务端 `SCENE_*` 4xx 视为终态；iOS v0.24.0 对
 - **底部安全区**：表格底部约束到 `safeAreaLayoutGuide.bottomAnchor`，内容不被悬浮 Tab 条带覆盖。
 - **iPad 宽度**：表格 `centerX` + 宽 `<= Layout.contentMaxWidth (760)` + 高优先级 `fillWidth`，13 英寸下居中限宽，按钮不溢出；常规字号按钮高度保持 48pt。
 - **测试**：`RoomDetailTests` 新增 2 项布局测试（AX5 430×900：按钮竖排、文本行数不限、按钮高度 > 单行标题；iPad 1024×1366：表格宽 760、水平居中、按钮横排且不超宽），合计 468 单测 0 失败；e2e 仍 460 项。
-- **截图**：18 张（AX5 / 200% / iPad 各 6 张）使用本机 SQLite 过渡夹具，非 seed 后端数据；seed 库当前无房间数据、无法重建首页同源画面，后续如恢复 seed 可重截。
+- **截图**：房间详情 23 张（默认 / AX5 / 200% / iPad 各含首页、底部、待同步、待同步底部、空态、成员只读）在 **v0.31.2 用 `scripts/seed-demo-data.sh` 重建的 seed 数据重拍**，与本机 Postgres 同源；画面为「共 3 台 · 在线 0 · 离线 3 · 已标记 1」，行内「离线 · 来自 Android，本机不可连接 · 暂无读数」。读数不显示的原因见 3.25。
+
+### 3.25 截图数据可复现（v0.31.2）
+
+- **脚本**：`scripts/seed-demo-data.sh` 通过 API 重建与商城截图一致的数据形状：3 个演示家庭（我的家 / 父母家 / 办公室）、6 个房间（客厅 / 主卧 / 次卧 / 父母家客厅 / 书房 / 工位）、12 台在用设备 + 1 台已移除设备（被「阳台信号弱记录」场景引用）、7 天读数（30 分钟一个点，19 条指标序列 × 336 = 6384 条）、4 个场景、3 条反馈（1 条已关闭），客厅骑行台 `markedAt` 为 2 小时前。另建 1 个只读成员账号并领取父母家邀请码，供「成员只读」截图使用；该账号自带 1 个空个人家庭，所以库内家庭总数为 4，但演示家庭仍是 3 个。
+- **幂等**：默认先 `TRUNCATE` 所有用户数据表（保留设备类型目录 / 固件 / 配件 / 迁移表）再按固定名称与数量重建；设备 `externalId` 固定为 `AA:BB:CC:00:00:01..13`，读数用确定性日周期而非随机数。连续执行两次，形状完全一致（见脚本输出）。`SEED_SKIP_RESET=1` 只追加，不建议。
+- **前置条件**：后端 `PJGoIoT` v0.25.x、迁移 **19**（`000019_device_marked_at`）；`DATABASE_URL` 可连（默认 `postgres://platojobs@127.0.0.1:5432/pjgoiot?sslmode=disable`）；API 以 `STORE=postgres` 启动并可访问 `SEED_BASE_URL`（默认 `http://127.0.0.1:8080`）；本机有 `psql` / `python3` / `curl`。
+- **账号**：脚本 `POST /auth/anonymous` 新建账号，结束时打印 10 分钟一次性 `pairingCode`；在 App「我的 → 用配对码恢复原账号」输入即可接管。成员截图用 `memberPairingCode`。接管会把本机已有设备 / 读数标记为 pending，所以截图前需全新安装 App。
+- **为什么房间详情是「离线 / 暂无读数」**：`/sync/changes` 只拉家庭 / 房间 / 设备 / 场景，不拉读数；房间详情只读本机 SQLite。同步落地的远程设备没有本机 `lastSeenAt`，按现有判定全部离线；平台 Android 时行内标注本机不可连接。这是实现口径，不是 seed 缺数据。
+- **`household_rooms = 0` 排查**：`e2e-contract.sh` 使用内存 fixture，`e2e-postgres.sh` 固定独立库 `pjgoiot_e2e`，均不会 TRUNCATE 开发库；开发库只剩余旧的手工重置 / 反复匿名登录残留。`e2e-postgres.sh` 已新增 DATABASE_URL 库名断言（必须为 `pjgoiot_e2e` 或含 `_e2e`），从源头避免误连开发库。
+- **测试**：本轮不改客户端逻辑，单测仍 **468** 0 失败；e2e 仍 **460** 项。
 
 ## 4. 错误码
 
