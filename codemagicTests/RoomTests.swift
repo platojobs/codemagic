@@ -220,6 +220,7 @@ final class RoomTests: XCTestCase {
         var remote = device
         remote.platform = "android"
         remote.externalID = "AA:BB:CC:00:00:01"
+        remote.serverLastSeenAt = Date()
         try deviceStore.upsert(remote)
         let cloud = FakeCloudReadings()
         cloud.states["android:\(remote.externalID)"] = .available(CloudLatestReading(
@@ -247,6 +248,7 @@ final class RoomTests: XCTestCase {
         var remote = device
         remote.platform = "android"
         remote.externalID = "AA:BB:CC:00:00:02"
+        remote.serverLastSeenAt = Date()
         try deviceStore.upsert(remote)
         let cloud = FakeCloudReadings()
         cloud.states["android:\(remote.externalID)"] = .failed
@@ -257,6 +259,18 @@ final class RoomTests: XCTestCase {
         XCTAssertEqual(viewModel.readingText(for: remote), L10n.t("home.reading.unavailable"))
         XCTAssertNil(viewModel.cloudReportedAt(for: remote))
         XCTAssertFalse(viewModel.isConnected(remote), "拉取失败不影响连接状态判定")
+    }
+
+    func testHomeSkipsCloudReadingsForUnknownPresence() throws {
+        let device = makeSavedDevice(name: "从未上报")
+        try deviceStore.upsert(device)
+        let cloud = FakeCloudReadings()
+
+        let viewModel = try makeViewModel(cloudReadings: cloud)
+        viewModel.reload()
+
+        XCTAssertTrue(cloud.requested.isEmpty, "presence=unknown 时不应再请求云端读数")
+        XCTAssertEqual(viewModel.readingText(for: device), L10n.t("device.detail.noReadings"))
     }
 
     // MARK: - Helpers

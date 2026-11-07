@@ -232,8 +232,15 @@ final class RoomDetailViewController: UIViewController {
 
         if traitCollection.preferredContentSizeCategory.isAccessibilityCategory {
             // AX 档每项一行；跨平台状态用带显式换行的文案，避免「本机不可连接」被拆字。
-            contextLines[0] = entry.statusTextForAccessibility
-            return (contextLines + readingParts).joined(separator: "\n")
+            // 标记与上报说明各自保留，不能因为切换状态文案而丢掉「已标记」。
+            var lines = [entry.statusTextForAccessibility]
+            if let markText = entry.markText {
+                lines.append(markText)
+            }
+            if let presenceNote = entry.presenceNote {
+                lines.append(presenceNote)
+            }
+            return (lines + readingParts).joined(separator: "\n")
         }
         // 云端来源 + 读数另起一行，避免“来自 Android，本机不可连接 · 云端 … · 心率 72 bpm”
         // 在窄屏上把“心率”拆成两行。
@@ -268,7 +275,9 @@ extension RoomDetailViewController: UITableViewDataSource, UITableViewDelegate {
         content.textProperties.numberOfLines = 0
         content.secondaryText = metaText(for: entry)
         content.secondaryTextProperties.font = AppText.caption.font(compatibleWith: traitCollection)
-        content.secondaryTextProperties.color = entry.isOnline ? Palette.success : Palette.textSecondary
+        content.secondaryTextProperties.color = entry.linkStatus.isLocalConnected
+            ? Palette.success
+            : (entry.device.isConnectable ? Palette.textSecondary : Palette.textTertiary)
         content.secondaryTextProperties.numberOfLines = 0
         cell.contentConfiguration = content
         cell.backgroundColor = Palette.surface

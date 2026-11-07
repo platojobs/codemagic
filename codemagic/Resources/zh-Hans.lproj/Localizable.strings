@@ -109,7 +109,6 @@
 "date.justNow" = "刚刚";
 "device.cell.firmware" = "固件 %@";
 "device.cell.lastSeen" = "最近出现 %@";
-"device.cell.lastReported" = "最近上报 %@";
 "device.cell.noVendor" = "尚未读取厂商信息";
 "device.detail.advertisedName" = "广播名";
 "device.detail.alias" = "用户别名";
@@ -151,8 +150,6 @@
 "device.detail.infoNetworkFallback" = "%@ 网络读取失败，显示 %@ 的本地缓存";
 "device.detail.infoUpdated" = "设备信息已更新";
 "device.detail.lastSeen" = "最近出现";
-"device.detail.lastReported" = "最近上报 %@";
-"device.detail.offlineWithTime" = "已离线 · 最近上报 %@";
 "device.detail.presence" = "上报状态";
 "device.detail.loading" = "读取中…";
 "device.detail.metric" = "指标";
@@ -189,10 +186,13 @@
 "device.detail.vendor" = "厂商";
 "device.group.none" = "未分组";
 "device.remoteOnly" = "来自 %@，本机不可连接";
-"device.presence.reported" = "最近上报";
-"device.presence.offline" = "已离线";
-"device.presence.unknown" = "从未上报读数";
-"device.presence.unknownShort" = "从未上报";
+"device.link.localConnected" = "本机已连接";
+"device.link.cloudRecent" = "云端 15 分钟内有上报";
+"device.link.cloudStale" = "云端上报已超时";
+"device.link.cloudUnknown" = "云端从未收到上报";
+"device.link.serverLastReported" = "云端最近上报 %@";
+"device.link.localLastSeen" = "本机最近扫描 %@";
+"device.link.notConnectable" = "本机不可连接";
 "device.remoteOnlyAX" = "来自 %@，\n本机不可连接";
 "devices.alias" = "备注名";
 "devices.deleteFailed" = "删除设备失败：%@";
@@ -292,11 +292,8 @@
 "home.scanning" = "正在扫描附近设备… 已发现 %@ 台";
 "home.scanningHint" = "请让蓝牙设备进入广播状态，扫描结果会自动出现在这里。";
 "home.scanningTitle" = "正在扫描";
-"home.status.connected" = "本机在线";
-"home.status.crossPlatform" = "本机不可连接";
 "home.status.disconnected" = "未连接";
 "home.status.notConnectedYet" = "尚未连接";
-"home.lastReported" = "最近上报 %@";
 "home.cloudReported" = "云端 %@";
 "home.reading.unavailable" = "云端读数暂不可用";
 "home.stop" = "停止";
@@ -503,9 +500,6 @@
 "room.detail.markDone" = "已标记 %@ 台设备";
 "room.detail.markFailed" = "标记设备失败：%@";
 "room.detail.noReading" = "暂无读数";
-"room.detail.offline" = "本机离线";
-"room.detail.online" = "本机在线";
-"room.detail.remoteOnlyShort" = "本机不可连接";
 "room.detail.cloudReported" = "云端 %@";
 "room.detail.cloudUnavailable" = "云端读数暂不可用";
 "room.detail.readingLoading" = "正在读取云端读数";
@@ -516,9 +510,7 @@
 "room.detail.readonlyNote" = "当前为家庭成员：新建、改名、排序、删除房间仅家庭所有者可用；本页可查看房间并标记设备。";
 "room.detail.readonlyNoteAX" = "当前为家庭成员：\n新建、改名、排序、删除房间\n仅家庭所有者可用；\n本页可查看房间并标记设备。";
 "room.detail.scan" = "扫描添加设备";
-"room.detail.summary" = "共 %@ 台\n本机在线 %@ · 最近上报 %@\n已离线 %@ · 从未上报 %@\n本机不可连接 %@ · 已标记 %@";
-"room.detail.lastReported" = "最近上报 %@";
-"room.detail.offlineWithTime" = "已离线 · 最近上报 %@";
+"room.detail.summary" = "共 %@ 台\n本机已连接 %@ · 云端 15 分钟内有上报 %@\n云端上报已超时 %@ · 云端从未收到上报 %@\n已标记 %@ · 本机不可连接 %@";
 "room.detail.syncPendingNotice" = "标记变更已保存在本机，联网后会自动同步";
 "room.detail.unmark" = "取消标记";
 "room.detail.unmarkDone" = "已取消 %@ 台设备的标记";

@@ -109,7 +109,6 @@
 "date.justNow" = "Just now";
 "device.cell.firmware" = "Firmware %@";
 "device.cell.lastSeen" = "Last seen %@";
-"device.cell.lastReported" = "Last reported %@";
 "device.cell.noVendor" = "Vendor info not read yet";
 "device.detail.advertisedName" = "Advertised name";
 "device.detail.alias" = "User alias";
@@ -151,8 +150,6 @@
 "device.detail.infoNetworkFallback" = "%@ network read failed; showing the local cache from %@";
 "device.detail.infoUpdated" = "Device info updated";
 "device.detail.lastSeen" = "Last seen";
-"device.detail.lastReported" = "Last reported %@";
-"device.detail.offlineWithTime" = "Offline · last reported %@";
 "device.detail.presence" = "Reporting status";
 "device.detail.loading" = "Loading…";
 "device.detail.metric" = "Metric";
@@ -189,10 +186,13 @@
 "device.detail.vendor" = "Vendor";
 "device.group.none" = "No group";
 "device.remoteOnly" = "From %@; not connectable on this device";
-"device.presence.reported" = "Recently reported";
-"device.presence.offline" = "Offline";
-"device.presence.unknown" = "Never reported";
-"device.presence.unknownShort" = "Never reported";
+"device.link.localConnected" = "Connected on this phone";
+"device.link.cloudRecent" = "Cloud report in last 15 min";
+"device.link.cloudStale" = "Cloud report timed out";
+"device.link.cloudUnknown" = "Never reported to the cloud";
+"device.link.serverLastReported" = "Cloud last reported %@";
+"device.link.localLastSeen" = "Scanned on this phone %@";
+"device.link.notConnectable" = "Not connectable on this phone";
 "device.remoteOnlyAX" = "From %@;\nNot connectable here";
 "devices.alias" = "Alias";
 "devices.deleteFailed" = "Failed to delete the device: %@";
@@ -292,11 +292,8 @@
 "home.scanning" = "Scanning nearby devices… %@ found";
 "home.scanningHint" = "Put your Bluetooth device into advertising mode; results appear here automatically.";
 "home.scanningTitle" = "Scanning";
-"home.status.connected" = "Online on this phone";
-"home.status.crossPlatform" = "Not connectable from this phone";
 "home.status.disconnected" = "Not connected";
 "home.status.notConnectedYet" = "Not connected yet";
-"home.lastReported" = "Last reported %@";
 "home.cloudReported" = "Cloud %@";
 "home.reading.unavailable" = "Cloud readings unavailable";
 "home.stop" = "Stop";
@@ -503,9 +500,6 @@
 "room.detail.markDone" = "Marked %@ devices";
 "room.detail.markFailed" = "Failed to mark devices: %@";
 "room.detail.noReading" = "No readings yet";
-"room.detail.offline" = "Offline on this phone";
-"room.detail.online" = "Online on this phone";
-"room.detail.remoteOnlyShort" = "Not connectable from this phone";
 "room.detail.cloudReported" = "Cloud %@";
 "room.detail.cloudUnavailable" = "Cloud readings unavailable";
 "room.detail.readingLoading" = "Loading cloud readings";
@@ -516,9 +510,7 @@
 "room.detail.readonlyNote" = "You are a household member: creating, renaming, reordering and deleting rooms is owner-only. You can view this room and mark devices here.";
 "room.detail.readonlyNoteAX" = "You are a household member:\ncreating, renaming, reordering\nand deleting rooms is owner-only.\nYou can view this room and mark devices here.";
 "room.detail.scan" = "Scan to add devices";
-"room.detail.summary" = "%@ devices\n%@ online on this phone · %@ recently reported\n%@ offline · %@ never reported\n%@ not connectable from this phone · %@ marked";
-"room.detail.lastReported" = "Last reported %@";
-"room.detail.offlineWithTime" = "Offline · last reported %@";
+"room.detail.summary" = "%@ devices\n%@ connected on this phone · %@ reported in the last 15 min\n%@ cloud report timed out · %@ never reported to the cloud\n%@ marked · %@ not connectable on this phone";
 "room.detail.syncPendingNotice" = "Mark changes are saved on this device and will sync automatically when online.";
 "room.detail.unmark" = "Unmark";
 "room.detail.unmarkDone" = "Unmarked %@ devices";

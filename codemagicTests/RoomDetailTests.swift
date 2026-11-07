@@ -35,15 +35,15 @@ final class RoomDetailTests: XCTestCase {
             name: "温度计",
             roomID: room.id,
             markedAt: markedAt,
-            lastSeenAt: now.addingTimeInterval(-16 * 60)
+            serverLastSeenAt: now.addingTimeInterval(-16 * 60)
         )
-        let online = makeDevice(
+        let recent = makeDevice(
             name: "面板",
             roomID: room.id,
-            lastSeenAt: now.addingTimeInterval(-60)
+            serverLastSeenAt: now.addingTimeInterval(-60)
         )
         let outside = makeDevice(name: "卧室设备", roomID: otherRoom.id)
-        for device in [marked, online, outside] {
+        for device in [marked, recent, outside] {
             try deviceStore.upsert(device)
         }
         try readingsStore.insert(DeviceReading(
@@ -59,51 +59,61 @@ final class RoomDetailTests: XCTestCase {
         viewModel.reload()
 
         XCTAssertEqual(viewModel.totalCount, 2, "只聚合本房间设备")
-        XCTAssertEqual(viewModel.onlineCount, 1)
-        XCTAssertEqual(viewModel.reportedCount, 0)
-        XCTAssertEqual(viewModel.presenceOfflineCount, 0)
-        XCTAssertEqual(viewModel.neverReportedCount, 1)
+        XCTAssertEqual(viewModel.localConnectedCount, 0)
+        XCTAssertEqual(viewModel.cloudRecentCount, 1)
+        XCTAssertEqual(viewModel.cloudStaleCount, 1)
+        XCTAssertEqual(viewModel.cloudUnknownCount, 0)
         XCTAssertEqual(viewModel.remoteCount, 0)
         XCTAssertEqual(viewModel.markedCount, 1)
         XCTAssertEqual(
             viewModel.summaryText,
-            L10n.f("room.detail.summary", "2", "1", "0", "0", "1", "0", "1")
+            L10n.f("room.detail.summary", "2", "0", "1", "1", "0", "1", "0")
         )
-        XCTAssertEqual(viewModel.entries.map(\.device.displayName), ["面板", "温度计"], "在线优先，其次按名称")
+        XCTAssertEqual(viewModel.entries.map(\.device.displayName), ["面板", "温度计"], "云端最近上报优先，其次按名称")
         XCTAssertEqual(viewModel.entries[0].readingText, L10n.t("room.detail.noReading"), "无读数不补造")
         XCTAssertTrue(viewModel.entries[1].readingText.contains("24.5"))
         XCTAssertEqual(viewModel.entries[1].markText, L10n.t("device.marked"))
         XCTAssertNil(viewModel.entries[0].markText)
     }
 
-    func testOnlineUsesConnectedOrRecentlySeenAndCrossPlatformStaysOffline() throws {
+    func testOnlyBLEConnectionCountsAsLocalAndRecentScanDoesNot() throws {
         let room = try roomStore.create(name: "客厅", at: now)
         let bluetooth = FakeBluetoothService()
         let connected = makeDevice(name: "已连接", roomID: room.id)
         bluetooth.markConnected(connected.peripheralID)
-        let recent = makeDevice(name: "刚出现", roomID: room.id, lastSeenAt: now.addingTimeInterval(-60))
-        let stale = makeDevice(name: "很久没出现", roomID: room.id, lastSeenAt: now.addingTimeInterval(-16 * 60))
+        let recentScan = makeDevice(name: "刚扫描到", roomID: room.id, lastSeenAt: now.addingTimeInterval(-60))
+        let staleScan = makeDevice(name: "很久没扫描到", roomID: room.id, lastSeenAt: now.addingTimeInterval(-16 * 60))
         let crossPlatform = makeDevice(name: "安卓设备", roomID: room.id, platform: "android")
-        for device in [connected, recent, stale, crossPlatform] {
+        for device in [connected, recentScan, staleScan, crossPlatform] {
             try deviceStore.upsert(device)
         }
 
         let viewModel = makeViewModel(room: room, bluetooth: bluetooth)
         viewModel.reload()
 
-        XCTAssertEqual(viewModel.onlineCount, 2)
-        XCTAssertEqual(viewModel.reportedCount, 0)
-        XCTAssertEqual(viewModel.presenceOfflineCount, 0)
-        XCTAssertEqual(viewModel.neverReportedCount, 2, "本机无在线依据且服务端从未上报，单独一档")
-        XCTAssertEqual(viewModel.remoteCount, 1, "跨平台设备单独计数，不并入本机离线")
+        XCTAssertEqual(viewModel.localConnectedCount, 1, "只有 BLE 已连接才算本机已连接")
+        XCTAssertEqual(viewModel.cloudRecentCount, 0)
+        XCTAssertEqual(viewModel.cloudStaleCount, 0)
+        XCTAssertEqual(
+            viewModel.cloudUnknownCount, 3,
+            "15 分钟内本机扫描到不再算在线；从未上报读数的设备单独一档"
+        )
+        XCTAssertEqual(viewModel.remoteCount, 1, "跨平台设备是附加说明，不占独立档位")
+        let recentEntry = viewModel.entries.first { $0.device.displayName == "刚扫描到" }
+        XCTAssertEqual(recentEntry?.linkStatus.tier, .cloudUnknown, "本机扫描不能替代服务端上报窗口")
+        XCTAssertEqual(recentEntry?.statusText, L10n.t("device.link.cloudUnknown"))
         let crossPlatformEntry = viewModel.entries.first { $0.device.displayName == "安卓设备" }
-        XCTAssertEqual(crossPlatformEntry?.isOnline, false, "本机没有连接依据，不判定在线")
+        XCTAssertEqual(crossPlatformEntry?.linkStatus.tier, .cloudUnknown)
         XCTAssertEqual(
             crossPlatformEntry?.statusText,
             crossPlatformEntry?.device.connectUnavailableText,
             "本机不可连接时如实说明来源边界，不宣称离线"
         )
-        XCTAssertEqual(crossPlatformEntry?.presenceNote, L10n.t("device.presence.unknown"))
+        XCTAssertEqual(
+            crossPlatformEntry?.presenceNote,
+            L10n.t("device.link.cloudUnknown"),
+            "本机不可连接与云端状态同时呈现，不互相遮蔽"
+        )
     }
 
     func testPresenceThreeStatesUseServerLastSeenAndNeverClaimOnline() throws {
@@ -126,30 +136,40 @@ final class RoomDetailTests: XCTestCase {
         let viewModel = makeViewModel(room: room)
         viewModel.reload()
 
-        XCTAssertEqual(viewModel.onlineCount, 0)
-        XCTAssertEqual(viewModel.reportedCount, 1)
-        XCTAssertEqual(viewModel.presenceOfflineCount, 1)
-        XCTAssertEqual(viewModel.neverReportedCount, 1, "unknown 不并进离线")
+        XCTAssertEqual(viewModel.localConnectedCount, 0)
+        XCTAssertEqual(viewModel.cloudRecentCount, 1)
+        XCTAssertEqual(viewModel.cloudStaleCount, 1)
+        XCTAssertEqual(viewModel.cloudUnknownCount, 1, "unknown 不并进上报超时")
         XCTAssertEqual(viewModel.entries.map(\.device.displayName), ["刚上报", "久未上报", "从未上报"])
 
         let reportedEntry = viewModel.entries[0]
         XCTAssertEqual(reportedEntry.presence, .online)
+        XCTAssertEqual(reportedEntry.statusText, L10n.t("device.link.cloudRecent"))
         XCTAssertEqual(
-            reportedEntry.statusText,
-            L10n.f("room.detail.lastReported", RelativeTimeText.short(for: now.addingTimeInterval(-120)))
+            reportedEntry.presenceNote,
+            L10n.f(
+                "device.link.serverLastReported",
+                RelativeTimeText.short(for: now.addingTimeInterval(-120), relativeTo: now)
+            )
         )
-        XCTAssertFalse(reportedEntry.statusText.contains(L10n.t("room.detail.online")), "不得把服务端推导写成在线")
+        XCTAssertFalse(reportedEntry.statusText.contains("在线"), "不得把服务端推导写成在线")
 
         let staleEntry = viewModel.entries[1]
         XCTAssertEqual(staleEntry.presence, .offline)
+        XCTAssertEqual(staleEntry.statusText, L10n.t("device.link.cloudStale"))
         XCTAssertEqual(
-            staleEntry.statusText,
-            L10n.f("room.detail.offlineWithTime", RelativeTimeText.short(for: now.addingTimeInterval(-2 * 60 * 60)))
+            staleEntry.presenceNote,
+            L10n.f(
+                "device.link.serverLastReported",
+                RelativeTimeText.short(for: now.addingTimeInterval(-2 * 60 * 60), relativeTo: now)
+            ),
+            "上报超时也要给出具体最近上报时间，不写成「已离线」"
         )
 
         let neverEntry = viewModel.entries[2]
         XCTAssertEqual(neverEntry.presence, .unknown)
-        XCTAssertEqual(neverEntry.statusText, L10n.t("device.presence.unknown"))
+        XCTAssertEqual(neverEntry.statusText, L10n.t("device.link.cloudUnknown"))
+        XCTAssertNil(neverEntry.presenceNote, "从未上报且本机无扫描记录时不再编造时间")
     }
 
     func testPresenceWindowBoundaryAtNineHundredSeconds() throws {
@@ -173,8 +193,8 @@ final class RoomDetailTests: XCTestCase {
 
         XCTAssertEqual(viewModel.entries.first { $0.device.displayName == "边界" }?.presence, .online)
         XCTAssertEqual(viewModel.entries.first { $0.device.displayName == "超窗" }?.presence, .offline)
-        XCTAssertEqual(viewModel.reportedCount, 1)
-        XCTAssertEqual(viewModel.presenceOfflineCount, 1)
+        XCTAssertEqual(viewModel.cloudRecentCount, 1)
+        XCTAssertEqual(viewModel.cloudStaleCount, 1, "900 秒内为云端最近上报，超过即上报超时")
     }
 
     func testLocalConnectionTakesPriorityOverStaleServerPresence() throws {
@@ -191,9 +211,18 @@ final class RoomDetailTests: XCTestCase {
         let viewModel = makeViewModel(room: room, bluetooth: bluetooth)
         viewModel.reload()
 
-        XCTAssertEqual(viewModel.onlineCount, 1, "本机 BLE 连接优先，服务端 offline 不覆盖")
-        XCTAssertEqual(viewModel.presenceOfflineCount, 0)
-        XCTAssertEqual(viewModel.entries[0].statusText, L10n.t("room.detail.online"))
+        XCTAssertEqual(viewModel.localConnectedCount, 1, "本机 BLE 连接优先，服务端超时不被说成本机在线")
+        XCTAssertEqual(viewModel.cloudStaleCount, 0, "本机已连接时不占云端档位")
+        XCTAssertEqual(viewModel.entries[0].statusText, L10n.t("device.link.localConnected"))
+        XCTAssertEqual(
+            viewModel.entries[0].presenceNote,
+            "\(L10n.t("device.link.cloudStale")) · "
+                + L10n.f(
+                    "device.link.serverLastReported",
+                    RelativeTimeText.short(for: now.addingTimeInterval(-3 * 60 * 60), relativeTo: now)
+                ),
+            "本机连接与云端超时同时呈现，不互相遮蔽"
+        )
     }
 
     // MARK: - 批量标记
@@ -387,7 +416,12 @@ final class RoomDetailTests: XCTestCase {
 
     func testCloudReadingFillsMissingLocalReadingAndKeepsSourceBoundary() throws {
         let room = try roomStore.create(name: "客厅", at: now)
-        let device = makeDevice(name: "客厅温湿度计", roomID: room.id, platform: "android")
+        let device = makeDevice(
+            name: "客厅温湿度计",
+            roomID: room.id,
+            platform: "android",
+            serverLastSeenAt: now.addingTimeInterval(-60)
+        )
         try deviceStore.upsert(device)
         let cloud = FakeCloudReadings()
         cloud.states[cloudKey(for: device)] = .available(CloudLatestReading(
@@ -409,9 +443,13 @@ final class RoomDetailTests: XCTestCase {
         XCTAssertEqual(entry.statusText, device.connectUnavailableText, "跨平台设备不宣称离线")
     }
 
-    func testLocalReadingTakesPrecedenceOverCloud() throws {
+    func testLocalReadingTakesPrecedenceOverCloudAndSkipsRequest() throws {
         let room = try roomStore.create(name: "客厅", at: now)
-        let device = makeDevice(name: "面板", roomID: room.id)
+        let device = makeDevice(
+            name: "面板",
+            roomID: room.id,
+            serverLastSeenAt: now.addingTimeInterval(-60)
+        )
         try deviceStore.upsert(device)
         try readingsStore.insert(DeviceReading(
             deviceID: device.id,
@@ -436,11 +474,17 @@ final class RoomDetailTests: XCTestCase {
         let entry = try XCTUnwrap(viewModel.entries.first)
         XCTAssertTrue(entry.readingText.contains("21.2"), "本机读数优先")
         XCTAssertNil(entry.cloudNote, "未使用云端数据时不标注云端来源")
+        XCTAssertTrue(cloud.requested.isEmpty, "本机已有读数时不再为云端读数白跑往返")
     }
 
     func testCloudFailureShowsUnavailableRatherThanNoReading() throws {
         let room = try roomStore.create(name: "客厅", at: now)
-        let device = makeDevice(name: "客厅温湿度计", roomID: room.id, platform: "android")
+        let device = makeDevice(
+            name: "客厅温湿度计",
+            roomID: room.id,
+            platform: "android",
+            serverLastSeenAt: now.addingTimeInterval(-60)
+        )
         try deviceStore.upsert(device)
         let cloud = FakeCloudReadings()
         cloud.states[cloudKey(for: device)] = .failed
@@ -455,7 +499,12 @@ final class RoomDetailTests: XCTestCase {
 
     func testCloudEmptyAndNoLocalReadingStaysNoReading() throws {
         let room = try roomStore.create(name: "客厅", at: now)
-        let device = makeDevice(name: "客厅温湿度计", roomID: room.id, platform: "android")
+        let device = makeDevice(
+            name: "客厅温湿度计",
+            roomID: room.id,
+            platform: "android",
+            serverLastSeenAt: now.addingTimeInterval(-60)
+        )
         try deviceStore.upsert(device)
         let cloud = FakeCloudReadings()
         cloud.states[cloudKey(for: device)] = .empty
@@ -466,6 +515,21 @@ final class RoomDetailTests: XCTestCase {
         let entry = try XCTUnwrap(viewModel.entries.first)
         XCTAssertEqual(entry.readingText, L10n.t("room.detail.noReading"))
         XCTAssertNil(entry.cloudNote)
+    }
+
+    func testUnknownPresenceSkipsCloudReadingsRequest() throws {
+        let room = try roomStore.create(name: "客厅", at: now)
+        let device = makeDevice(name: "从未上报", roomID: room.id)
+        try deviceStore.upsert(device)
+        let cloud = FakeCloudReadings()
+
+        let viewModel = makeViewModel(room: room, cloudReadings: cloud)
+        viewModel.reload()
+
+        XCTAssertTrue(cloud.requested.isEmpty, "presence=unknown 时服务端从未接受过读数，不应再请求 metrics + limit=1")
+        let entry = try XCTUnwrap(viewModel.entries.first)
+        XCTAssertEqual(entry.readingText, L10n.t("room.detail.noReading"), "跳过请求不能显示成「正在读取」")
+        XCTAssertEqual(entry.cloudReading, .empty)
     }
 
     // MARK: - Helpers

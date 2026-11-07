@@ -3,10 +3,12 @@ import Foundation
 /// 房间详情中的一台设备：名称、在线状态与最新一条真实读数。
 struct RoomDetailEntry: Equatable {
     let device: SavedDevice
-    /// 本机依据：CoreBluetooth 已连接，或本机最近 15 分钟内扫描到过。
-    let isOnline: Bool
+    /// 统一的四档联动状态：本机 BLE 连接优先，其次服务端按 `lastSeenAt` 推导的上报状态。
+    let linkStatus: DeviceLinkStatus
+    /// 计算相对时间用的基准时刻，页面内所有条目共用。
+    let now: Date
     /// 服务端按 `lastSeenAt` 推导的上报状态（契约 0.21.0），只读。
-    let presence: DevicePresence
+    var presence: DevicePresence { linkStatus.presence }
     /// 本机 SQLite 中的最新读数；有则优先展示。
     let reading: DeviceReading?
     /// 云端最近读数状态；`nil` 表示未接入云端读数服务。
@@ -33,50 +35,37 @@ struct RoomDetailEntry: Equatable {
         }
     }
 
-    /// 本机有依据时用本机状态；否则用服务端上报状态，且不把推导结果说成「在线」。
+    /// 本机可连接时用统一四档标题；跨平台设备如实说明来源边界。
     var statusText: String {
-        if isOnline { return L10n.t("room.detail.online") }
-        if !device.isConnectable { return device.connectUnavailableText ?? L10n.t("room.detail.remoteOnlyShort") }
-        switch presence {
-        case .online:
-            guard let serverLastSeenAt = device.serverLastSeenAt else {
-                return L10n.t("device.presence.reported")
-            }
-            return L10n.f("room.detail.lastReported", RelativeTimeText.short(for: serverLastSeenAt))
-        case .offline:
-            guard let serverLastSeenAt = device.serverLastSeenAt else {
-                return L10n.t("device.presence.offline")
-            }
-            return L10n.f("room.detail.offlineWithTime", RelativeTimeText.short(for: serverLastSeenAt))
-        case .unknown:
-            return L10n.t("device.presence.unknown")
+        guard device.isConnectable else {
+            return device.connectUnavailableText ?? linkStatus.notConnectableText
         }
+        return linkStatus.title
     }
 
-    /// 跨平台设备的状态行只说「本机不可连接」，再用一条附带说明给出最近上报 / 从未上报。
+    /// 第二行：云端是否超时 / 最近上报时间；跨平台设备与「本机不可连接」同时呈现，互不遮蔽。
     var presenceNote: String? {
-        guard !isOnline, !device.isConnectable else { return nil }
-        guard let serverLastSeenAt = device.serverLastSeenAt else {
-            return L10n.t("device.presence.unknown")
-        }
-        if presence == .offline {
-            return L10n.f("room.detail.offlineWithTime", RelativeTimeText.short(for: serverLastSeenAt))
-        }
-        return L10n.f("room.detail.lastReported", RelativeTimeText.short(for: serverLastSeenAt))
+        linkStatus.secondaryText(
+            connectable: device.isConnectable,
+            serverLastSeenAt: device.serverLastSeenAt,
+            localLastSeenAt: device.lastSeenAt,
+            now: now
+        )
     }
 
     /// AX 档用的状态文案：跨平台说明在「来自 X」后显式换行，
     /// 避免最大字号下「本机不可连接」被拆成「本 / 机不可连接」。
     var statusTextForAccessibility: String {
-        if isOnline { return L10n.t("room.detail.online") }
-        if device.isConnectable { return statusText }
-        return L10n.f("device.remoteOnlyAX", String(describing: device.platformDisplayName))
+        guard device.isConnectable else {
+            return L10n.f("device.remoteOnlyAX", String(describing: device.platformDisplayName))
+        }
+        return linkStatus.title
     }
 
     /// 使用云端读数时标注上报时间，说明数据来源；本机读数不追加。
     var cloudNote: String? {
         guard reading == nil, case .available(let cloud)? = cloudReading else { return nil }
-        return L10n.f("room.detail.cloudReported", RelativeTimeText.short(for: cloud.reportedAt))
+        return L10n.f("room.detail.cloudReported", RelativeTimeText.short(for: cloud.reportedAt, relativeTo: now))
     }
 
     /// 标记状态：已标记 / 已标记 · 待同步 / 已取消标记 · 待同步；未标记且无待上传变更时为 nil。
@@ -95,12 +84,12 @@ struct RoomDetailEntry: Equatable {
 /// 房间详情聚合视图：设备列表来自本机 SQLite 与服务端同步落地的同一份 `saved_devices`；
 /// 读数优先取本机，本机没有时查询服务端按设备读数接口。
 ///
-/// 在线判定：本机 BLE 优先（已连接，或最近 15 分钟内扫描到），其次才是服务端
+/// 状态判定与首页共用 `DeviceLinkStatus`：本机 BLE 已连接为第一档，其次才是服务端
 /// `presence`（按 `lastSeenAt` 与 900 秒窗口推导）。服务端 `online` 只表示
-/// 「最近 15 分钟有读数上报」，界面写成「最近上报」，不包装成权威的在线绿灯；
-/// `unknown`（从未上报）单独一档，不并进离线。
+/// 「最近 15 分钟有读数上报」，界面写成「云端 15 分钟内有上报」，不包装成权威的在线绿灯；
+/// `unknown`（从未上报）单独一档，不并进「上报超时」。跨平台设备的「本机不可连接」
+/// 是附加说明，与云端状态同时呈现。
 final class RoomDetailViewModel {
-    private static let onlineWindow: TimeInterval = 15 * 60
 
     private(set) var room: Room
     private(set) var entries: [RoomDetailEntry] = []
@@ -145,15 +134,15 @@ final class RoomDetailViewModel {
     }
 
     var totalCount: Int { entries.count }
-    /// 本机有真实连接 / 最近扫描依据的在线数。
-    var onlineCount: Int { entries.filter(\.isOnline).count }
-    /// 本机没有依据、但服务端 `presence = online` 的数量（只代表最近 15 分钟有读数上报）。
-    var reportedCount: Int { entries.filter { !$0.isOnline && $0.presence == .online }.count }
-    /// 本机没有依据、且服务端显示已超出上报窗口的数量；不含 `unknown`。
-    var presenceOfflineCount: Int { entries.filter { !$0.isOnline && $0.presence == .offline }.count }
-    /// 服务端从未收到过读数的数量：单独一档，不并进离线。
-    var neverReportedCount: Int { entries.filter { !$0.isOnline && $0.presence == .unknown }.count }
-    /// 跨平台设备数量：本机没有在线判定依据，单独计数，不计入「离线」。
+    /// BLE 真实连接的数量。
+    var localConnectedCount: Int { entries.filter { $0.linkStatus.tier == .localConnected }.count }
+    /// 服务端最近 15 分钟有读数上报的数量（只代表上报窗口，不代表设备当前连接着）。
+    var cloudRecentCount: Int { entries.filter { $0.linkStatus.tier == .cloudRecent }.count }
+    /// 曾上报读数但已超出上报窗口的数量。
+    var cloudStaleCount: Int { entries.filter { $0.linkStatus.tier == .cloudStale }.count }
+    /// 服务端从未收到过读数的数量：单独一档，不并进「上报超时」。
+    var cloudUnknownCount: Int { entries.filter { $0.linkStatus.tier == .cloudUnknown }.count }
+    /// 跨平台设备数量：附加的本机连接说明，不占独立档位。
     var remoteCount: Int { entries.filter { !$0.device.isConnectable }.count }
     var markedCount: Int { entries.filter { $0.device.markedAt != nil }.count }
     /// 标记 / 取消标记已写本机但尚未 push 的数量。
@@ -165,9 +154,9 @@ final class RoomDetailViewModel {
     var summaryText: String {
         L10n.f(
             "room.detail.summary",
-            String(totalCount), String(onlineCount), String(reportedCount),
-            String(presenceOfflineCount), String(neverReportedCount),
-            String(remoteCount), String(markedCount)
+            String(totalCount), String(localConnectedCount), String(cloudRecentCount),
+            String(cloudStaleCount), String(cloudUnknownCount),
+            String(markedCount), String(remoteCount)
         )
     }
 
@@ -205,18 +194,35 @@ final class RoomDetailViewModel {
 
     private func rebuildEntries() {
         let now = self.now()
-        let onlineSince = now.addingTimeInterval(-Self.onlineWindow)
         entries = roomDevices.map { device in
-            RoomDetailEntry(
+            let reading = try? readingsStore.latestReading(deviceID: device.id)
+            let presence = device.presence(at: now)
+            let linkStatus = DeviceLinkStatus(
+                isConnected: Self.isConnected(device, bluetooth: bluetooth),
+                presence: presence
+            )
+            let cloudReading: CloudLatestReadingState?
+            if cloudReadings == nil {
+                cloudReading = nil
+            } else if let state = cloudStates[device.id] {
+                cloudReading = state
+            } else if presence == .unknown || reading != nil {
+                // 从未上报或本机已有读数时不会发起云端请求，也不显示「正在读取」。
+                cloudReading = .empty
+            } else {
+                cloudReading = .loading
+            }
+            return RoomDetailEntry(
                 device: device,
-                isOnline: Self.isOnline(device, bluetooth: bluetooth, onlineSince: onlineSince),
-                presence: device.presence(at: now),
-                reading: try? readingsStore.latestReading(deviceID: device.id),
-                cloudReading: cloudReadings == nil ? nil : (cloudStates[device.id] ?? .loading)
+                linkStatus: linkStatus,
+                now: now,
+                reading: reading,
+                cloudReading: cloudReading
             )
         }.sorted { lhs, rhs in
-            if lhs.isOnline != rhs.isOnline { return lhs.isOnline }
-            if lhs.presence != rhs.presence { return Self.presenceRank(lhs.presence) < Self.presenceRank(rhs.presence) }
+            if lhs.linkStatus.sortRank != rhs.linkStatus.sortRank {
+                return lhs.linkStatus.sortRank < rhs.linkStatus.sortRank
+            }
             let leftName = lhs.device.displayName
             let rightName = rhs.device.displayName
             if leftName != rightName { return leftName < rightName }
@@ -224,19 +230,16 @@ final class RoomDetailViewModel {
         }
     }
 
-    /// 本机在线优先；服务端状态里最近上报 > 已离线 > 从未上报。
-    private static func presenceRank(_ presence: DevicePresence) -> Int {
-        switch presence {
-        case .online: return 0
-        case .offline: return 1
-        case .unknown: return 2
-        }
-    }
-
     /// 逐台补云端最近读数；结果在主队列回调，只重建条目，不重复发起整页刷新。
+    ///
+    /// `presence = unknown` 表示服务端从未接受过该设备读数，再查 `metrics + limit=1`
+    /// 只是白跑两次往返；本机已有读数时界面也本机优先，同样跳过。
     private func requestCloudReadings() {
         guard let cloudReadings else { return }
+        let timestamp = now()
         for device in roomDevices {
+            guard device.presence(at: timestamp) != .unknown else { continue }
+            guard (try? readingsStore.latestReading(deviceID: device.id)) == nil else { continue }
             cloudReadings.latestReading(platform: device.platform, externalID: device.externalID) { [weak self] state in
                 guard let self, self.cloudStates[device.id] != state else { return }
                 self.cloudStates[device.id] = state
@@ -285,16 +288,9 @@ final class RoomDetailViewModel {
         }
     }
 
-    /// 在线判定与首页一致：已连接优先，其次最近 15 分钟内出现过。
-    static func isOnline(
-        _ device: SavedDevice,
-        bluetooth: BluetoothServicing,
-        onlineSince: Date
-    ) -> Bool {
-        if device.isConnectable, bluetooth.isConnected(peripheralID: device.peripheralID) {
-            return true
-        }
-        guard let lastSeenAt = device.lastSeenAt else { return false }
-        return lastSeenAt >= onlineSince
+    /// 本机连接判定：只有本机可连接的 iOS 设备才查询 CoreBluetooth。
+    /// 与首页共用同一口径，不再把「15 分钟内本机扫描到」额外算作在线。
+    static func isConnected(_ device: SavedDevice, bluetooth: BluetoothServicing) -> Bool {
+        device.isConnectable && bluetooth.isConnected(peripheralID: device.peripheralID)
     }
 }

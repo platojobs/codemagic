@@ -242,7 +242,7 @@ final class HomeLayoutTests: XCTestCase {
         XCTAssertNotNil(nameLabel, "找到设备名标签")
         XCTAssertEqual(nameLabel?.numberOfLines, 0, "设备名不限制行数，由卡片高度容纳")
 
-        guard let statusLabel = firstLabel(in: cell, text: L10n.t("device.presence.unknownShort")) else {
+        guard let statusLabel = firstLabel(in: cell, text: L10n.t("device.link.cloudUnknown")) else {
             return XCTFail("找到状态标签")
         }
         XCTAssertGreaterThan(statusLabel.bounds.height, 0)

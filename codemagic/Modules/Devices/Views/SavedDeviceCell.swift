@@ -28,20 +28,18 @@ final class SavedDeviceCell: UITableViewCell {
         if let mark = device.markStatusText {
             metaParts.append(mark)
         }
-        if let serverLastSeenAt = device.serverLastSeenAt {
-            let relative = String(describing: AppDateFormat.relative(serverLastSeenAt))
-            switch device.presence(at: now) {
-            case .online:
-                metaParts.append(L10n.f("device.cell.lastReported", relative))
-            case .offline:
-                metaParts.append(L10n.f("room.detail.offlineWithTime", relative))
-            case .unknown:
-                metaParts.append(L10n.t("device.presence.unknown"))
-            }
-        } else if let lastSeenAt = device.lastSeenAt {
-            metaParts.append(L10n.f("device.cell.lastSeen", String(describing: AppDateFormat.relative(lastSeenAt))))
+        // 云端状态与相对时间用统一四档实现；跨平台设备的「本机不可连接」在下方单独一行，
+        // 两件事同时呈现，不互相遮蔽。
+        let linkStatus = DeviceLinkStatus(isConnected: false, presence: device.presence(at: now))
+        if let summary = linkStatus.secondaryText(
+            connectable: true,
+            serverLastSeenAt: device.serverLastSeenAt,
+            localLastSeenAt: device.lastSeenAt,
+            now: now
+        ) {
+            metaParts.append(summary)
         } else {
-            metaParts.append(L10n.t("device.presence.unknown"))
+            metaParts.append(linkStatus.cloudStatusText)
         }
         metaLabel.text = metaParts.joined(separator: " · ")
 

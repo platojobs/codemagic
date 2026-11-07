@@ -911,8 +911,14 @@ private func run() -> Int32 {
     // 冒号在 URL 路径段中是合法字符；不要预编码，否则 Gin 不会二次解码。
     let macPath = androidMAC
     let ownDevice = client.request("GET", "my/devices/\(macPath)", token: tokenA)
-    report.check(ownDevice.status == 200, "本人按 MAC 查询返回 200", "status=\(ownDevice.status)")
     let ownDeviceObject = jsonObject(ownDevice.body) ?? [:]
+    report.check(
+        ownDevice.status == 200
+            && text(ownDeviceObject, "presence") == "unknown"
+            && (ownDeviceObject["lastSeenAt"] == nil || ownDeviceObject["lastSeenAt"] is NSNull),
+        "本人按 MAC 查询返回 200，且从未上报读数的设备 presence=unknown / lastSeenAt=null",
+        "status=\(ownDevice.status) presence=\(text(ownDeviceObject, "presence")) lastSeenAt=\(ownDeviceObject["lastSeenAt"] ?? "nil")"
+    )
     report.check(text(ownDeviceObject, "alias") == sharedAlias, "服务端仍保留较新 alias，未被旧版本覆盖", "alias=\(text(ownDeviceObject, "alias"))")
     report.check(text(ownDeviceObject, "group") == sharedGroup, "服务端仍保留较新 group", "group=\(text(ownDeviceObject, "group"))")
 

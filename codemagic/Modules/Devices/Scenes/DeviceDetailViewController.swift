@@ -257,20 +257,13 @@ final class DeviceDetailViewController: UIViewController {
         return sections
     }
 
-    /// 服务端上报状态：只陈述「最近上报」时间，不写成权威在线状态。
+    /// 服务端上报状态：只陈述「云端最近上报」时间与是否超时，不写成权威在线状态。
     private func presenceText(for device: SavedDevice) -> String {
+        let linkStatus = DeviceLinkStatus(isConnected: false, presence: device.presence(at: Date()))
         guard let serverLastSeenAt = device.serverLastSeenAt else {
-            return L10n.t("device.presence.unknown")
+            return linkStatus.cloudStatusText
         }
-        let absolute = AppDateFormat.absolute(serverLastSeenAt)
-        switch device.presence(at: Date()) {
-        case .online:
-            return L10n.f("device.detail.lastReported", absolute)
-        case .offline:
-            return L10n.f("device.detail.offlineWithTime", absolute)
-        case .unknown:
-            return L10n.t("device.presence.unknown")
-        }
+        return "\(linkStatus.cloudStatusText) · \(AppDateFormat.absolute(serverLastSeenAt))"
     }
 
     /// 「数据」区：区间切换 → 指标选择 → 时间比例折线图 → 24h 汇总 → 来源 → 最近记录。

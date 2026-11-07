@@ -28,7 +28,7 @@ PJGOIOT_DIR=/tmp/pjgoiot-v026 ./scripts/e2e-postgres.sh
 
 隔离说明：所有后端状态与日志都在 `mktemp` 目录（`E2E_STATE_DIR`）；契约 runner 是纯网络、无本地状态，**不读写 App 开发用的 SQLite / UserDefaults**。
 
-## 真实输出（2026-11-07，v0.31.5 / 后端 v0.26.0 / 契约 0.21.0 / 迁移 20）
+## 真实输出（2026-11-07，v0.31.6 / 后端 v0.26.0 / 契约 0.21.0 / 迁移 20）
 
 ```text
 == 起真实 Postgres + API（状态目录 /var/folders/…/codemagic-e2e-pg.r5TCIS/stack） ==
@@ -111,6 +111,8 @@ PASS 注销: DELETE=204，旧 token 再访问=401
 | --- | --- | --- |
 | 匿名登录 | 真实 `POST /auth/anonymous` | PASS，返回 `expiresAt` |
 | 推送设备 + 读数 | 真实 `POST /sync/push`（1 设备 / 4 读数） | PASS |
+| 设备上报状态 `presence` / `lastSeenAt` | 读数被接受后 `GET /my/devices/ios/{externalId}` | PASS：`presence=online`，`lastSeenAt` 与当前相差 ≤ 60 秒（服务端接收时间，非客户端 `recordedAt`） |
+| 上报超时 `presence=offline` | `UPDATE user_devices SET last_seen_at = now() - interval '20 minutes'` 后再读接口 | PASS：`presence=offline`，且仍保留 `lastSeenAt` 具体时间 |
 | changes | `cursor=0&limit=500` | PASS |
 | 410 分支 | SQL 改 `server_ts` 100 天前 + `cleanup(90)`，再 `cursor=102` | PASS，`410 RESYNC_REQUIRED` |
 | 410 后全量 | `cursor=0` | PASS，`200` + `nextCursor=104` |
@@ -121,3 +123,5 @@ PASS 注销: DELETE=204，旧 token 再访问=401
 ## CI 边界
 
 GitHub Actions 的 macOS runner **无法运行 Docker**，因此本项 **不进 CI**，只在本地执行；CI 中仍只跑 `scripts/e2e-contract.sh`（fixture）。上表结果来自本机真实运行，不是 CI 截图。
+
+`e2e-contract.sh` 使用 **`STORE=fixture`**（后端 v0.26.0），fixture 不记录读数推送的服务端接收时间，因此 `presence` 恒为 `unknown`；它只断言从未上报设备的 `presence=unknown / lastSeenAt=null`，**不能证明 online / offline 推导**。online 与回拨后的 offline 由本文件的真实 Postgres 步骤覆盖。CI 还额外 pin 在 `PJGoIoT` v0.25.0（无 presence 字段），所以 CI 的 460 项全绿不代表新字段已被断言。

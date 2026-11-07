@@ -599,6 +599,37 @@ assert body.get("skippedReadings") == 0, body
 print("PASS push#1: applied=%d appliedReadings=%d" % (len(body["applied"]), body["appliedReadings"]))
 PY
 
+step "presence（真 Postgres）：读数被接受后 online，lastSeenAt 为服务端接收时间"
+DEVICE_PRESENCE_JSON="$(curl -fsS -H "Authorization: Bearer $TOKEN" \
+    "$BASE_URL/api/v1/my/devices/ios/$EXTERNAL_ID")"
+python3 - "$DEVICE_PRESENCE_JSON" <<'PY'
+import datetime as dt
+import json
+import sys
+body = json.loads(sys.argv[1])
+assert body.get("presence") == "online", body
+seen = body.get("lastSeenAt")
+assert seen, body
+parsed = dt.datetime.strptime(seen[:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=dt.timezone.utc)
+delta = abs((dt.datetime.now(dt.timezone.utc) - parsed).total_seconds())
+assert delta <= 60, "lastSeenAt 应是服务端接收时间而非客户端 recordedAt：%r (%ss)" % (seen, delta)
+print("PASS presence online: lastSeenAt=%s" % seen)
+PY
+
+step "presence（真 Postgres）：回拨 last_seen_at 20 分钟，读接口实时推导 offline"
+docker exec "$PG_CONTAINER" psql -U "$PG_USER" -d "$PG_DB" -v ON_ERROR_STOP=1 \
+    -c "UPDATE user_devices SET last_seen_at = now() - interval '20 minutes' WHERE user_id = '$USER_ID'::uuid AND platform = 'ios' AND external_id = '$EXTERNAL_ID';" >/dev/null
+STALE_PRESENCE_JSON="$(curl -fsS -H "Authorization: Bearer $TOKEN" \
+    "$BASE_URL/api/v1/my/devices/ios/$EXTERNAL_ID")"
+python3 - "$STALE_PRESENCE_JSON" <<'PY'
+import json
+import sys
+body = json.loads(sys.argv[1])
+assert body.get("presence") == "offline", body
+assert body.get("lastSeenAt"), "offline 仍必须保留最近上报时间"
+print("PASS presence offline: lastSeenAt=%s" % body["lastSeenAt"])
+PY
+
 step "再次更新同一设备（制造两条 change_log，供 410 构造间隙）"
 python3 - "$TMP_ROOT/artifacts/push-1.json" >"$TMP_ROOT/artifacts/push-2.json" <<'PY'
 import datetime as dt

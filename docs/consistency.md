@@ -690,6 +690,22 @@ Android 自 v0.22.0 起把服务端 `SCENE_*` 4xx 视为终态；iOS v0.24.0 对
 
 **截图**：iPhone / iPad 的首页与房间详情（默认 / 200% / AX5 / 成员 / iPad）用真实后端 v0.26.0 + seed 重拍，presence 显示「最近上报 X 前」，与 seed 后 `last_seen_at` 对得上；跨平台设备仍标「本机不可连接」。
 
+### 3.29 v0.31.6：三端 presence 对账后的 iOS 收敛
+
+依据 `PKotlinApp/docs/consistency-presence.md`，修掉 v0.31.5 遗留的四处偏差，使 iOS 与 Android 的判定口径、文案层级一致。
+
+**1）在线判定统一。** 新增 `Core/Models/DeviceLinkStatus.swift`，以 `tier` 表达四档：`localConnected`（本机 BLE 已连接）/ `cloudRecent`（`presence = online`）/ `cloudStale`（`presence = offline`）/ `cloudUnknown`（`presence = unknown`）。`init(isConnected:presence:)` 固定「本机连接优先」，排序 `sortRank` 也由它给出。首页 `HomeCells`、房间详情 `RoomDetailViewModel`、设备列表 `SavedDeviceCell`、设备详情 `DeviceDetailViewController` 全部改用这一份实现；房间详情删除旧的 `isOnline`（它把「15 分钟内本机扫描到」也算在线，导致同机两页对同一设备给出不同档数），`lastSeenAt` 只作为本机扫描时间参与「本机最近扫描 X 前」，不再参与在线判定。
+
+**2）整组文案去掉上帝视角。** 四个档位统一为「本机已连接 / 云端 15 分钟内有上报 / 云端上报已超时 / 云端从未收到上报」；时间行统一写「云端最近上报 X 前」（无服务端时间时才退回「本机最近扫描 X 前」）。`offline` 不再写「已离线」，`online` 也不再写「最近上报」冒充权威在线；房间汇总四行改为 `共 N 台` / `本机已连接 N · 云端 15 分钟内有上报 N` / `云端上报已超时 N · 云端从未收到上报 N` / `已标记 N · 本机不可连接 N`。旧键 `device.presence.*`、`room.detail.online / offline / lastReported / offlineWithTime / remoteOnlyShort`、`home.status.connected / crossPlatform / lastReported`、`device.cell.lastReported`、`device.detail.lastReported / offlineWithTime` 已从双语 strings 删除，避免旧口吻被再次引用。
+
+**3）跨平台不再遮住 presence。** `isConnectable == false` 只是附加的本机连接说明，不是第五档。首页状态行写「本机不可连接」，时间行同时给「云端上报已超时 · 云端最近上报 X 前」或「云端 15 分钟内有上报 · 云端最近上报 X 前」；房间详情第一行保留「来自 Android，本机不可连接」，第二行给云端状态与时间；AX 档同样同时保留两件事，并修掉 `metaText` AX 分支此前丢弃「已标记」的问题。
+
+**4）`unknown` 跳过云端读数请求。** 房间与首页的 `requestCloudReadings` 在 `presence == unknown` 时直接跳过（服务端从未接受过该设备读数，`metrics + limit=1` 只会白跑两次往返）；本机已有读数时也跳过（界面本机优先）。房间详情对被跳过的设备把云端读数状态标记为 `.empty`，不再显示「正在读取」。
+
+**测试与 e2e。** 新增 `DeviceLinkStatusTests`（四档、BLE 优先、900 秒边界、跨平台同时呈现、文案不含「在线」）与房间 / 首页「unknown 跳过云端请求」用例，单测合计 **495**（0 失败）。`e2e-contract` 的 presence 断言并入既有 check（总项数保持 **460**）：`GET /my/devices/{mac}` 对从未上报的设备断言 `presence = unknown` 且 `lastSeenAt` 为 `null`；曾临时把期望改为 `online` 做反向验证，结果为 **459 通过 / 1 失败 / 退出码 1**，证明断言确实会触发。真 Postgres 的 `e2e-postgres.sh` 增加两步：读数被接受后断言 `presence = online` 且 `lastSeenAt` 距当前 ≤ 60 秒（排除客户端 `recordedAt`）；把 `user_devices.last_seen_at` 回拨 20 分钟后断言 `presence = offline` 且仍保留最近上报时间。
+
+**CI 覆盖边界。** `ios.yml:84` 仍 pin `PJGoIoT` v0.25.0（无 presence 字段），CI 的 460 项全绿**不包含新字段断言**；本机推送凭证缺少 `workflow` scope，无法修改 workflow 文件。新字段只在本地 v0.26.0 验证，README 第 1 节与第 8.1 节已显著标注，避免被误读为已覆盖。
+
 ## 4. 错误码
 
 客户端错误码用于日志、空状态副标题与问题反馈，**两端含义一致**：

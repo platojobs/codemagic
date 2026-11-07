@@ -245,6 +245,11 @@ final class HomeDashboardViewModel {
         device.presence(at: now())
     }
 
+    /// 与房间详情共用的四档联动状态：本机 BLE 连接优先，其次服务端上报状态。
+    func linkStatus(for device: SavedDevice) -> DeviceLinkStatus {
+        DeviceLinkStatus(isConnected: isConnected(device), presence: presence(for: device))
+    }
+
     var emptyStateText: String {
         devices.isEmpty ? AppCopy.Home.emptyMessage : AppCopy.Home.filteredMessage
     }
@@ -411,9 +416,14 @@ final class HomeDashboardViewModel {
     // MARK: - Private
 
     /// 本机没有读数的设备补查云端最近读数；失败只记录状态，不当作离线。
+    ///
+    /// `presence = unknown` 表示服务端从未接受过该设备读数，再查 `metrics + limit=1`
+    /// 只是白跑两次往返；本机已有读数时界面本机优先，同样跳过。
     private func requestCloudReadings() {
         guard let cloudReadings else { return }
         for device in devices {
+            guard presence(for: device) != .unknown else { continue }
+            guard latestReadings[device.id] == nil else { continue }
             cloudReadings.latestReading(platform: device.platform, externalID: device.externalID) { [weak self] state in
                 guard let self, self.cloudStates[device.id] != state else { return }
                 self.cloudStates[device.id] = state
