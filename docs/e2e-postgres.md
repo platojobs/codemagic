@@ -1,18 +1,18 @@
-# 真实 Postgres 端到端联调（v0.28.0）
+# 真实 Postgres 端到端联调（v0.31.5）
 
 本文件记录 `scripts/e2e-postgres.sh` 的**真实本地运行输出**。与 `scripts/e2e-contract.sh`（后端 `STORE=fixture` 内存态）不同，本项起真实 Postgres + 真实 API，额外覆盖只有真实库才能构造的分支，并直接查库核对家庭链路的数据不变量。
 
 ## 环境与命令
 
-- iOS 仓库：`codemagic`（v0.28.0）
-- 后端：`PJGoIoT` **`v0.23.0`**，通过 `PJGOIOT_DIR` 指向干净 worktree（固定在该 tag，不改原仓库未提交内容）
+- iOS 仓库：`codemagic`（v0.31.5）
+- 后端：`PJGoIoT` **`v0.26.0`**（契约 0.21.0，迁移 20），通过 `PJGOIOT_DIR` 指向干净 worktree（固定在该 tag，不改原仓库未提交内容）
 - 本机：macOS + Docker + Go 1.24+（Docker daemon 可用）
 - 命令：
 
 ```bash
 cd /Users/platojobs/Desktop/GitHub/platojobs/codemagic
-git -C /Users/platojobs/Desktop/GitHub/platojobs/PJGoIoT worktree add /tmp/pjgoiot-v023 v0.23.0
-PJGOIOT_DIR=/tmp/pjgoiot-v023 ./scripts/e2e-postgres.sh
+git -C /Users/platojobs/Desktop/GitHub/platojobs/PJGoIoT worktree add /tmp/pjgoiot-v026 v0.26.0
+PJGOIOT_DIR=/tmp/pjgoiot-v026 ./scripts/e2e-postgres.sh
 ```
 
 脚本行为：
@@ -28,7 +28,7 @@ PJGOIOT_DIR=/tmp/pjgoiot-v023 ./scripts/e2e-postgres.sh
 
 隔离说明：所有后端状态与日志都在 `mktemp` 目录（`E2E_STATE_DIR`）；契约 runner 是纯网络、无本地状态，**不读写 App 开发用的 SQLite / UserDefaults**。
 
-## 真实输出（2026-11-07，v0.28.0 / 后端 v0.23.0）
+## 真实输出（2026-11-07，v0.31.5 / 后端 v0.26.0 / 契约 0.21.0 / 迁移 20）
 
 ```text
 == 起真实 Postgres + API（状态目录 /var/folders/…/codemagic-e2e-pg.r5TCIS/stack） ==

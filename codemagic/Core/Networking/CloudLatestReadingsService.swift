@@ -113,7 +113,10 @@ enum RelativeTimeText {
     }()
 
     static func short(for date: Date, relativeTo now: Date = Date()) -> String {
+        // 用不换行空格把「14 分钟前」这类时间短语固定成一个语义单元，
+        // AX 最大字号下只会整段换行，不会出现「前」单独掉到下一行。
         formatter.localizedString(for: date, relativeTo: now)
+            .replacingOccurrences(of: " ", with: "\u{00A0}")
     }
 }
 

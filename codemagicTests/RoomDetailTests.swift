@@ -60,12 +60,14 @@ final class RoomDetailTests: XCTestCase {
 
         XCTAssertEqual(viewModel.totalCount, 2, "只聚合本房间设备")
         XCTAssertEqual(viewModel.onlineCount, 1)
-        XCTAssertEqual(viewModel.localOfflineCount, 1)
+        XCTAssertEqual(viewModel.reportedCount, 0)
+        XCTAssertEqual(viewModel.presenceOfflineCount, 0)
+        XCTAssertEqual(viewModel.neverReportedCount, 1)
         XCTAssertEqual(viewModel.remoteCount, 0)
         XCTAssertEqual(viewModel.markedCount, 1)
         XCTAssertEqual(
             viewModel.summaryText,
-            L10n.f("room.detail.summary", "2", "1", "1", "0", "1")
+            L10n.f("room.detail.summary", "2", "1", "0", "0", "1", "0", "1")
         )
         XCTAssertEqual(viewModel.entries.map(\.device.displayName), ["面板", "温度计"], "在线优先，其次按名称")
         XCTAssertEqual(viewModel.entries[0].readingText, L10n.t("room.detail.noReading"), "无读数不补造")
@@ -90,7 +92,9 @@ final class RoomDetailTests: XCTestCase {
         viewModel.reload()
 
         XCTAssertEqual(viewModel.onlineCount, 2)
-        XCTAssertEqual(viewModel.localOfflineCount, 1)
+        XCTAssertEqual(viewModel.reportedCount, 0)
+        XCTAssertEqual(viewModel.presenceOfflineCount, 0)
+        XCTAssertEqual(viewModel.neverReportedCount, 2, "本机无在线依据且服务端从未上报，单独一档")
         XCTAssertEqual(viewModel.remoteCount, 1, "跨平台设备单独计数，不并入本机离线")
         let crossPlatformEntry = viewModel.entries.first { $0.device.displayName == "安卓设备" }
         XCTAssertEqual(crossPlatformEntry?.isOnline, false, "本机没有连接依据，不判定在线")
@@ -99,6 +103,97 @@ final class RoomDetailTests: XCTestCase {
             crossPlatformEntry?.device.connectUnavailableText,
             "本机不可连接时如实说明来源边界，不宣称离线"
         )
+        XCTAssertEqual(crossPlatformEntry?.presenceNote, L10n.t("device.presence.unknown"))
+    }
+
+    func testPresenceThreeStatesUseServerLastSeenAndNeverClaimOnline() throws {
+        let room = try roomStore.create(name: "客厅", at: now)
+        let reported = makeDevice(
+            name: "刚上报",
+            roomID: room.id,
+            serverLastSeenAt: now.addingTimeInterval(-120)
+        )
+        let stale = makeDevice(
+            name: "久未上报",
+            roomID: room.id,
+            serverLastSeenAt: now.addingTimeInterval(-2 * 60 * 60)
+        )
+        let never = makeDevice(name: "从未上报", roomID: room.id)
+        for device in [reported, stale, never] {
+            try deviceStore.upsert(device)
+        }
+
+        let viewModel = makeViewModel(room: room)
+        viewModel.reload()
+
+        XCTAssertEqual(viewModel.onlineCount, 0)
+        XCTAssertEqual(viewModel.reportedCount, 1)
+        XCTAssertEqual(viewModel.presenceOfflineCount, 1)
+        XCTAssertEqual(viewModel.neverReportedCount, 1, "unknown 不并进离线")
+        XCTAssertEqual(viewModel.entries.map(\.device.displayName), ["刚上报", "久未上报", "从未上报"])
+
+        let reportedEntry = viewModel.entries[0]
+        XCTAssertEqual(reportedEntry.presence, .online)
+        XCTAssertEqual(
+            reportedEntry.statusText,
+            L10n.f("room.detail.lastReported", RelativeTimeText.short(for: now.addingTimeInterval(-120)))
+        )
+        XCTAssertFalse(reportedEntry.statusText.contains(L10n.t("room.detail.online")), "不得把服务端推导写成在线")
+
+        let staleEntry = viewModel.entries[1]
+        XCTAssertEqual(staleEntry.presence, .offline)
+        XCTAssertEqual(
+            staleEntry.statusText,
+            L10n.f("room.detail.offlineWithTime", RelativeTimeText.short(for: now.addingTimeInterval(-2 * 60 * 60)))
+        )
+
+        let neverEntry = viewModel.entries[2]
+        XCTAssertEqual(neverEntry.presence, .unknown)
+        XCTAssertEqual(neverEntry.statusText, L10n.t("device.presence.unknown"))
+    }
+
+    func testPresenceWindowBoundaryAtNineHundredSeconds() throws {
+        let room = try roomStore.create(name: "客厅", at: now)
+        let boundary = makeDevice(
+            name: "边界",
+            roomID: room.id,
+            serverLastSeenAt: now.addingTimeInterval(-DevicePresence.window)
+        )
+        let justOver = makeDevice(
+            name: "超窗",
+            roomID: room.id,
+            serverLastSeenAt: now.addingTimeInterval(-(DevicePresence.window + 1))
+        )
+        for device in [boundary, justOver] {
+            try deviceStore.upsert(device)
+        }
+
+        let viewModel = makeViewModel(room: room)
+        viewModel.reload()
+
+        XCTAssertEqual(viewModel.entries.first { $0.device.displayName == "边界" }?.presence, .online)
+        XCTAssertEqual(viewModel.entries.first { $0.device.displayName == "超窗" }?.presence, .offline)
+        XCTAssertEqual(viewModel.reportedCount, 1)
+        XCTAssertEqual(viewModel.presenceOfflineCount, 1)
+    }
+
+    func testLocalConnectionTakesPriorityOverStaleServerPresence() throws {
+        let room = try roomStore.create(name: "客厅", at: now)
+        let bluetooth = FakeBluetoothService()
+        let connected = makeDevice(
+            name: "本机已连接",
+            roomID: room.id,
+            serverLastSeenAt: now.addingTimeInterval(-3 * 60 * 60)
+        )
+        bluetooth.markConnected(connected.peripheralID)
+        try deviceStore.upsert(connected)
+
+        let viewModel = makeViewModel(room: room, bluetooth: bluetooth)
+        viewModel.reload()
+
+        XCTAssertEqual(viewModel.onlineCount, 1, "本机 BLE 连接优先，服务端 offline 不覆盖")
+        XCTAssertEqual(viewModel.presenceOfflineCount, 0)
+        XCTAssertEqual(viewModel.entries[0].statusText, L10n.t("room.detail.online"))
     }
 
     // MARK: - 批量标记
@@ -207,7 +302,7 @@ final class RoomDetailTests: XCTestCase {
         XCTAssertEqual(viewModel.totalCount, 0)
         XCTAssertEqual(
             viewModel.summaryText,
-            L10n.f("room.detail.summary", "0", "0", "0", "0", "0")
+            L10n.f("room.detail.summary", "0", "0", "0", "0", "0", "0", "0")
         )
         XCTAssertFalse(L10n.t("room.detail.emptyTitle").isEmpty)
         XCTAssertFalse(L10n.t("room.detail.emptyMessage").isEmpty)
@@ -430,7 +525,8 @@ final class RoomDetailTests: XCTestCase {
         platform: String = SavedDevice.iosPlatform,
         markedAt: Date? = nil,
         markedAtPatch: Patch<Date> = .absent,
-        lastSeenAt: Date? = nil
+        lastSeenAt: Date? = nil,
+        serverLastSeenAt: Date? = nil
     ) -> SavedDevice {
         SavedDevice(
             peripheralID: UUID(),
@@ -439,6 +535,7 @@ final class RoomDetailTests: XCTestCase {
             roomID: roomID,
             householdID: householdID,
             lastSeenAt: lastSeenAt,
+            serverLastSeenAt: serverLastSeenAt,
             markedAt: markedAt,
             syncState: .synced,
             markedAtPatch: markedAtPatch

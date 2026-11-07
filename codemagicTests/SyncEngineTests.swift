@@ -160,6 +160,9 @@ final class SyncEngineTests: XCTestCase {
         advertisedName: String? = "PJ-Sensor",
         group: String? = "默认分组",
         markedAt: Patch<Date> = .absent,
+        serverLastSeenAt: Date? = nil,
+        hasLastSeenAtField: Bool = false,
+        presence: DevicePresence? = nil,
         updatedAt: Date,
         platform: String = SavedDevice.iosPlatform,
         deletedAt: Date? = nil
@@ -172,6 +175,9 @@ final class SyncEngineTests: XCTestCase {
             advertisedName: advertisedName,
             group: group,
             markedAt: markedAt,
+            serverLastSeenAt: serverLastSeenAt,
+            hasLastSeenAtField: hasLastSeenAtField,
+            presence: presence,
             updatedAt: updatedAt,
             deletedAt: deletedAt
         )
@@ -850,6 +856,12 @@ final class SyncEngineTests: XCTestCase {
         if let deletedAt = payload.deletedAt {
             payloadObject["deletedAt"] = SyncDateCodec.string(from: deletedAt)
         }
+        if payload.hasLastSeenAtField {
+            payloadObject["lastSeenAt"] = payload.serverLastSeenAt.map(SyncDateCodec.string(from:)) ?? NSNull()
+        }
+        if let presence = payload.presence {
+            payloadObject["presence"] = presence.rawValue
+        }
         let json: [String: Any] = [
             "seq": 1,
             "entity": "device",
@@ -860,6 +872,115 @@ final class SyncEngineTests: XCTestCase {
         ]
         let data = try! JSONSerialization.data(withJSONObject: json)
         return try! JSONDecoder().decode(SyncChange.self, from: data)
+    }
+
+    // MARK: - v0.26.0（契约 0.21.0）：presence / lastSeenAt
+
+    func testPresenceOnlyIncrementUpdatesLastSeenWithoutDirtyBit() throws {
+        let updatedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        let local = SavedDevice(
+            peripheralID: UUID(),
+            advertisedName: "客厅面板",
+            updatedAt: updatedAt,
+            syncState: .synced
+        )
+        try savedDeviceStore.upsert(local)
+
+        let lastSeenAt = Date(timeIntervalSince1970: 1_700_000_600)
+        let change = makeChange(
+            payload: makeRemote(
+                id: local.id.uuidString,
+                externalID: local.peripheralID.uuidString.uppercased(),
+                alias: local.remark,
+                serverLastSeenAt: lastSeenAt,
+                hasLastSeenAtField: true,
+                presence: .online,
+                updatedAt: updatedAt
+            ),
+            op: "upsert"
+        )
+        api.changesPages = [.success(SyncChangesPage(changes: [change], nextCursor: 1, hasMore: false))]
+
+        let engine = makeEngine()
+        _ = runSync(engine)
+
+        let stored = try XCTUnwrap(savedDeviceStore.fetch(id: local.id))
+        XCTAssertEqual(stored.serverLastSeenAt, lastSeenAt)
+        XCTAssertEqual(stored.syncState, .synced, "只读字段不应产生同步脏位")
+        XCTAssertEqual(stored.updatedAt, updatedAt, "不应推进本地 updatedAt")
+        XCTAssertEqual(engine.status.pendingCount, 0)
+    }
+
+    func testPresenceOnlyIncrementKeepsPendingLocalEdits() throws {
+        let updatedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        let local = SavedDevice(
+            peripheralID: UUID(),
+            advertisedName: "客厅面板",
+            remark: "待同步别名",
+            updatedAt: updatedAt,
+            syncState: .pending,
+            aliasPatch: .set("待同步别名")
+        )
+        try savedDeviceStore.upsert(local)
+        api.pushResults = [.failure(.network("offline"))]
+
+        let lastSeenAt = Date(timeIntervalSince1970: 1_700_000_600)
+        let change = makeChange(
+            payload: makeRemote(
+                id: local.id.uuidString,
+                externalID: local.peripheralID.uuidString.uppercased(),
+                alias: local.remark,
+                serverLastSeenAt: lastSeenAt,
+                hasLastSeenAtField: true,
+                presence: .online,
+                updatedAt: updatedAt
+            ),
+            op: "upsert"
+        )
+        api.changesPages = [.success(SyncChangesPage(changes: [change], nextCursor: 1, hasMore: false))]
+
+        let engine = makeEngine()
+        _ = runSync(engine)
+
+        let stored = try XCTUnwrap(savedDeviceStore.fetch(id: local.id))
+        XCTAssertEqual(stored.serverLastSeenAt, lastSeenAt)
+        XCTAssertEqual(stored.syncState, .pending, "本地待上传修改保持不变")
+        XCTAssertEqual(stored.updatedAt, updatedAt, "不推进本地 updatedAt")
+        XCTAssertEqual(stored.aliasPatch, .set("待同步别名"))
+        XCTAssertEqual(engine.status.pendingCount, 1)
+    }
+
+    func testAbsentLastSeenFieldDoesNotClearStoredPresence() throws {
+        let updatedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        let storedLastSeen = Date(timeIntervalSince1970: 1_600_000_000)
+        let local = SavedDevice(
+            peripheralID: UUID(),
+            advertisedName: "客厅面板",
+            serverLastSeenAt: storedLastSeen,
+            updatedAt: updatedAt,
+            syncState: .synced
+        )
+        try savedDeviceStore.upsert(local)
+
+        let change = makeChange(
+            payload: makeRemote(
+                id: local.id.uuidString,
+                externalID: local.peripheralID.uuidString.uppercased(),
+                alias: local.remark,
+                updatedAt: updatedAt
+            ),
+            op: "upsert"
+        )
+        api.changesPages = [.success(SyncChangesPage(changes: [change], nextCursor: 1, hasMore: false))]
+
+        let engine = makeEngine()
+        _ = runSync(engine)
+
+        XCTAssertEqual(
+            try savedDeviceStore.fetch(id: local.id)?.serverLastSeenAt,
+            storedLastSeen,
+            "旧后端 / 缺省字段不得覆盖本地已存值"
+        )
     }
 
     // MARK: - v0.25.0（契约 0.20.0）：设备标记 markedAt

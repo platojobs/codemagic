@@ -544,6 +544,9 @@ final class SyncEngine {
                 continue
             }
 
+            // 契约 0.21.0：lastSeenAt 是服务端只读派生字段，键缺省时不得覆盖本地。
+            let lastSeenChanged = remote.hasLastSeenAtField
+                && remote.serverLastSeenAt != existing.serverLastSeenAt
             if existing.syncState == .synced {
                 // 缺省字段（nil）表示服务端未上报，不参与比较也不得覆盖本地。
                 let aliasChanged = remote.alias.map { $0 != existing.remark } ?? false
@@ -565,7 +568,7 @@ final class SyncEngine {
                         || (remote.householdID != nil && remote.householdID != existing.remoteHouseholdID)
                 )
                 if remote.updatedAt > existing.updatedAt || aliasChanged || groupChanged
-                    || advertisedChanged || markedChanged || assignmentChanged {
+                    || advertisedChanged || markedChanged || assignmentChanged || lastSeenChanged {
                     try deviceStore.upsert(merge(remote, into: existing))
                     pulled += 1
                 }
@@ -578,6 +581,11 @@ final class SyncEngine {
                 conflicts.append(message)
                 recordLog(message, level: .warning)
                 try deviceStore.upsert(merge(remote, into: existing))
+                pulled += 1
+            } else if lastSeenChanged {
+                // 本地仍有待上传修改，且云端版本没有前进：只写只读的 lastSeenAt，
+                // 保持 pending 与 updatedAt 不变，避免凭空产生同步脏位或 LWW 冲突。
+                try deviceStore.applyServerLastSeenAt(id: existing.id, at: remote.serverLastSeenAt)
                 pulled += 1
             }
             // 本地更新则保留 pending，后续推送由服务端做最终裁决。
@@ -789,6 +797,10 @@ final class SyncEngine {
             merged.markedAt = date
         }
         merged.updatedAt = max(local.updatedAt, remote.updatedAt)
+        if remote.hasLastSeenAtField {
+            // 只接受服务端值；本地不得自行推进或把它当作可写字段。
+            merged.serverLastSeenAt = remote.serverLastSeenAt
+        }
         merged.deletedAt = remote.deletedAt
         // 服务端版本已落库，本地待上报的三态全部归零。
         merged.aliasPatch = .absent

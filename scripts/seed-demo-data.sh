@@ -13,7 +13,7 @@
 # 数量重建，因此**可重复执行**：每次都得到同样的形状，不会累积脏数据。
 #
 # 前置条件：
-#   1. 后端 PJGoIoT v0.25.x，数据库迁移到 19（000019_device_marked_at）；
+#   1. 后端 PJGoIoT v0.26.0，数据库迁移到 20（000019_device_marked_at / 000020_device_presence）；
 #   2. Postgres 已启动，`DATABASE_URL` 可连（默认与本机开发库一致）；
 #   3. API 已以 STORE=postgres 启动并可访问 `SEED_BASE_URL`（默认 127.0.0.1:8080）；
 #   4. 本机有 psql、python3、curl。
@@ -23,7 +23,10 @@
 #   在 App「我的 → 用配对码恢复原账号」输入该码即可接管同一账号（10 分钟内有效）。
 #   另打印成员账号的 memberPairingCode，用于「成员只读」截图。
 #   App 会拉取 /sync/changes 里的家庭、房间、设备与场景；读数只存在于服务端，
-#   本机房间详情页不读取云端读数，因此截图里设备行会显示「暂无读数」。
+#   房间详情与首页会按需查询云端最近读数（v0.31.3 起）。
+#   读数通过 /sync/push 上报，服务端据此写入 user_devices.last_seen_at，
+#   因此 seed 后 15 分钟内 presence 为 online，界面显示「最近上报 X 前」；
+#   超过 900 秒后自动转为 offline（显示「已离线 · 最近上报 X 前」），截图需在窗口内重拍。
 #
 # 用法：
 #   ./scripts/seed-demo-data.sh

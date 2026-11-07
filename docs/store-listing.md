@@ -1,8 +1,8 @@
-# App Store 上架材料（iOS v0.28.0）
+# App Store 上架材料（iOS v0.31.5）
 
 > 状态：**材料已补齐，但尚未上传 App Store Connect、尚未提交审核、未上架**。
 > 本机没有 Apple Developer Program 账号，也没有任何 App Store 审核记录；仓库中没有分发证书、
-> Provisioning Profile 与 APNs 推送证书。`MARKETING_VERSION 0.28.0` / `CURRENT_PROJECT_VERSION 37`
+> Provisioning Profile 与 APNs 推送证书。`MARKETING_VERSION 0.31.5` / `CURRENT_PROJECT_VERSION 45`
 > 只用于模拟器构建与 CI，不能直接提交商店。
 >
 > 本文只描述仓库中**已实现并有代码证据**的能力。未实现的能力（账号密码、云备份、OTA、
@@ -17,7 +17,7 @@
 | 副标题（中文，≤30 字符） | `扫描、读数、曲线与阈值告警`（13 字符） |
 | 副标题（英文，≤30 字符） | `Scan, read, chart, alert`（24 字符） |
 | Bundle ID | `com.platojobs.codemagic` |
-| 版本 | `MARKETING_VERSION 0.28.0`、`CURRENT_PROJECT_VERSION 37` |
+| 版本 | `MARKETING_VERSION 0.31.5`、`CURRENT_PROJECT_VERSION 45` |
 | 默认语言 | 中文（简体）；另含英文 `en` |
 | 主分类 | 工具 |
 | 次分类 | 效率 |
@@ -159,7 +159,7 @@ bluetooth,ble,sensor,readings,heart rate,chart,alerts,home,devices
 | 标识符 → 用户 ID | 匿名 `userId`、Keychain token | `NSPrivacyCollectedDataTypeUserID` | Keychain + `sync_metadata` | `users.id` | 首次匿名登录 |
 | 健康与健身 → 健康 | 心率读数（特征 `0x2A37`） | `NSPrivacyCollectedDataTypeHealth` | `readings`（7 天） | `readings`（90 天） | 设备上报心率时 |
 | 其他数据类型 | 温度、电量与 NUS 透传指标值、单位、`recordedAt` | `NSPrivacyCollectedDataTypeOtherDataTypes` | `readings`（7 天） | `readings`（90 天） | 设备上报对应指标时 |
-| 使用数据 → 其他使用数据 | 读数时间戳、规则触发记录、本机扫描日志、同步元数据 | `NSPrivacyCollectedDataTypeOtherUsageData` | `readings` / `scan_logs` / `sync_metadata` | 规则与触发记录 | App 运行与规则命中时 |
+| 使用数据 → 其他使用数据 | 读数时间戳、规则触发记录、本机扫描日志、同步元数据、设备最近上报时间（服务端 `lastSeenAt`，用于推导 `presence`；客户端只读、不上报） | `NSPrivacyCollectedDataTypeOtherUsageData` | `readings` / `scan_logs` / `sync_metadata` / `saved_devices.server_last_seen_at` | 规则与触发记录；设备读数被 `/sync/push` 接受时由服务端记录接收时间 | App 运行、规则命中与读数上报时 |
 | 用户内容 → 其他用户内容 | 设备广播名 / 别名 / 分组；家庭名与房间名；反馈主题与正文 | `NSPrivacyCollectedDataTypeOtherUserContent` | `saved_devices` / `households` / `rooms` / `feedback_drafts` | 对应业务表 | 用户输入或蓝牙广播 |
 | 联系信息 → 其他用户联系信息 | 反馈页**可选**联系方式（自由文本） | `NSPrivacyCollectedDataTypeOtherUserContactInfo` | `feedback_drafts.contact` | `feedback.contact` | 仅在用户主动填写并提交反馈时 |
 | 诊断 → 其他诊断数据 | 反馈附带的 App 版本、iOS 版本、设备型号 | `NSPrivacyCollectedDataTypeOtherDiagnosticData` | `feedback_drafts.client_context` | `feedback.client_context` | 仅在提交反馈时 |
@@ -170,9 +170,9 @@ bluetooth,ble,sensor,readings,heart rate,chart,alerts,home,devices
 
 **8 类一致性**：`PrivacyInfo.xcprivacy` 的 `NSPrivacyCollectedDataTypes` **恰好 8 个键**，与上表 8 个「清单键」逐项一致；上表有 9 行数据，但「BLE 外设 UUID」与「APNs 推送令牌」两行同属 `DeviceID`，不是第 9 类。`PrivacyManifestTests` 会解析清单与本文并断言键集合完全相同，防止一边 8 类、另一边另一套。
 
-**APNs 令牌当前不采集**：当前二进制（0.28.0/build 37）没有 `aps-environment` entitlement，`registerForRemoteNotifications` 拿不到令牌，`PushRegistrationService` 停在 `missingToken`，本地 `push_devices` 仅记录状态与错误，**不写占位 token、不调用 `POST /push/devices`**。因此隐私问卷中 DeviceID 的实际内容只有 BLE 外设 UUID。启用推送时必须同步修改：① 工程增加 `aps-environment` entitlement 与 APNs 证书；② `Core/Notifications/APNSTokenProvider.swift` 取真实令牌；③ 本表「触发条件」改为「配置推送后即采集」；④ 审核备注移除「推送服务当前未配置」；⑤ `docs/privacy-policy.md` 与 `docs/app-privacy.md` 同步改写；⑥ `PrivacyManifestTests` 复核。完整清单见 [`app-privacy.md`](app-privacy.md) 2.2 节。
+**APNs 令牌当前不采集**：当前二进制（0.31.5/build 45）没有 `aps-environment` entitlement，`registerForRemoteNotifications` 拿不到令牌，`PushRegistrationService` 停在 `missingToken`，本地 `push_devices` 仅记录状态与错误，**不写占位 token、不调用 `POST /push/devices`**。因此隐私问卷中 DeviceID 的实际内容只有 BLE 外设 UUID。启用推送时必须同步修改：① 工程增加 `aps-environment` entitlement 与 APNs 证书；② `Core/Notifications/APNSTokenProvider.swift` 取真实令牌；③ 本表「触发条件」改为「配置推送后即采集」；④ 审核备注移除「推送服务当前未配置」；⑤ `docs/privacy-policy.md` 与 `docs/app-privacy.md` 同步改写；⑥ `PrivacyManifestTests` 复核。完整清单见 [`app-privacy.md`](app-privacy.md) 2.2 节。
 
-> v0.27.0 在清单中新增 `OtherDataTypes`、`OtherUserContactInfo`、`OtherDiagnosticData` 三类以覆盖传感器指标、反馈可选联系方式与客户端诊断；v0.28.0 **未新增类别**，只把 APNs 令牌的「当前不采集」边界写清。`plutil -lint` 已通过。
+> v0.27.0 在清单中新增 `OtherDataTypes`、`OtherUserContactInfo`、`OtherDiagnosticData` 三类以覆盖传感器指标、反馈可选联系方式与客户端诊断；v0.28.0 **未新增类别**，只把 APNs 令牌的「当前不采集」边界写清；v0.31.5 接入后端 `lastSeenAt` / `presence` 后**仍未新增类别**——设备最近上报时间属于「使用数据 → 其他使用数据」（同步元数据），`PrivacyInfo.xcprivacy` 键集合仍恰好 8 类。`plutil -lint` 已通过。
 
 ## 6. 审核备注（给 App Review）
 

@@ -198,6 +198,7 @@ final class DeviceDetailViewController: UIViewController {
                 title: L10n.t("device.detail.lastSeen"),
                 value: device.lastSeenAt.map { AppDateFormat.absolute($0) } ?? L10n.t("device.detail.noScanRecord")
             ),
+            Row(title: L10n.t("device.detail.presence"), value: presenceText(for: device)),
         ]
 
         if let product = viewModel.product {
@@ -254,6 +255,22 @@ final class DeviceDetailViewController: UIViewController {
         }
 
         return sections
+    }
+
+    /// 服务端上报状态：只陈述「最近上报」时间，不写成权威在线状态。
+    private func presenceText(for device: SavedDevice) -> String {
+        guard let serverLastSeenAt = device.serverLastSeenAt else {
+            return L10n.t("device.presence.unknown")
+        }
+        let absolute = AppDateFormat.absolute(serverLastSeenAt)
+        switch device.presence(at: Date()) {
+        case .online:
+            return L10n.f("device.detail.lastReported", absolute)
+        case .offline:
+            return L10n.f("device.detail.offlineWithTime", absolute)
+        case .unknown:
+            return L10n.t("device.presence.unknown")
+        }
     }
 
     /// 「数据」区：区间切换 → 指标选择 → 时间比例折线图 → 24h 汇总 → 来源 → 最近记录。

@@ -21,16 +21,28 @@ final class SavedDeviceCell: UITableViewCell {
         fatalError("init(coder:) has not been implemented")
     }
 
-    func configure(device: SavedDevice) {
+    func configure(device: SavedDevice, now: Date = Date()) {
         nameLabel.text = device.displayName
 
         var metaParts = [device.groupName]
         if let mark = device.markStatusText {
             metaParts.append(mark)
         }
-        metaParts.append(
-            device.lastSeenAt.map { L10n.f("device.cell.lastSeen", String(describing: AppDateFormat.relative($0))) } ?? L10n.t("device.detail.noScanRecord")
-        )
+        if let serverLastSeenAt = device.serverLastSeenAt {
+            let relative = String(describing: AppDateFormat.relative(serverLastSeenAt))
+            switch device.presence(at: now) {
+            case .online:
+                metaParts.append(L10n.f("device.cell.lastReported", relative))
+            case .offline:
+                metaParts.append(L10n.f("room.detail.offlineWithTime", relative))
+            case .unknown:
+                metaParts.append(L10n.t("device.presence.unknown"))
+            }
+        } else if let lastSeenAt = device.lastSeenAt {
+            metaParts.append(L10n.f("device.cell.lastSeen", String(describing: AppDateFormat.relative(lastSeenAt))))
+        } else {
+            metaParts.append(L10n.t("device.presence.unknown"))
+        }
         metaLabel.text = metaParts.joined(separator: " · ")
 
         var detailParts: [String] = []

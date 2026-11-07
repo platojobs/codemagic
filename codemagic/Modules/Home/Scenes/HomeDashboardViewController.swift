@@ -256,6 +256,7 @@ final class HomeDashboardViewController: UIViewController {
             sizingCard.configure(
                 device: device,
                 isConnected: viewModel.isConnected(device),
+                presence: viewModel.presence(for: device),
                 readingText: viewModel.readingText(for: device),
                 rssi: viewModel.rssi(for: device),
                 cloudReportedAt: viewModel.cloudReportedAt(for: device),
@@ -826,6 +827,7 @@ extension HomeDashboardViewController: UICollectionViewDataSource {
             cell.configure(
                 device: device,
                 isConnected: viewModel.isConnected(device),
+                presence: viewModel.presence(for: device),
                 readingText: viewModel.readingText(for: device),
                 rssi: viewModel.rssi(for: device),
                 cloudReportedAt: viewModel.cloudReportedAt(for: device),

@@ -1,4 +1,4 @@
-# App 隐私清单对照（v0.28.0）
+# App 隐私清单对照（v0.31.5）
 
 隐私清单文件：[`codemagic/Resources/PrivacyInfo.xcprivacy`](../codemagic/Resources/PrivacyInfo.xcprivacy)。工程使用 Xcode 文件系统同步组，新增资源会自动进入 `codemagic` target 的 Resources 阶段（`Info.plist` 是唯一例外）。
 
@@ -17,7 +17,7 @@
 | `NSPrivacyCollectedDataTypeUserID` | 标识符 → 用户 ID | `Core/Sync/TokenStore.swift`（Keychain 中的 `AnonymousSession`）；`Core/Sync/SyncMetadataStore.swift`（`userID`）；`Core/Account/AccountAPIClient.swift` | 服务端匿名账号 ID 与 token，用于同步鉴权 |
 | `NSPrivacyCollectedDataTypeOtherUserContent` | 用户内容 → 其他用户内容 | `Core/Models/SavedDevice.swift`（`advertisedName` / `remark` / `groupName`）；家庭与房间名；`Core/Support/FeedbackModels.swift`（反馈主题与正文） | 设备广播名、用户别名、分组、家庭 / 房间名与反馈正文 |
 | `NSPrivacyCollectedDataTypeHealth` | 健康与健身 → 健康 | `Core/Models/DeviceReading.swift`（`heartRate`）；`Core/Readings/ReadingParser.swift`（`parseHeartRate`，特征 `0x2A37`） | 心率读数；仅用于展示、曲线与阈值判断，不做医疗诊断 |
-| `NSPrivacyCollectedDataTypeOtherUsageData` | 使用数据 → 其他使用数据 | `Core/Models/DeviceReading.swift`（`recordedAt`）；`Core/Models/ScanLogEntry.swift`；`Core/Models/DeviceRule.swift` 与 `Core/Rules/RuleEvaluator.swift`（规则触发）；`Core/Sync/SyncMetadataStore.swift` | 读数时间戳、规则触发、本地扫描日志与同步元数据 |
+| `NSPrivacyCollectedDataTypeOtherUsageData` | 使用数据 → 其他使用数据 | `Core/Models/DeviceReading.swift`（`recordedAt`）；`Core/Models/ScanLogEntry.swift`；`Core/Models/DeviceRule.swift` 与 `Core/Rules/RuleEvaluator.swift`（规则触发）；`Core/Sync/SyncMetadataStore.swift`；`Core/Models/SavedDevice.swift`（`serverLastSeenAt`，服务端 `lastSeenAt` 只读落地） | 读数时间戳、规则触发、本地扫描日志、同步元数据与设备最近上报时间（presence 推导依据；客户端只读，不上报、不参与 LWW） |
 | `NSPrivacyCollectedDataTypeOtherDataTypes` | 其他数据类型 | `Core/Models/DeviceReading.swift`（温度、电量与 NUS 透传指标值与单位） | 非心率类传感器读数，仅用于展示、曲线、阈值与导出 |
 | `NSPrivacyCollectedDataTypeOtherUserContactInfo` | 联系信息 → 其他用户联系信息 | `Core/Support/FeedbackModels.swift`（`contact`） | 反馈页可选联系方式，仅在用户主动填写并提交时上传 |
 | `NSPrivacyCollectedDataTypeOtherDiagnosticData` | 诊断 → 其他诊断数据 | `Core/Support/FeedbackModels.swift`（`clientContext`：App 版本、iOS 版本、设备型号） | 随反馈提交的客户端诊断信息，仅用于排查问题 |
@@ -43,7 +43,7 @@
 
 ### 2.2 当前版本与将来接推送的边界
 
-- **当前二进制（0.28.0/build 37）**：`Info.plist` / `entitlements` 均无 `aps-environment`，`PushRegistrationService` 获取令牌失败后状态为 `missingToken`，界面显示「未配置推送」，本地 `push_devices` 只记录状态与错误，**不写占位 token，也不调用 `POST /push/devices`**。因此 APNs 令牌当前不属于「已采集」数据。
+- **当前二进制（0.31.5/build 45）**：`Info.plist` / `entitlements` 均无 `aps-environment`，`PushRegistrationService` 获取令牌失败后状态为 `missingToken`，界面显示「未配置推送」，本地 `push_devices` 只记录状态与错误，**不写占位 token，也不调用 `POST /push/devices`**。因此 APNs 令牌当前不属于「已采集」数据。
 - **启用推送时必须同步修改的位置**：
   1. 工程签名：为 `codemagic` target 增加 `aps-environment` entitlement 与对应 Provisioning Profile / APNs 证书；
   2. `Core/Notifications/APNSTokenProvider.swift`：让 `registerForRemoteNotifications` 能拿到真实 token 并交给 `PushRegistrationService`；

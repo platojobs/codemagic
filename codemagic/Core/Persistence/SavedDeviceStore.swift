@@ -80,10 +80,10 @@ final class SavedDeviceStore {
             """
             INSERT OR REPLACE INTO saved_devices
             (id, peripheral_id, platform, external_id, name, advertised_name, remark, group_name, room_id, mac,
-             vendor, device_type, firmware_version, last_seen_at, created_at, updated_at, deleted_at,
+             vendor, device_type, firmware_version, last_seen_at, server_last_seen_at, created_at, updated_at, deleted_at,
              sync_state, alias_patch, advertised_name_patch, group_patch,
              household_id, remote_room_id, remote_household_id, marked_at, marked_at_patch)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """,
             [
                 .text(device.id.uuidString),
@@ -101,6 +101,7 @@ final class SavedDeviceStore {
                 device.deviceType.map(SQLValue.text) ?? .null,
                 device.firmwareVersion.map(SQLValue.text) ?? .null,
                 device.lastSeenAt.map { .double($0.timeIntervalSince1970) } ?? .null,
+                device.serverLastSeenAt.map { .double($0.timeIntervalSince1970) } ?? .null,
                 .double(device.createdAt.timeIntervalSince1970),
                 .double(device.updatedAt.timeIntervalSince1970),
                 device.deletedAt.map { .double($0.timeIntervalSince1970) } ?? .null,
@@ -113,6 +114,18 @@ final class SavedDeviceStore {
                 device.remoteHouseholdID.map(SQLValue.text) ?? .null,
                 device.markedAt.map { .double($0.timeIntervalSince1970) } ?? .null,
                 .text(device.markedAtPatch.persistedState),
+            ]
+        )
+    }
+
+    /// 只写入服务端 `lastSeenAt`：它是只读派生字段，绝不置 `pending`、不推进 `updated_at`。
+    /// 本地有其他待同步修改时也可以安全调用，不会覆盖 `sync_state` 或字段级 LWW 三态。
+    func applyServerLastSeenAt(id: UUID, at date: Date?) throws {
+        try database.execute(
+            "UPDATE saved_devices SET server_last_seen_at = ? WHERE id = ?;",
+            [
+                date.map { .double($0.timeIntervalSince1970) } ?? .null,
+                .text(id.uuidString),
             ]
         )
     }
@@ -316,6 +329,7 @@ final class SavedDeviceStore {
         let createdAt = Date(timeIntervalSince1970: row.double("created_at") ?? 0)
         let updatedAt = Date(timeIntervalSince1970: row.double("updated_at") ?? 0)
         let lastSeenAt = row.double("last_seen_at").map(Date.init(timeIntervalSince1970:))
+        let serverLastSeenAt = row.double("server_last_seen_at").map(Date.init(timeIntervalSince1970:))
         let deletedAt = row.double("deleted_at").map(Date.init(timeIntervalSince1970:))
         let markedAt = row.double("marked_at").map(Date.init(timeIntervalSince1970:))
         let syncState = SyncState(rawValue: row.text("sync_state") ?? "") ?? .pending
@@ -350,6 +364,7 @@ final class SavedDeviceStore {
             deviceType: row.text("device_type"),
             firmwareVersion: row.text("firmware_version"),
             lastSeenAt: lastSeenAt,
+            serverLastSeenAt: serverLastSeenAt,
             markedAt: markedAt,
             createdAt: createdAt,
             updatedAt: updatedAt,

@@ -90,6 +90,7 @@ final class DeviceCardCell: UICollectionViewCell {
     func configure(
         device: SavedDevice,
         isConnected: Bool,
+        presence: DevicePresence,
         readingText: String,
         rssi: Int?,
         cloudReportedAt: Date? = nil,
@@ -97,21 +98,39 @@ final class DeviceCardCell: UICollectionViewCell {
         onTap: @escaping () -> Void
     ) {
         nameLabel.text = device.displayName
-        if !device.isConnectable {
-            statusLabel.text = L10n.t("home.status.crossPlatform")
-            statusLabel.textColor = Palette.textTertiary
-        } else if isConnected {
+        // 本机 BLE 连接优先；其次才是服务端按 lastSeenAt 推导的上报状态。
+        // 服务端状态一律用「最近上报」措辞，不写成权威的「在线」。
+        if isConnected {
             statusLabel.text = L10n.t("home.status.connected")
             statusLabel.textColor = Palette.success
+        } else if !device.isConnectable {
+            statusLabel.text = L10n.t("home.status.crossPlatform")
+            statusLabel.textColor = Palette.textTertiary
         } else {
-            statusLabel.text = L10n.t("home.status.disconnected")
-            statusLabel.textColor = Palette.textSecondary
+            switch presence {
+            case .online:
+                statusLabel.text = L10n.t("device.presence.reported")
+                statusLabel.textColor = Palette.textSecondary
+            case .offline:
+                statusLabel.text = L10n.t("device.presence.offline")
+                statusLabel.textColor = Palette.textSecondary
+            case .unknown:
+                statusLabel.text = L10n.t("device.presence.unknownShort")
+                statusLabel.textColor = Palette.textSecondary
+            }
         }
         readingLabel.text = readingText
         signalView.isSignalUnavailable = rssi == nil
         signalView.rssi = rssi ?? -100
         let timeText: String
-        if let lastSeenAt = device.lastSeenAt {
+        if let serverLastSeenAt = device.serverLastSeenAt {
+            // 连接中 / 本机不可连接时补全「最近上报」，避免状态行与时间行重复或含糊。
+            if isConnected || !device.isConnectable || presence == .offline {
+                timeText = L10n.f("home.lastReported", RelativeTimeText.short(for: serverLastSeenAt))
+            } else {
+                timeText = RelativeTimeText.short(for: serverLastSeenAt)
+            }
+        } else if let lastSeenAt = device.lastSeenAt {
             timeText = RelativeTimeText.short(for: lastSeenAt)
         } else if let cloudReportedAt {
             // 本机没扫描过这台设备，用云端最近上报时间说明读数来源，不写成「尚未连接」。
@@ -127,11 +146,9 @@ final class DeviceCardCell: UICollectionViewCell {
         } else if isUnsynced {
             timeParts.append(L10n.t("device.sync.unsynced"))
         }
-        // AX 档每项单独一行，避免「云端 …」「已标记」「待同步」被拆字。
-        let separator = traitCollection.preferredContentSizeCategory.isAccessibilityCategory
-            ? "\n"
-            : " · "
-        timeLabel.text = timeParts.joined(separator: separator)
+        // 卡片宽度有限，第二段（已标记 / 待同步 / 未同步）始终独占一行，
+        // 避免默认字号下「已标记」被拆成「已 / 标记」；AX 档同样适用。
+        timeLabel.text = timeParts.joined(separator: "\n")
         card.onTap(onTap)
         accessibilityLabel = L10n.f("home.a11y.card", device.displayName, statusLabel.text ?? "", readingText)
     }

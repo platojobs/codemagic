@@ -219,7 +219,14 @@ final class HomeLayoutTests: XCTestCase {
             advertisedName: "客厅环境传感器",
             remark: "客厅环境传感器一号机"
         )
-        cell.configure(device: device, isConnected: false, readingText: "电量 66 %", rssi: -70, onTap: {})
+        cell.configure(
+            device: device,
+            isConnected: false,
+            presence: .unknown,
+            readingText: "电量 66 %",
+            rssi: -70,
+            onTap: {}
+        )
         // 卡片高度由首页按内容实测；这里按同样口径把单元格拉到可容纳多行名称的高度。
         let fitting = cell.contentView.systemLayoutSizeFitting(
             CGSize(width: 179, height: UIView.layoutFittingCompressedSize.height),
@@ -235,7 +242,7 @@ final class HomeLayoutTests: XCTestCase {
         XCTAssertNotNil(nameLabel, "找到设备名标签")
         XCTAssertEqual(nameLabel?.numberOfLines, 0, "设备名不限制行数，由卡片高度容纳")
 
-        guard let statusLabel = firstLabel(in: cell, text: L10n.t("home.status.disconnected")) else {
+        guard let statusLabel = firstLabel(in: cell, text: L10n.t("device.presence.unknownShort")) else {
             return XCTFail("找到状态标签")
         }
         XCTAssertGreaterThan(statusLabel.bounds.height, 0)

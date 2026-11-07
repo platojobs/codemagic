@@ -183,6 +183,9 @@ final class SQLiteDatabase {
         if version < 17 {
             try migrateToVersion17()
         }
+        if version < 18 {
+            try migrateToVersion18()
+        }
     }
 
     /// v1：五张业务表，均含 `id / updated_at / deleted_at / sync_state`。
@@ -762,6 +765,22 @@ final class SQLiteDatabase {
             }
         }
         script += "PRAGMA user_version = 17;"
+        try executeScript(script)
+    }
+
+    /// v18：服务端 `lastSeenAt`（契约 0.21.0）。
+    ///
+    /// 只读派生字段，仅用于展示「最近上报」；与本地 BLE 的 `last_seen_at` 分列存储，
+    /// 避免把服务端接收时间误当成本机扫描时间。可重复执行：`PRAGMA table_info` 判列，
+    /// 缺列才 `ALTER`，旧行保留。
+    private func migrateToVersion18() throws {
+        let columns = Set(try performQuery("PRAGMA table_info(saved_devices);", [])
+            .compactMap { $0.text("name") })
+        var script = ""
+        if !columns.isEmpty, !columns.contains("server_last_seen_at") {
+            script += "ALTER TABLE saved_devices ADD COLUMN server_last_seen_at REAL;\n"
+        }
+        script += "PRAGMA user_version = 18;"
         try executeScript(script)
     }
 

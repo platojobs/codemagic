@@ -27,6 +27,7 @@ final class HomeDashboardViewModel {
     private let executor: ScenarioExecutor
     private let householdService: HouseholdService?
     private let cloudReadings: CloudLatestReadingsProviding?
+    private let now: () -> Date
     private var recentRSSI: [UUID: Int] = [:]
     private var latestReadings: [UUID: DeviceReading] = [:]
     private var cloudStates: [UUID: CloudLatestReadingState] = [:]
@@ -42,7 +43,8 @@ final class HomeDashboardViewModel {
         roomStore: RoomStore,
         executor: ScenarioExecutor,
         householdService: HouseholdService? = nil,
-        cloudReadings: CloudLatestReadingsProviding? = nil
+        cloudReadings: CloudLatestReadingsProviding? = nil,
+        now: @escaping () -> Date = Date.init
     ) {
         self.bluetooth = bluetooth
         self.savedDeviceStore = savedDeviceStore
@@ -55,6 +57,7 @@ final class HomeDashboardViewModel {
         self.executor = executor
         self.householdService = householdService
         self.cloudReadings = cloudReadings
+        self.now = now
         self.sort = settingsStore.deviceSort
     }
 
@@ -235,6 +238,11 @@ final class HomeDashboardViewModel {
     /// 真实连接状态：仅本机可连接设备才查询 CoreBluetooth。
     func isConnected(_ device: SavedDevice) -> Bool {
         device.isConnectable && bluetooth.isConnected(peripheralID: device.peripheralID)
+    }
+
+    /// 服务端上报状态：按 `lastSeenAt` 与 900 秒窗口推导；`unknown` 不等同于离线。
+    func presence(for device: SavedDevice) -> DevicePresence {
+        device.presence(at: now())
     }
 
     var emptyStateText: String {

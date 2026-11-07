@@ -612,7 +612,7 @@ Android 自 v0.22.0 起把服务端 `SCENE_*` 4xx 视为终态；iOS v0.24.0 对
 
 - **脚本**：`scripts/seed-demo-data.sh` 通过 API 重建与商城截图一致的数据形状：3 个演示家庭（我的家 / 父母家 / 办公室）、6 个房间（客厅 / 主卧 / 次卧 / 父母家客厅 / 书房 / 工位）、12 台在用设备 + 1 台已移除设备（被「阳台信号弱记录」场景引用）、7 天读数（30 分钟一个点，19 条指标序列 × 336 = 6384 条）、4 个场景、3 条反馈（1 条已关闭），客厅骑行台 `markedAt` 为 2 小时前。另建 1 个只读成员账号并领取父母家邀请码，供「成员只读」截图使用；该账号自带 1 个空个人家庭，所以库内家庭总数为 4，但演示家庭仍是 3 个。
 - **幂等**：默认先 `TRUNCATE` 所有用户数据表（保留设备类型目录 / 固件 / 配件 / 迁移表）再按固定名称与数量重建；设备 `externalId` 固定为 `AA:BB:CC:00:00:01..13`，读数用确定性日周期而非随机数。连续执行两次，形状完全一致（见脚本输出）。`SEED_SKIP_RESET=1` 只追加，不建议。
-- **前置条件**：后端 `PJGoIoT` v0.25.x、迁移 **19**（`000019_device_marked_at`）；`DATABASE_URL` 可连（默认 `postgres://platojobs@127.0.0.1:5432/pjgoiot?sslmode=disable`）；API 以 `STORE=postgres` 启动并可访问 `SEED_BASE_URL`（默认 `http://127.0.0.1:8080`）；本机有 `psql` / `python3` / `curl`。
+- **前置条件**：后端 `PJGoIoT` v0.26.0、迁移 **20**（`000019_device_marked_at` / `000020_device_presence`）；`DATABASE_URL` 可连（默认 `postgres://platojobs@127.0.0.1:5432/pjgoiot?sslmode=disable`）；API 以 `STORE=postgres` 启动并可访问 `SEED_BASE_URL`（默认 `http://127.0.0.1:8080`）；本机有 `psql` / `python3` / `curl`。seed 通过 `/sync/push` 上报读数，服务端据此写入 `last_seen_at`，截图中的 presence 与 seed 后 15 分钟窗口同源。
 - **账号**：脚本 `POST /auth/anonymous` 新建账号，结束时打印 10 分钟一次性 `pairingCode`；在 App「我的 → 用配对码恢复原账号」输入即可接管。成员截图用 `memberPairingCode`。接管会把本机已有设备 / 读数标记为 pending，所以截图前需全新安装 App。
 - **为什么房间详情是「离线 / 暂无读数」**：`/sync/changes` 只拉家庭 / 房间 / 设备 / 场景，不拉读数；房间详情只读本机 SQLite。同步落地的远程设备没有本机 `lastSeenAt`，按现有判定全部离线；平台 Android 时行内标注本机不可连接。这是 v0.31.2 时的实现口径，**已在 v0.31.3 修正**（见 3.26）。
 - **`household_rooms = 0` 排查**：`e2e-contract.sh` 使用内存 fixture，`e2e-postgres.sh` 固定独立库 `pjgoiot_e2e`，均不会 TRUNCATE 开发库；开发库只剩余旧的手工重置 / 反复匿名登录残留。`e2e-postgres.sh` 已新增 DATABASE_URL 库名断言（必须为 `pjgoiot_e2e` 或含 `_e2e`），从源头避免误连开发库。
@@ -651,7 +651,7 @@ Android 自 v0.22.0 起把服务端 `SCENE_*` 4xx 视为终态；iOS v0.24.0 对
 2. 契约写清在线窗口（例如 15 分钟）与 `lastSeenAt` 的精度 / 时区；客户端不得自行推断在线。
 3. 若要求跨平台设备读数实时刷新，需要推送或轮询语义；当前是按需查询 + 60s 缓存。
 
-在此之前，界面只声明「本机在线 / 本机离线 / 本机不可连接」与「云端上报时间」，不宣称服务端在线。
+**缺口已落地（v0.31.5，后端 v0.26.0 / 契约 0.21.0）**：`UserDevice` 新增 `lastSeenAt`（`date-time | null`，UTC 微秒截断）与 `presence`（`unknown | online | offline`），在线窗口为 900 秒；`/my/devices`、单设备读接口与 `/sync/changes` payload 均返回。客户端接入细节见 3.28，本轮起界面按「本机连接 > 服务端 `presence`」三态展示，`online` 一律写成「最近上报」，不宣称权威在线。
 
 **测试**：新增 12 个单测 —— `CloudLatestReadingsTests` 6 个（最新指标与单位映射、无指标为空且不再请求读数、404 为空、网络失败为 failed、读数失败为 failed、缓存命中不重复请求，并断言实际请求的指标名为 `temperature_celsius` 防止再被归一化）；`RoomDetailTests` 4 个（云端补齐缺失读数并保留来源边界、本机读数优先、云端失败显示不可用而非暂无读数、云端空且本机空仍暂无读数）；`RoomTests` 2 个（首页云端补齐读数与上报时间、云端失败不影响连接状态）。合计 **480** 单测 0 失败；e2e 仍 **460** 项。
 
@@ -665,6 +665,30 @@ Android 自 v0.22.0 起把服务端 `SCENE_*` 4xx 视为终态；iOS v0.24.0 对
 - **截图**：iPhone AX5（`home-ax.png` / `home-ax-bottom.png`）、200%（`home-200.png` / `home-200-bottom.png`）与 iPad 13 英寸 `home-ax.png` 用 seed 数据重拍；客厅三台为心率 72 bpm / 湿度 52 % / 踏频 78 rpm，骑行台「已标记」，与 seed 一致。
 - **测试**：单测仍 **480** 0 失败（更新 `HomeLayoutTests.testDeviceCardShowsFullStatusUnderLongName` 以内容实测高度布局、`RoomTests` 断言数值与单位间为 `\u{00A0}`）；e2e 仍 **460** 项 0 失败。
 - **不变**：本轮不提前推演服务端 presence；`lastSeenAt` / 在线窗口契约落地后再接。当前在线口径仍为「本机在线 / 本机离线 / 本机不可连接」。
+
+### 3.28 服务端 presence 接入（v0.31.5，后端 v0.26.0 / 契约 0.21.0）
+
+**契约事实**（`PJGoIoT/api/openapi.yaml` 0.21.0）：
+
+- `UserDevice.lastSeenAt`：`date-time | null`，UTC、微秒截断；`null` 表示从未上报（`:3523-3527`）。
+- `UserDevice.presence`：`unknown | online | offline`，响应时实时推导、**不落库**（`:3528-3532`）；`now - lastSeenAt <= 900s` 为 `online`。
+- 推导只取 `/sync/push` 中被接受的 `readings` 的**服务端接收时间**（`push_received_at`），不用客户端 `recordedAt`；字段只读，客户端上报会被忽略，不参与 LWW。
+- `/my/devices`、单设备读接口与 `/sync/changes` payload 均已包含；seed 上报读数后，`last_seen_at` 即 seed 时刻，截图中的「最近上报 X 前」与 `psql` 查询同源。
+
+**客户端落地**：
+
+- `Core/Models/SavedDevice.swift` 新增 `DevicePresence`（`unknown` / `online` / `offline`，窗口 `15 * 60`）与 `serverLastSeenAt`；保留原有 `lastSeenAt` 为**本机 BLE 扫描时间**，两者不混用。`presence(at:)` 仅按服务端时间推导。
+- `Core/Sync/SyncModels.swift` 的 `RemoteDevice` 增加 `lastSeenAt` / `presence` 与 `hasLastSeenAtField`（用于区分「字段缺省」与「显式 null」），`makeLocalDevice()` 传入 `serverLastSeenAt`。
+- 持久化：迁移 **v18** 新增 `saved_devices.server_last_seen_at`（`PRAGMA table_info` 判列后 `ALTER TABLE`）；upsert 与行映射同步读写；新增 `applyServerLastSeenAt(id:at:)` 只更新该列。
+- 同步：`SyncEngine` 计算 `lastSeenChanged`。已同步设备仅在字段/服务端时间变化时 upsert；本地 `pending` 设备只走 `applyServerLastSeenAt`，**不置 pending、不推进 `updatedAt`、不改本地可写字段**；`merge` 仅在 `hasLastSeenAtField` 时覆盖。`presence` 不参与 LWW。
+- 判定顺序：**本机 BLE 连接 > `presence`**；`unknown` 单独一档，不并进离线。跨平台设备（`isConnectable == false`）单独显示「本机不可连接」。
+- 文案：`online` 统一写「最近上报」并附 `lastSeenAt` 相对时间；`offline` 写「已离线 · 最近上报 X 前」；`unknown` 写「从未上报读数」。房间汇总四行：`共 N 台` / `本机在线 N · 最近上报 N` / `已离线 N · 从未上报 N` / `本机不可连接 N · 已标记 N`，不出现含糊的「在线 N」。首页卡片状态 `home.status.connected` = 「本机在线」、`home.status.crossPlatform` = 「本机不可连接」。
+- 卡片排版：时间行与「已标记 / 待同步 / 未同步」第二段一律换行（`\n`），默认字号下不再把「已标记」拆成「已 / 标记」；AX 档每项一行。相对时间短语内部用 NBSP，避免「14 分钟 / 前」拆行。
+- 隐私：`lastSeenAt` 归「使用数据 → 其他使用数据」（同步元数据）；`PrivacyInfo.xcprivacy` 键集合仍为 8 类，未新增类别；`docs/store-listing.md`、`docs/privacy-policy.md`、`docs/app-privacy.md` 已同步。
+
+**测试**：新增/更新见 3.28 末尾统计 —— `RoomDetailTests` 三态渲染、900 秒边界（`lastSeenAt` 恰为 15 分钟前为 `online`、超出 1 秒为 `offline`）、本机连接优先；`SyncEngineTests` synced 增量覆盖、pending 保留状态与 `updatedAt`、字段缺省不覆盖、`presence` 更新不触发同步脏位；`PersistenceTests` `serverLastSeenAt` 往返与「更新不改 pending / updatedAt」；`HomeViewModelTests` 状态文案改「从未上报读数」。合计 **487** 单测 0 失败；e2e 仍 **460** 项 0 失败。
+
+**截图**：iPhone / iPad 的首页与房间详情（默认 / 200% / AX5 / 成员 / iPad）用真实后端 v0.26.0 + seed 重拍，presence 显示「最近上报 X 前」，与 seed 后 `last_seen_at` 对得上；跨平台设备仍标「本机不可连接」。
 
 ## 4. 错误码
 

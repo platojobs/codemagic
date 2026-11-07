@@ -35,6 +35,22 @@ enum Patch<Value: Equatable>: Equatable {
     }
 }
 
+/// 服务端按 `lastSeenAt` 推导的上报状态（契约 0.21.0）。
+///
+/// - `unknown`：该账号从未收到过这台设备的读数（`lastSeenAt = null`）；
+/// - `online`：`now - lastSeenAt <= 900s`，即最近 15 分钟有读数上报；
+/// - `offline`：曾上报过读数，但已超出 15 分钟窗口。
+///
+/// 该状态**不代表设备当前连接着**，界面文案一律用「最近上报」，不写成权威的「在线」。
+enum DevicePresence: String, Equatable {
+    case unknown
+    case online
+    case offline
+
+    /// 服务端固定判定窗口（900 秒）。
+    static let window: TimeInterval = 15 * 60
+}
+
 /// 已保存的蓝牙设备。
 /// `id` 为客户端生成的 UUID，作为同步主键；`peripheralID` 为本机 CoreBluetooth 标识符。
 /// 服务端设备唯一键为 `(platform, externalId)`，iOS 的 `externalId` 为
@@ -68,7 +84,11 @@ struct SavedDevice: Identifiable, Equatable {
     var vendor: String?
     var deviceType: String?
     var firmwareVersion: String?
+    /// 本机 BLE 最近一次扫描到该设备的时间；只用于本机在线判定，服务端不可写。
     var lastSeenAt: Date?
+    /// 服务端最后一次接受该设备读数上报的接收时间（契约 0.21.0，UTC、微秒）。
+    /// `nil` 表示该账号从未收到过它的读数；只读字段，写本机 SQLite 时不置待同步、不推进 `updatedAt`。
+    var serverLastSeenAt: Date?
     /// 用户「标记设备」的时间（契约 0.20.0）；`nil` 表示未标记。
     /// 同时作为该字段的字段级 LWW 版本，未标记时服务端返回 JSON `null`。
     var markedAt: Date?
@@ -103,6 +123,7 @@ struct SavedDevice: Identifiable, Equatable {
         deviceType: String? = nil,
         firmwareVersion: String? = nil,
         lastSeenAt: Date? = nil,
+        serverLastSeenAt: Date? = nil,
         markedAt: Date? = nil,
         createdAt: Date = Date(),
         updatedAt: Date = Date(),
@@ -132,6 +153,7 @@ struct SavedDevice: Identifiable, Equatable {
         self.deviceType = deviceType
         self.firmwareVersion = firmwareVersion
         self.lastSeenAt = lastSeenAt
+        self.serverLastSeenAt = serverLastSeenAt
         self.markedAt = markedAt
         self.createdAt = createdAt
         self.updatedAt = updatedAt
@@ -162,6 +184,12 @@ struct SavedDevice: Identifiable, Equatable {
         case "android": return "Android"
         default: return platform
         }
+    }
+
+    /// 服务端上报状态，按契约窗口实时推导；本地时钟只用于比较，不臆造「在线」。
+    func presence(at now: Date) -> DevicePresence {
+        guard let serverLastSeenAt else { return .unknown }
+        return now.timeIntervalSince(serverLastSeenAt) <= DevicePresence.window ? .online : .offline
     }
 
     /// 同步别名：与列表展示名一致，长度受后端限制（100）。

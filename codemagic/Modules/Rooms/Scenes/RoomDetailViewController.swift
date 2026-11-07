@@ -219,6 +219,11 @@ final class RoomDetailViewController: UIViewController {
         if let markText = entry.markText {
             contextParts.append(markText)
         }
+        // 上报说明单独占一行：状态 + 标记已经较长，合并会只剩「· 待同步」孤行。
+        var contextLines = [contextParts.joined(separator: " · ")]
+        if let presenceNote = entry.presenceNote {
+            contextLines.append(presenceNote)
+        }
         var readingParts: [String] = []
         if let cloudNote = entry.cloudNote {
             readingParts.append(cloudNote)
@@ -227,18 +232,18 @@ final class RoomDetailViewController: UIViewController {
 
         if traitCollection.preferredContentSizeCategory.isAccessibilityCategory {
             // AX 档每项一行；跨平台状态用带显式换行的文案，避免「本机不可连接」被拆字。
-            var parts = contextParts
-            parts[0] = entry.statusTextForAccessibility
-            return (parts + readingParts).joined(separator: "\n")
+            contextLines[0] = entry.statusTextForAccessibility
+            return (contextLines + readingParts).joined(separator: "\n")
         }
         // 云端来源 + 读数另起一行，避免“来自 Android，本机不可连接 · 云端 … · 心率 72 bpm”
         // 在窄屏上把“心率”拆成两行。
+        let contextText = contextLines.joined(separator: "\n")
         if entry.cloudNote != nil {
-            return contextParts.joined(separator: " · ")
+            return contextText
                 + "\n"
                 + readingParts.joined(separator: " · ")
         }
-        return (contextParts + readingParts).joined(separator: " · ")
+        return contextText + " · " + readingParts.joined(separator: " · ")
     }
 }
 

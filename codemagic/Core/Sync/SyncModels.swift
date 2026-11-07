@@ -136,6 +136,12 @@ struct RemoteDevice: Decodable, Equatable {
     let hasRoomField: Bool
     /// 设备标记（契约 0.20.0）：字段缺省=保持原值；`null`/`""`=取消标记；时间=标记。
     let markedAt: Patch<Date>
+    /// 服务端最后一次接受读数上报的接收时间（契约 0.21.0）；`nil` 表示从未上报。
+    let serverLastSeenAt: Date?
+    /// 响应里是否真的出现了 `lastSeenAt` 键：缺省（旧后端）时不得覆盖本地已存值。
+    let hasLastSeenAtField: Bool
+    /// 服务端响应生成时推导的 `unknown / online / offline`；只读，客户端不参与 LWW。
+    let presence: DevicePresence?
     let updatedAt: Date
     let deletedAt: Date?
     let serverSeq: Int64?
@@ -152,6 +158,8 @@ struct RemoteDevice: Decodable, Equatable {
         case householdId
         case roomId
         case markedAt
+        case lastSeenAt
+        case presence
         case updatedAt
         case deletedAt
         case serverSeq
@@ -185,6 +193,13 @@ struct RemoteDevice: Decodable, Equatable {
         } else {
             markedAt = .absent
         }
+        // lastSeenAt 是只读派生字段：键缺省时保持本地已存值；显式 null 表示从未上报。
+        hasLastSeenAtField = container.contains(.lastSeenAt)
+        serverLastSeenAt = hasLastSeenAtField
+            ? SyncDateCodec.parse((try? container.decodeIfPresent(String.self, forKey: .lastSeenAt)) ?? "")
+            : nil
+        let rawPresence = (try? container.decodeIfPresent(String.self, forKey: .presence)) ?? nil
+        presence = rawPresence.flatMap(DevicePresence.init(rawValue:))
         updatedAt = SyncDateCodec.parse(
             (try? container.decodeIfPresent(String.self, forKey: .updatedAt)) ?? ""
         ) ?? Date(timeIntervalSince1970: 0)
@@ -208,6 +223,9 @@ struct RemoteDevice: Decodable, Equatable {
         roomID: String? = nil,
         hasRoomField: Bool = true,
         markedAt: Patch<Date> = .absent,
+        serverLastSeenAt: Date? = nil,
+        hasLastSeenAtField: Bool = true,
+        presence: DevicePresence? = nil,
         updatedAt: Date,
         deletedAt: Date? = nil,
         serverSeq: Int64? = nil
@@ -224,6 +242,9 @@ struct RemoteDevice: Decodable, Equatable {
         self.roomID = roomID
         self.hasRoomField = hasRoomField
         self.markedAt = markedAt
+        self.serverLastSeenAt = serverLastSeenAt
+        self.hasLastSeenAtField = hasLastSeenAtField
+        self.presence = presence
         self.updatedAt = updatedAt
         self.deletedAt = deletedAt
         self.serverSeq = serverSeq
@@ -268,6 +289,7 @@ struct RemoteDevice: Decodable, Equatable {
             vendor: nil,
             firmwareVersion: nil,
             lastSeenAt: nil,
+            serverLastSeenAt: serverLastSeenAt,
             markedAt: markedDate,
             createdAt: updatedAt,
             updatedAt: updatedAt,

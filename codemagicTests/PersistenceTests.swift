@@ -28,6 +28,7 @@ final class PersistenceTests: XCTestCase {
             vendor: "Acme",
             firmwareVersion: "1.2.0",
             lastSeenAt: Date(timeIntervalSince1970: 1000),
+            serverLastSeenAt: Date(timeIntervalSince1970: 1200),
             createdAt: Date(timeIntervalSince1970: 900),
             updatedAt: Date(timeIntervalSince1970: 1100),
             syncState: .pending
@@ -45,6 +46,33 @@ final class PersistenceTests: XCTestCase {
         XCTAssertEqual(loaded.syncState, .pending)
         XCTAssertEqual(loaded.displayName, "客厅面板")
         XCTAssertEqual(loaded.lastSeenAt?.timeIntervalSince1970, 1000)
+        XCTAssertEqual(loaded.serverLastSeenAt?.timeIntervalSince1970, 1200)
+    }
+
+    /// 服务端只读字段：更新 lastSeenAt 不得置 pending、不得推进 updatedAt、不得清掉待上报三态。
+    func testServerLastSeenAtUpdateKeepsPendingAndUpdatedAt() throws {
+        let store = SavedDeviceStore(database: testDatabase.database)
+        let device = SavedDevice(
+            peripheralID: UUID(),
+            advertisedName: "Panel",
+            remark: "待同步别名",
+            lastSeenAt: Date(timeIntervalSince1970: 1000),
+            createdAt: Date(timeIntervalSince1970: 900),
+            updatedAt: Date(timeIntervalSince1970: 1100),
+            syncState: .pending,
+            aliasPatch: .set("待同步别名")
+        )
+        try store.upsert(device)
+
+        let serverLastSeenAt = Date(timeIntervalSince1970: 1800)
+        try store.applyServerLastSeenAt(id: device.id, at: serverLastSeenAt)
+
+        let loaded = try XCTUnwrap(store.fetch(id: device.id))
+        XCTAssertEqual(loaded.serverLastSeenAt, serverLastSeenAt)
+        XCTAssertEqual(loaded.lastSeenAt?.timeIntervalSince1970, 1000, "本机扫描时间不被服务端值覆盖")
+        XCTAssertEqual(loaded.syncState, .pending, "只读字段不产生同步脏位")
+        XCTAssertEqual(loaded.updatedAt.timeIntervalSince1970, 1100, "不推进本地 updatedAt")
+        XCTAssertEqual(loaded.aliasPatch, .set("待同步别名"))
     }
 
     func testSoftDeleteKeepsRowForSync() throws {
@@ -186,7 +214,7 @@ final class PersistenceTests: XCTestCase {
         )
         XCTAssertEqual(events.count, 1)
         XCTAssertTrue(events[0].message.contains("-80 dBm"))
-        XCTAssertEqual(try migrated.query("PRAGMA user_version;").first?.integer("user_version"),  17)
+        XCTAssertEqual(try migrated.query("PRAGMA user_version;").first?.integer("user_version"),  18)
     }
 
     func testRecentDevicesSortedByLastSeen() throws {
@@ -266,7 +294,7 @@ final class PersistenceTests: XCTestCase {
         XCTAssertEqual(loaded.syncKey, "android:\(externalID)")
 
         let version = try testDatabase.database.query("PRAGMA user_version;").first?.integer("user_version")
-        XCTAssertEqual(version, 17)
+        XCTAssertEqual(version, 18)
     }
 
     func testDeviceTypeColumnRoundTrip() throws {
@@ -336,7 +364,7 @@ final class PersistenceTests: XCTestCase {
         XCTAssertEqual(device.groupPatch, .absent)
 
         let version = try migrated.query("PRAGMA user_version;").first?.integer("user_version")
-        XCTAssertEqual(version, 17)
+        XCTAssertEqual(version, 18)
     }
 
     func testAdvertisedNameAndPatchStatesRoundTrip() throws {

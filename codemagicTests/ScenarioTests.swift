@@ -82,7 +82,7 @@ final class ScenarioTests: XCTestCase {
 
         let migrated = try SQLiteDatabase(path: path)
         defer { migrated.close() }
-        XCTAssertEqual(try migrated.query("PRAGMA user_version;").first?.integer("user_version"),  17)
+        XCTAssertEqual(try migrated.query("PRAGMA user_version;").first?.integer("user_version"),  18)
 
         let columns = try migrated.query("PRAGMA table_info(scenarios);")
         XCTAssertEqual(columns.count, 25)
