@@ -1013,15 +1013,55 @@ private func run() -> Int32 {
             "status=\(readingsPush.status) body=\(bodyText(readingsPush.body))"
         )
         report.check(
-            (readingsPushObject["appliedReadings"] as? NSNumber)?.intValue == 3,
-            "appliedReadings 为 3",
-            "appliedReadings=\(readingsPushObject["appliedReadings"] ?? "nil")"
+            (readingsPushObject["appliedReadings"] as? NSNumber)?.intValue == 3
+                && (readingsPushObject["skippedReadings"] as? NSNumber)?.intValue == 0,
+            "首次推送 appliedReadings=3 且 skippedReadings=0",
+            "appliedReadings=\(readingsPushObject["appliedReadings"] ?? "nil") skippedReadings=\(readingsPushObject["skippedReadings"] ?? "nil")"
         )
+
+        // /sync/changes 的 user_device payload 必须反映推送后的服务端状态：
+        // 读数被接受后 lastSeenAt / presence 与单设备读接口同源，客户端增量同步才能自洽。
+        let changesAfterReadingsResponse = client.request("GET", "sync/changes?cursor=0&limit=500", token: tokenA)
+        let changesAfterReadingsObject = jsonObject(changesAfterReadingsResponse.body) ?? [:]
+        let readingsChanges = list(changesAfterReadingsObject["changes"])
+        let readingsNextCursor = (changesAfterReadingsObject["nextCursor"] as? NSNumber)?.int64Value ?? 0
+        let readingsMaxSeq = readingsChanges.compactMap { ($0["seq"] as? NSNumber)?.int64Value }.max() ?? 0
         report.check(
-            (readingsPushObject["skippedReadings"] as? NSNumber)?.intValue == 0,
-            "首次推送 skippedReadings 为 0",
-            "skippedReadings=\(readingsPushObject["skippedReadings"] ?? "nil")"
+            changesAfterReadingsResponse.status == 200
+                && readingsNextCursor >= readingsMaxSeq
+                && (changesAfterReadingsObject["hasMore"] as? Bool) == false,
+            "推送读数后增量游标覆盖本页全部实体",
+            "status=\(changesAfterReadingsResponse.status) nextCursor=\(readingsNextCursor) maxSeq=\(readingsMaxSeq) hasMore=\(changesAfterReadingsObject["hasMore"] ?? "nil")"
         )
+
+        let myDeviceAfterReadings = client.request("GET", "my/devices/ios/\(iosExternalID)", token: tokenA)
+        let myDeviceAfterReadingsObject = jsonObject(myDeviceAfterReadings.body) ?? [:]
+        let deviceChangeAfterReadings = readingsChanges.last { change in
+            text(change, "entity") == "user_device"
+                && text(change["payload"] as? [String: Any] ?? [:], "externalId") == iosExternalID
+        }
+        let deviceChangePayload = deviceChangeAfterReadings?["payload"] as? [String: Any] ?? [:]
+        if deviceChangePayload["presence"] != nil || deviceChangePayload["lastSeenAt"] != nil {
+            // 字段存在即硬断言，不做「存在即可」降级：取值必须与设备读接口逐字一致。
+            report.check(
+                myDeviceAfterReadings.status == 200
+                    && deviceChangeAfterReadings != nil
+                    && text(deviceChangePayload, "presence") == text(myDeviceAfterReadingsObject, "presence")
+                    && text(deviceChangePayload, "lastSeenAt") == text(myDeviceAfterReadingsObject, "lastSeenAt"),
+                "user_device payload 的 presence / lastSeenAt 与设备读接口一致",
+                "changes=\(text(deviceChangePayload, "presence"))/\(text(deviceChangePayload, "lastSeenAt")) myDevices=\(text(myDeviceAfterReadingsObject, "presence"))/\(text(myDeviceAfterReadingsObject, "lastSeenAt"))"
+            )
+        } else {
+            report.check(
+                myDeviceAfterReadings.status == 200 && deviceChangeAfterReadings != nil,
+                "user_device payload 存在（后端无 presence 字段，未断言取值）",
+                "status=\(myDeviceAfterReadings.status) payloadKeys=\(deviceChangePayload.count)"
+            )
+            report.skip(
+                "/sync/changes 的 presence / lastSeenAt 断言",
+                "后端响应无 presence 字段（CI pin v0.25.0）；本项本轮未执行"
+            )
+        }
 
         let listResponse = client.request(
             "GET",
@@ -1076,14 +1116,10 @@ private func run() -> Int32 {
             "status=\(duplicatePush.status)"
         )
         report.check(
-            (duplicateObject["appliedReadings"] as? NSNumber)?.intValue == 0,
-            "重复 id appliedReadings 为 0",
-            "body=\(bodyText(duplicatePush.body))"
-        )
-        report.check(
-            (duplicateObject["skippedReadings"] as? NSNumber)?.intValue == 3,
-            "重复 id skippedReadings 为 3",
-            "body=\(bodyText(duplicatePush.body))"
+            (duplicateObject["appliedReadings"] as? NSNumber)?.intValue == 0
+                && (duplicateObject["skippedReadings"] as? NSNumber)?.intValue == 3,
+            "重复 id appliedReadings=0 且 skippedReadings=3",
+            "appliedReadings=\(duplicateObject["appliedReadings"] ?? "nil") skippedReadings=\(duplicateObject["skippedReadings"] ?? "nil")"
         )
 
         let nanBody = """

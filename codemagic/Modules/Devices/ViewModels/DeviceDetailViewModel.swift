@@ -56,6 +56,11 @@ final class DeviceDetailViewModel {
     }
     private(set) var device: SavedDevice
 
+    /// 详情页使用的联动状态：连接态来自真实 BLE 服务，与首页 / 房间详情 / 设备列表同源。
+    var linkStatus: DeviceLinkStatus {
+        DeviceLinkStatus.make(device: device, bluetooth: bluetooth)
+    }
+
     var onChange: (() -> Void)?
 
     private let bluetooth: BluetoothServicing

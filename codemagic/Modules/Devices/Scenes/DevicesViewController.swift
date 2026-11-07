@@ -315,7 +315,11 @@ extension DevicesViewController: UITableViewDataSource {
             ) as? SavedDeviceCell else {
                 return UITableViewCell()
             }
-            cell.configure(device: devices[indexPath.row])
+            let device = devices[indexPath.row]
+            cell.configure(
+                device: device,
+                isConnected: DeviceLinkStatus.isConnected(device, bluetooth: environment.bluetooth)
+            )
             return cell
 
         case .rules:

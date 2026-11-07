@@ -237,7 +237,7 @@ final class HomeDashboardViewModel {
 
     /// 真实连接状态：仅本机可连接设备才查询 CoreBluetooth。
     func isConnected(_ device: SavedDevice) -> Bool {
-        device.isConnectable && bluetooth.isConnected(peripheralID: device.peripheralID)
+        DeviceLinkStatus.isConnected(device, bluetooth: bluetooth)
     }
 
     /// 服务端上报状态：按 `lastSeenAt` 与 900 秒窗口推导；`unknown` 不等同于离线。

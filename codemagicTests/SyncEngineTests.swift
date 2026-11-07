@@ -983,6 +983,42 @@ final class SyncEngineTests: XCTestCase {
         )
     }
 
+    /// 显式 null 与「字段缺失」语义不同：显式 null 是服务端确认从未上报，必须清空本地旧值。
+    /// 与上面的缺省字段用例分开，两种语义各自独立断言，不参数化混在一起。
+    func testExplicitNullLastSeenClearsStoredPresence() throws {
+        let updatedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        let storedLastSeen = Date(timeIntervalSince1970: 1_600_000_000)
+        let local = SavedDevice(
+            peripheralID: UUID(),
+            advertisedName: "客厅面板",
+            serverLastSeenAt: storedLastSeen,
+            updatedAt: updatedAt,
+            syncState: .synced
+        )
+        try savedDeviceStore.upsert(local)
+
+        let change = makeChange(
+            payload: makeRemote(
+                id: local.id.uuidString,
+                externalID: local.peripheralID.uuidString.uppercased(),
+                alias: local.remark,
+                hasLastSeenAtField: true,
+                presence: .unknown,
+                updatedAt: updatedAt
+            ),
+            op: "upsert"
+        )
+        api.changesPages = [.success(SyncChangesPage(changes: [change], nextCursor: 1, hasMore: false))]
+
+        let engine = makeEngine()
+        _ = runSync(engine)
+
+        XCTAssertNil(
+            try savedDeviceStore.fetch(id: local.id)?.serverLastSeenAt,
+            "显式 null 必须清空本地已存的上报时间"
+        )
+    }
+
     // MARK: - v0.25.0（契约 0.20.0）：设备标记 markedAt
 
     /// RFC3339 微秒精度：`...123456Z` 解析后再序列化必须原样返回，避免回传时被截成毫秒。

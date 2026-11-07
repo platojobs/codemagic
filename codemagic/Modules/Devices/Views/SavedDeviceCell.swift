@@ -21,7 +21,7 @@ final class SavedDeviceCell: UITableViewCell {
         fatalError("init(coder:) has not been implemented")
     }
 
-    func configure(device: SavedDevice, now: Date = Date()) {
+    func configure(device: SavedDevice, isConnected: Bool, now: Date = Date()) {
         nameLabel.text = device.displayName
 
         var metaParts = [device.groupName]
@@ -30,7 +30,8 @@ final class SavedDeviceCell: UITableViewCell {
         }
         // 云端状态与相对时间用统一四档实现；跨平台设备的「本机不可连接」在下方单独一行，
         // 两件事同时呈现，不互相遮蔽。
-        let linkStatus = DeviceLinkStatus(isConnected: false, presence: device.presence(at: now))
+        // 连接状态由列表页从 BLE 服务读取后传入，与首页 / 房间详情同一判定。
+        let linkStatus = DeviceLinkStatus(isConnected: isConnected, presence: device.presence(at: now))
         if let summary = linkStatus.secondaryText(
             connectable: device.isConnectable,
             serverLastSeenAt: device.serverLastSeenAt,

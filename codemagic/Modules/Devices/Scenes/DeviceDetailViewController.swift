@@ -257,13 +257,18 @@ final class DeviceDetailViewController: UIViewController {
         return sections
     }
 
-    /// 服务端上报状态：只陈述「云端最近上报」时间与是否超时，不写成权威在线状态。
+    /// 上报状态：与首页 / 房间详情 / 设备列表共用四档判定。
+    /// 本机已连接时主状态写「本机已连接」；云端已超时或从未上报仍附在后面，不因本机连接而隐藏云端事实。
     private func presenceText(for device: SavedDevice) -> String {
-        let linkStatus = DeviceLinkStatus(isConnected: false, presence: device.presence(at: Date()))
-        guard let serverLastSeenAt = device.serverLastSeenAt else {
-            return linkStatus.cloudStatusText
+        let linkStatus = viewModel.linkStatus
+        var parts = [linkStatus.title]
+        if linkStatus.isLocalConnected, linkStatus.presence != .online {
+            parts.append(linkStatus.cloudStatusText)
         }
-        return "\(linkStatus.cloudStatusText) · \(AppDateFormat.absolute(serverLastSeenAt))"
+        if let serverLastSeenAt = device.serverLastSeenAt {
+            parts.append(AppDateFormat.absolute(serverLastSeenAt))
+        }
+        return parts.joined(separator: " · ")
     }
 
     /// 「数据」区：区间切换 → 指标选择 → 时间比例折线图 → 24h 汇总 → 来源 → 最近记录。

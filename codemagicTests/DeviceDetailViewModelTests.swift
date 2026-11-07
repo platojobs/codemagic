@@ -110,6 +110,32 @@ final class DeviceDetailViewModelTests: XCTestCase {
         XCTAssertNil(bluetooth.connectionHandler)
     }
 
+    /// 详情页连接状态必须来自 BLE 服务：本机已连接时主状态是「本机已连接」，
+    /// 与首页 / 房间详情 / 设备列表同一结论，不能再写死 false。
+    func testLinkStatusReflectsRealBluetoothConnection() throws {
+        let device = makeSavedDevice(name: "面板")
+        let viewModel = try makeViewModel(device: device)
+        bluetooth.markConnected(device.peripheralID)
+
+        XCTAssertTrue(viewModel.linkStatus.isLocalConnected)
+        XCTAssertEqual(viewModel.linkStatus.title, L10n.t("device.link.localConnected"))
+    }
+
+    /// 跨平台设备没有本机 BLE 标识，不得声称本机连接，只按云端状态呈现。
+    func testLinkStatusDoesNotClaimConnectionForCrossPlatformDevice() throws {
+        let remote = SavedDevice(
+            peripheralID: UUID(),
+            platform: "android",
+            externalID: "AA:BB:CC:DD:EE:FF",
+            advertisedName: "安卓面板"
+        )
+        let viewModel = try makeViewModel(device: remote)
+        bluetooth.markConnected(remote.peripheralID)
+
+        XCTAssertFalse(viewModel.linkStatus.isLocalConnected, "本机不可连接设备不得声称已连接")
+        XCTAssertEqual(viewModel.linkStatus.cloudStatusText, L10n.t("device.link.cloudUnknown"))
+    }
+
     func testCloudDeviceTypePersistsForPush() throws {
         let device = makeSavedDevice(name: "面板")
         let product = ProductModel(

@@ -291,6 +291,6 @@ final class RoomDetailViewModel {
     /// 本机连接判定：只有本机可连接的 iOS 设备才查询 CoreBluetooth。
     /// 与首页共用同一口径，不再把「15 分钟内本机扫描到」额外算作在线。
     static func isConnected(_ device: SavedDevice, bluetooth: BluetoothServicing) -> Bool {
-        device.isConnectable && bluetooth.isConnected(peripheralID: device.peripheralID)
+        DeviceLinkStatus.isConnected(device, bluetooth: bluetooth)
     }
 }

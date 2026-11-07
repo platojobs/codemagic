@@ -616,6 +616,80 @@ assert delta <= 60, "lastSeenAt 应是服务端接收时间而非客户端 recor
 print("PASS presence online: lastSeenAt=%s" % seen)
 PY
 
+step "sync/changes presence（真 Postgres）：读数推送后增量 payload 与读接口一致"
+SYNC_PRESENCE_JSON="$(python3 - "$BASE_URL" "$TOKEN" "$EXTERNAL_ID" <<'PY'
+import json
+import sys
+import urllib.request
+
+base, token, ext = sys.argv[1:4]
+
+
+def call(path):
+    request = urllib.request.Request(base + "/api/v1/" + path)
+    request.add_header("Authorization", "Bearer " + token)
+    with urllib.request.urlopen(request) as response:
+        return json.loads(response.read())
+
+
+device = call("my/devices/ios/" + ext)
+assert device.get("presence") == "online", device
+page = call("sync/changes?cursor=0&limit=500")
+assert page.get("hasMore") is False, page
+rows = [
+    c for c in page["changes"]
+    if c["entity"] == "user_device" and (c["payload"] or {}).get("externalId") == ext
+]
+assert rows, "change_log 缺少该设备的 user_device 变更：%r" % page
+latest = rows[-1]["payload"]
+assert latest.get("presence") == device["presence"], (latest, device)
+assert latest.get("lastSeenAt") == device["lastSeenAt"], (latest, device)
+assert latest.get("lastSeenAt"), "在线设备的 payload 必须保留 lastSeenAt"
+assert page["nextCursor"] == max(c["seq"] for c in page["changes"]), page
+print(json.dumps({"cursor": page["nextCursor"], "lastSeenAt": latest["lastSeenAt"]}))
+PY
+)"
+SYNC_CURSOR="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["cursor"])' "$SYNC_PRESENCE_JSON")"
+log "PASS sync/changes presence：user_device payload presence=online / lastSeenAt 与读接口一致，cursor=${SYNC_CURSOR}"
+
+step "未知 entity 不影响同步（真 Postgres）：直接写入 future_entity 后游标照常推进"
+UNKNOWN_SEQ="$(docker exec "$PG_CONTAINER" psql -U "$PG_USER" -d "$PG_DB" -tAc \
+    "WITH ins AS (INSERT INTO change_log (user_id, entity, entity_id, op, payload) VALUES ('$USER_ID'::uuid, 'future_entity', 'future:1', 'upsert', '{\"future\":true}') RETURNING seq) SELECT seq FROM ins;" | tr -d '[:space:]')"
+[ -n "$UNKNOWN_SEQ" ] || fail "插入未知 entity 失败"
+python3 - "$BASE_URL" "$TOKEN" "$EXTERNAL_ID" "$SYNC_CURSOR" "$UNKNOWN_SEQ" <<'PY'
+import json
+import sys
+import urllib.request
+
+base, token, ext, cursor, unknown_seq = sys.argv[1:6]
+
+
+def call(path):
+    request = urllib.request.Request(base + "/api/v1/" + path)
+    request.add_header("Authorization", "Bearer " + token)
+    with urllib.request.urlopen(request) as response:
+        return json.loads(response.read())
+
+
+page = call("sync/changes?cursor=%s&limit=500" % cursor)
+assert page.get("hasMore") is False, page
+rows = page["changes"]
+assert rows, "未知 entity 应出现在增量页：%r" % page
+assert rows[-1]["entity"] == "future_entity", rows[-1]
+assert page["nextCursor"] == max(c["seq"] for c in rows), page
+assert page["nextCursor"] >= int(unknown_seq), (page, unknown_seq)
+# 未知实体不改变已有设备事实：全量页里该设备的 presence / lastSeenAt 仍为 online。
+full = call("sync/changes?cursor=0&limit=500")
+device_rows = [
+    c for c in full["changes"]
+    if c["entity"] == "user_device" and (c["payload"] or {}).get("externalId") == ext
+]
+assert device_rows, full
+assert device_rows[-1]["payload"].get("presence") == "online", device_rows[-1]
+assert device_rows[-1]["payload"].get("lastSeenAt"), device_rows[-1]
+print("PASS 未知 entity：delta=%d nextCursor=%s" % (len(rows), page["nextCursor"]))
+PY
+
 step "presence（真 Postgres）：回拨 last_seen_at 20 分钟，读接口实时推导 offline"
 docker exec "$PG_CONTAINER" psql -U "$PG_USER" -d "$PG_DB" -v ON_ERROR_STOP=1 \
     -c "UPDATE user_devices SET last_seen_at = now() - interval '20 minutes' WHERE user_id = '$USER_ID'::uuid AND platform = 'ios' AND external_id = '$EXTERNAL_ID';" >/dev/null

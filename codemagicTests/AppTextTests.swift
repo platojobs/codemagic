@@ -64,7 +64,7 @@ final class AppTextTests: XCTestCase {
         )
 
         let deviceCell = SavedDeviceCell(style: .default, reuseIdentifier: nil)
-        deviceCell.configure(device: device)
+        deviceCell.configure(device: device, isConnected: false)
         let ruleCell = RuleCell(style: .default, reuseIdentifier: nil)
         ruleCell.configure(rule: rule, targetName: device.displayName, onToggle: {})
 

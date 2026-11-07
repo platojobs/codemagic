@@ -718,6 +718,18 @@ Android 自 v0.22.0 起把服务端 `SCENE_*` 4xx 视为终态；iOS v0.24.0 对
 
 **截图同步。** 界面四档措辞与跨平台双行呈现变化后，用真实后端 v0.26.0 + `seed-demo-data.sh` 重拍受影响页面（iPhone 首页 6 张、房间详情 18 张、iPad 首页 3 张、iPad 房间详情 6 张），逐张核对画面与代码；`DeviceLinkStatus.secondaryText` 的云端状态与时间改为换行连接，窄卡片不再出现行末「·」。
 
+### 3.31 v0.31.8：列表 / 详情连接状态与增量 presence 校验
+
+依据 `PKotlinApp/docs/consistency-presence.md` 的二次对账，修掉 v0.31.7 遗留的一处真缺陷与三处遗漏。
+
+**1）连接状态不再写死。** `SavedDeviceCell` 与 `DeviceDetailViewController` 此前把 `isConnected` 传成常量 `false`，同一台已连接设备在首页显示「本机已连接」，在列表 / 详情却落到云端档位。现新增 `DeviceLinkStatus.isConnected(device:bluetooth:)`：`device.isConnectable && bluetooth.isConnected(peripheralID:)`；`DeviceLinkStatus.make(device:bluetooth:)` 由它构造。首页 `HomeDashboardViewModel`、房间详情 `RoomDetailViewModel`、设备列表 `DevicesViewController`、设备详情 `DeviceDetailViewModel.linkStatus` 全部改为调用这一处判定；列表页数据源虽是本地 `SavedDeviceStore`，但连接状态可从同一个 `BluetoothServicing` 读取，因此**不需要「不声称连接状态」的降级**。详情页「上报状态」行在本机已连接时写「本机已连接」，云端已超时 / 未上报时仍附在后面；跨平台设备 `isConnectable == false`，即使 BLE 层存在同名 UUID 也不会声称已连接。
+
+**2）显式 null 清空有独立覆盖。** `SyncEngineTests` 新增 `testExplicitNullLastSeenClearsStoredPresence`：payload 带 `lastSeenAt: null` 且 `hasLastSeenAtField = true` 时，本地旧 `serverLastSeenAt` 必须清空。它与既有「字段缺省不覆盖」用例分成两个独立测试，语义各自断言，没有参数化混写。
+
+**3）`/sync/changes` 的 presence。** `e2e-contract` 在推送读数后拉增量页：断言 `entity=user_device` 的 payload `presence` / `lastSeenAt` 与 `GET /my/devices/ios/{externalId}` **逐字一致**（字段存在即硬断言，不降级为「存在即可」），并断言 `nextCursor` 覆盖本页最大 `seq`。CI pin v0.25.0 时按既有机制先硬断言 200、再 `report.skip("...presence / lastSeenAt 断言", "后端响应无 presence 字段（CI pin v0.25.0）；本项本轮未执行")`。为保持**总项数 460**，本段把「首次推送 appliedReadings / skippedReadings」与「重复 id appliedReadings / skippedReadings」各合并为一条，空出的两条用于新增断言。`e2e-postgres` 在真实 Postgres 上额外断言读数推送后 payload `presence=online`、`lastSeenAt` 与读接口一致、游标推进；并用 `psql` 直接写入 `entity=future_entity` 的未知实体，断言增量页照常返回、游标跨过该行、设备 presence 不受影响（客户端跳过未知实体另由 `SyncEngineTests` 覆盖）。
+
+**4）文档版本头。** `docs/app-privacy.md`、`docs/e2e-postgres.md`、`docs/store-listing.md` 的版本头与 build 号从 v0.31.5 同步到 v0.31.8 / 48；`docs/store-listing.md` 中「当前二进制」的版本标注一并更新。
+
 ## 4. 错误码
 
 客户端错误码用于日志、空状态副标题与问题反馈，**两端含义一致**：

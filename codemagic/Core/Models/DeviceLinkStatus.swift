@@ -16,6 +16,24 @@ struct DeviceLinkStatus: Equatable {
     let tier: Tier
     let presence: DevicePresence
 
+    /// 本机连接判定：只有本机可连接的 iOS 设备才查询 CoreBluetooth。
+    /// 首页、房间详情、设备列表与设备详情共用这一处判定，任何页面都不得写死连接状态。
+    static func isConnected(_ device: SavedDevice, bluetooth: BluetoothServicing) -> Bool {
+        device.isConnectable && bluetooth.isConnected(peripheralID: device.peripheralID)
+    }
+
+    /// 按设备当前真实连接状态构造；连接状态来自 BLE 服务，不用常量冒充。
+    static func make(
+        device: SavedDevice,
+        bluetooth: BluetoothServicing,
+        now: Date = Date()
+    ) -> DeviceLinkStatus {
+        DeviceLinkStatus(
+            isConnected: isConnected(device, bluetooth: bluetooth),
+            presence: device.presence(at: now)
+        )
+    }
+
     init(isConnected: Bool, presence: DevicePresence) {
         self.presence = presence
         if isConnected {
