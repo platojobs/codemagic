@@ -24,22 +24,31 @@ final class DeviceCardCell: UICollectionViewCell {
 
         nameLabel.applyFont(AppText.body.font(weight: .semibold))
         nameLabel.textColor = Palette.textPrimary
-        // 名称单独占行，最多两行；过长的名称才省略，不再和状态抢同一行的宽度。
-        nameLabel.numberOfLines = 2
-        nameLabel.lineBreakMode = .byTruncatingTail
+        // 名称单独占行、不限制行数；卡片高度由首页按内容测量，AX 字号放大后不会截断。
+        nameLabel.numberOfLines = 0
+        nameLabel.lineBreakMode = .byWordWrapping
+        nameLabel.lineBreakStrategy = .pushOut
 
         statusLabel.applyFont(AppText.caption.font(weight: .medium))
         statusLabel.textAlignment = .natural
-        statusLabel.numberOfLines = 1
-        // 状态（未连接 / 已连接 / 离线）必须完整可读，排在名称下一行且不被挤压。
+        statusLabel.numberOfLines = 0
+        statusLabel.lineBreakMode = .byWordWrapping
+        statusLabel.lineBreakStrategy = .pushOut
+        // 状态（未连接 / 已连接 / 跨平台）必须完整可读，排在名称下一行且不被挤压。
         statusLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
 
         readingLabel.applyFont(AppText.numericM.font())
         readingLabel.textColor = Palette.textPrimary
         readingLabel.adjustsFontForContentSizeCategory = true
+        readingLabel.numberOfLines = 0
+        readingLabel.lineBreakMode = .byWordWrapping
+        readingLabel.lineBreakStrategy = .pushOut
 
         timeLabel.applyFont(AppText.footnote.font())
         timeLabel.textColor = Palette.textTertiary
+        timeLabel.numberOfLines = 0
+        timeLabel.lineBreakMode = .byWordWrapping
+        timeLabel.lineBreakStrategy = .pushOut
 
         signalView.translatesAutoresizingMaskIntoConstraints = false
 
@@ -118,7 +127,11 @@ final class DeviceCardCell: UICollectionViewCell {
         } else if isUnsynced {
             timeParts.append(L10n.t("device.sync.unsynced"))
         }
-        timeLabel.text = timeParts.joined(separator: " · ")
+        // AX 档每项单独一行，避免「云端 …」「已标记」「待同步」被拆字。
+        let separator = traitCollection.preferredContentSizeCategory.isAccessibilityCategory
+            ? "\n"
+            : " · "
+        timeLabel.text = timeParts.joined(separator: separator)
         card.onTap(onTap)
         accessibilityLabel = L10n.f("home.a11y.card", device.displayName, statusLabel.text ?? "", readingText)
     }
@@ -153,11 +166,15 @@ final class QuickScenarioCell: UICollectionViewCell {
 
         nameLabel.applyFont(AppText.body.font(weight: .semibold))
         nameLabel.textColor = Palette.textPrimary
-        nameLabel.numberOfLines = 1
+        nameLabel.numberOfLines = 0
+        nameLabel.lineBreakMode = .byWordWrapping
+        nameLabel.lineBreakStrategy = .pushOut
 
         detailLabel.applyFont(AppText.caption.font())
         detailLabel.textColor = Palette.textSecondary
-        detailLabel.numberOfLines = 2
+        detailLabel.numberOfLines = 0
+        detailLabel.lineBreakMode = .byWordWrapping
+        detailLabel.lineBreakStrategy = .pushOut
 
         let stack = UIStackView(arrangedSubviews: [iconView, nameLabel, detailLabel, UIView()])
         stack.axis = .vertical
@@ -199,6 +216,8 @@ final class HomeAlertCell: UICollectionViewCell {
     private let rightStack = UIStackView()
     private var statusChip: StatusChipView?
     private let chevron = UIImageView()
+    private let spacer = UIView()
+    private let contentStack = UIStackView()
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -214,9 +233,15 @@ final class HomeAlertCell: UICollectionViewCell {
         titleLabel.applyFont(AppText.callout.font(weight: .semibold))
         titleLabel.text = L10n.t("home.alertSummary")
         titleLabel.textColor = Palette.textPrimary
+        titleLabel.numberOfLines = 0
+        titleLabel.lineBreakMode = .byWordWrapping
+        titleLabel.lineBreakStrategy = .pushOut
 
         detailLabel.applyFont(AppText.caption.font())
         detailLabel.textColor = Palette.textSecondary
+        detailLabel.numberOfLines = 0
+        detailLabel.lineBreakMode = .byWordWrapping
+        detailLabel.lineBreakStrategy = .pushOut
 
         countLabel.applyFont(AppText.numericM.font())
         countLabel.textColor = Palette.textPrimary
@@ -237,7 +262,8 @@ final class HomeAlertCell: UICollectionViewCell {
         rightStack.alignment = .center
         rightStack.addArrangedSubview(countLabel)
 
-        let stack = UIStackView(arrangedSubviews: [text, UIView(), rightStack, chevron])
+        let stack = contentStack
+        [text, spacer, rightStack, chevron].forEach(stack.addArrangedSubview)
         stack.axis = .horizontal
         stack.spacing = Layout.space12
         stack.alignment = .center
@@ -250,11 +276,28 @@ final class HomeAlertCell: UICollectionViewCell {
             stack.bottomAnchor.constraint(equalTo: card.contentView.bottomAnchor),
             chevron.widthAnchor.constraint(equalToConstant: Layout.icon16),
         ])
+        applyArrangement()
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        guard previousTraitCollection?.preferredContentSizeCategory
+            != traitCollection.preferredContentSizeCategory else { return }
+        applyArrangement()
+    }
+
+    /// 常规字号横排；AX 档改为竖排，避免标题被右侧计数 / 状态胶囊挤成「今日告警…」。
+    private func applyArrangement() {
+        let isAccessibility = traitCollection.preferredContentSizeCategory.isAccessibilityCategory
+        contentStack.axis = isAccessibility ? .vertical : .horizontal
+        contentStack.alignment = isAccessibility ? .leading : .center
+        spacer.isHidden = isAccessibility
+        chevron.isHidden = isAccessibility
     }
 
     func configure(count: Int, summary: String, detail: String, kind: StatusChipView.Kind, onTap: @escaping () -> Void) {

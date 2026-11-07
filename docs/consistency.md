@@ -655,6 +655,17 @@ Android 自 v0.22.0 起把服务端 `SCENE_*` 4xx 视为终态；iOS v0.24.0 对
 
 **测试**：新增 12 个单测 —— `CloudLatestReadingsTests` 6 个（最新指标与单位映射、无指标为空且不再请求读数、404 为空、网络失败为 failed、读数失败为 failed、缓存命中不重复请求，并断言实际请求的指标名为 `temperature_celsius` 防止再被归一化）；`RoomDetailTests` 4 个（云端补齐缺失读数并保留来源边界、本机读数优先、云端失败显示不可用而非暂无读数、云端空且本机空仍暂无读数）；`RoomTests` 2 个（首页云端补齐读数与上报时间、云端失败不影响连接状态）。合计 **480** 单测 0 失败；e2e 仍 **460** 项。
 
+### 3.27 首页无障碍大字号设备卡自适应高度（v0.31.4）
+
+- **不再写死 164pt**：`.room` 分区按本段设备逐台实测卡片高度。`HomeDashboardViewController` 在视图树里挂一个隐藏的 `DeviceCardCell`（仅宽度约束，高度由内容决定，AX 字号会真实放大），用 `systemLayoutSizeFitting(width:required, height:fittingSizeLevel)` 取本段最大值，且不低于 164pt；同段卡片统一高度，常规字号版式不变。
+- **iPhone AX 单列**：`preferredContentSizeCategory.isAccessibilityCategory && horizontalSizeClass == .compact` 时（iPhone AX5 / AX2）两列改单列全宽 —— 两列约 180pt 放不下放大后的读数；iPad 常规横向每列约 500pt，保持两列。分区高度仍按单列宽度实测，卡片高度随字号增长。
+- **不裁切、不拆字**：名称 / 状态 / 读数 / 时间 `numberOfLines = 0` + `.byWordWrapping` + `.pushOut`；数值与单位之间用不换行空格 `\u{00A0}`（`72 bpm` 不拆成两行）；AX 档时间行用 `\n` 按项分隔（「云端 1 小时前」/「已标记」），不缩小字号。
+- **同类固定高度卡片**：顶部告警摘要卡与快捷场景卡（含空态）在 AX 档改用 `.estimated` 自适配高，标题 / 说明 / 空态不被固定高度裁切；常规字号仍保持 96 / 124 / 200pt。
+- **行高与底部避让**：`traitCollectionDidChange` 触发 `invalidateLayout()`；卡片高度变化后分区高度与内容高度同步，底部 `BottomOcclusion` 仍按悬浮 Tab 顶边计算。AX5 实测滚到底最后一张卡完整位于 Tab 顶边 `873pt` 之上（440×956pt）。
+- **截图**：iPhone AX5（`home-ax.png` / `home-ax-bottom.png`）、200%（`home-200.png` / `home-200-bottom.png`）与 iPad 13 英寸 `home-ax.png` 用 seed 数据重拍；客厅三台为心率 72 bpm / 湿度 52 % / 踏频 78 rpm，骑行台「已标记」，与 seed 一致。
+- **测试**：单测仍 **480** 0 失败（更新 `HomeLayoutTests.testDeviceCardShowsFullStatusUnderLongName` 以内容实测高度布局、`RoomTests` 断言数值与单位间为 `\u{00A0}`）；e2e 仍 **460** 项 0 失败。
+- **不变**：本轮不提前推演服务端 presence；`lastSeenAt` / 在线窗口契约落地后再接。当前在线口径仍为「本机在线 / 本机离线 / 本机不可连接」。
+
 ## 4. 错误码
 
 客户端错误码用于日志、空状态副标题与问题反馈，**两端含义一致**：

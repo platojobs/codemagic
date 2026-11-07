@@ -31,6 +31,9 @@ final class HomeDashboardViewController: UIViewController {
     private let chipsStack = UIStackView()
     private let chipsScroll = UIScrollView()
     private var titleHost: LargeTitleHost?
+    /// 设备卡高度测量用：隐藏、不参与交互，但挂在视图树里，AX 字号会真实放大后再测量。
+    private let sizingCard = DeviceCardCell(frame: .zero)
+    private var sizingCardWidth: NSLayoutConstraint?
 
     /// 收起状态只保存在当前会话：房间分区标题可点击展开 / 收起，未分配分区固定排最后。
     private var collapsedRoomIDs: Set<UUID> = []
@@ -73,12 +76,15 @@ final class HomeDashboardViewController: UIViewController {
         guard previousTraitCollection?.preferredContentSizeCategory
             != traitCollection.preferredContentSizeCategory else { return }
         applyChipsArrangement()
+        // 设备卡高度按字号测量，字号切档后必须重新计算分区高度。
+        collectionView.collectionViewLayout.invalidateLayout()
     }
 
     override func viewDidLoad() {
         super.viewDidLoad()
         title = L10n.t("tab.home")
         view.backgroundColor = Palette.canvas
+        configureSizingCard()
         configureCollectionView()
         configureControls()
         configureNavigation()
@@ -208,6 +214,65 @@ final class HomeDashboardViewController: UIViewController {
         chipsScroll.alwaysBounceVertical = false
     }
 
+    /// 隐藏的测量卡：只有宽度约束，高度由内容决定；挂在视图树里才能拿到放大后的 AX 字体。
+    private func configureSizingCard() {
+        sizingCard.isHidden = true
+        sizingCard.isUserInteractionEnabled = false
+        sizingCard.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(sizingCard)
+        let width = sizingCard.widthAnchor.constraint(equalToConstant: 0)
+        sizingCardWidth = width
+        NSLayoutConstraint.activate([
+            width,
+            sizingCard.topAnchor.constraint(equalTo: view.topAnchor),
+        ])
+    }
+
+    /// AX 档在紧凑横向（iPhone）改为单列：两列时卡片只有约 180pt 宽，放不下放大后的
+    /// 「72 bpm」等读数；iPad 常规横向每列约 500pt，保持两列仍可完整显示。
+    private func usesSingleColumnCards() -> Bool {
+        traitCollection.preferredContentSizeCategory.isAccessibilityCategory
+            && traitCollection.horizontalSizeClass == .compact
+    }
+
+    /// 是否处于无障碍大字号档位（与横向尺寸无关，用于文案重排与卡片自适配高）。
+    private func isAccessibilityText() -> Bool {
+        traitCollection.preferredContentSizeCategory.isAccessibilityCategory
+    }
+
+    /// 设备卡宽度：与分区实际可用宽度一致（常规 / iPad 两列，iPhone AX 单列）。
+    private func deviceCardWidth() -> CGFloat {
+        let container = view.bounds.width > 0 ? view.bounds.width : UIScreen.main.bounds.width
+        let content = container - Layout.pageMargin * 2
+        return max(1, usesSingleColumnCards() ? content : (content - Layout.cardGap) / 2)
+    }
+
+    /// 取本段所有设备实测高度的最大值；常规字号下不低于 164pt，保持既有版式。
+    private func deviceCardHeight(for items: [SavedDevice]) -> CGFloat {
+        let width = deviceCardWidth()
+        sizingCardWidth?.constant = width
+        var height: CGFloat = 164
+        for device in items {
+            sizingCard.configure(
+                device: device,
+                isConnected: viewModel.isConnected(device),
+                readingText: viewModel.readingText(for: device),
+                rssi: viewModel.rssi(for: device),
+                cloudReportedAt: viewModel.cloudReportedAt(for: device),
+                isUnsynced: viewModel.isUnsynced(device)
+            ) {}
+            sizingCard.setNeedsLayout()
+            sizingCard.layoutIfNeeded()
+            let target = sizingCard.systemLayoutSizeFitting(
+                CGSize(width: width, height: UIView.layoutFittingCompressedSize.height),
+                withHorizontalFittingPriority: .required,
+                verticalFittingPriority: .fittingSizeLevel
+            )
+            height = max(height, ceil(target.height))
+        }
+        return height
+    }
+
     private func refreshControls() {
         sortButton.configuration?.title = L10n.f("devices.sortSummary", String(describing: viewModel.sort.title))
         roomButton.configuration?.title = viewModel.hasRooms
@@ -232,11 +297,13 @@ final class HomeDashboardViewController: UIViewController {
     private func layoutSection(for section: Section) -> NSCollectionLayoutSection? {
         switch section {
         case .alert:
+            // 常规字号保持 96pt；AX 档改为自适配高，标题与说明不被固定高度裁切。
+            let height: NSCollectionLayoutDimension = isAccessibilityText() ? .estimated(96) : .absolute(96)
             let item = NSCollectionLayoutItem(
-                layoutSize: NSCollectionLayoutSize(widthDimension: .fractionalWidth(1), heightDimension: .absolute(96))
+                layoutSize: NSCollectionLayoutSize(widthDimension: .fractionalWidth(1), heightDimension: height)
             )
             let group = NSCollectionLayoutGroup.vertical(
-                layoutSize: NSCollectionLayoutSize(widthDimension: .fractionalWidth(1), heightDimension: .absolute(96)),
+                layoutSize: NSCollectionLayoutSize(widthDimension: .fractionalWidth(1), heightDimension: height),
                 subitems: [item]
             )
             let layoutSection = NSCollectionLayoutSection(group: group)
@@ -246,17 +313,21 @@ final class HomeDashboardViewController: UIViewController {
             return layoutSection
 
         case .scenarios, .scenarioEmpty:
-            let height: CGFloat = section == .scenarios ? 124 : 200
+            let base: CGFloat = section == .scenarios ? 124 : 200
+            // 快捷场景卡与空态卡在 AX 档同样按内容自适配高，名称与说明不被固定高度裁切。
+            let height: NSCollectionLayoutDimension = isAccessibilityText()
+                ? .estimated(base)
+                : .absolute(base)
             let item = NSCollectionLayoutItem(
                 layoutSize: NSCollectionLayoutSize(
                     widthDimension: section == .scenarios ? .absolute(210) : .fractionalWidth(1),
-                    heightDimension: .absolute(height)
+                    heightDimension: height
                 )
             )
             let group = NSCollectionLayoutGroup.horizontal(
                 layoutSize: NSCollectionLayoutSize(
                     widthDimension: section == .scenarios ? .absolute(210) : .fractionalWidth(1),
-                    heightDimension: .absolute(height)
+                    heightDimension: height
                 ),
                 subitems: [item]
             )
@@ -284,15 +355,26 @@ final class HomeDashboardViewController: UIViewController {
                 layoutSection.boundarySupplementaryItems = [makeHeader()]
                 return layoutSection
             }
-            // 名称与状态各占一行，卡片留出两行名称的高度（164pt），状态不会被省略号吃掉。
+            // 每段卡片统一高度，按本段最长的名称 / 状态 / 读数 / 时间实测；
+            // 常规字号下最小 164pt，AX 字号放大后随内容增高，不裁切、不缩字号。
+            let height = deviceCardHeight(for: items)
             let item = NSCollectionLayoutItem(
-                layoutSize: NSCollectionLayoutSize(widthDimension: .fractionalWidth(1), heightDimension: .absolute(164))
+                layoutSize: NSCollectionLayoutSize(widthDimension: .fractionalWidth(1), heightDimension: .absolute(height))
             )
-            let group = NSCollectionLayoutGroup.horizontal(
-                layoutSize: NSCollectionLayoutSize(widthDimension: .fractionalWidth(1), heightDimension: .absolute(164)),
-                subitem: item,
-                count: 2
-            )
+            let group: NSCollectionLayoutGroup
+            if usesSingleColumnCards() {
+                // AX 档单列：放大后的读数有完整横向空间，不在数值与单位之间断行。
+                group = NSCollectionLayoutGroup.vertical(
+                    layoutSize: NSCollectionLayoutSize(widthDimension: .fractionalWidth(1), heightDimension: .absolute(height)),
+                    subitems: [item]
+                )
+            } else {
+                group = NSCollectionLayoutGroup.horizontal(
+                    layoutSize: NSCollectionLayoutSize(widthDimension: .fractionalWidth(1), heightDimension: .absolute(height)),
+                    subitem: item,
+                    count: 2
+                )
+            }
             group.interItemSpacing = .fixed(Layout.cardGap)
             let layoutSection = NSCollectionLayoutSection(group: group)
             layoutSection.interGroupSpacing = Layout.cardGap

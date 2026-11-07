@@ -233,7 +233,8 @@ final class RoomTests: XCTestCase {
         let viewModel = try makeViewModel(cloudReadings: cloud)
         viewModel.reload()
 
-        XCTAssertEqual(viewModel.readingText(for: remote), "温度 24.5 ℃")
+        // 数值与单位用不换行空格，避免 AX 字号下被拆行。
+        XCTAssertEqual(viewModel.readingText(for: remote), "温度 24.5\u{00A0}℃")
         XCTAssertEqual(
             viewModel.cloudReportedAt(for: remote)?.timeIntervalSince1970,
             1_799_999_000,

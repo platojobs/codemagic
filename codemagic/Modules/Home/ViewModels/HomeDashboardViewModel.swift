@@ -209,11 +209,14 @@ final class HomeDashboardViewModel {
 
     func readingText(for device: SavedDevice) -> String {
         if let reading = latestReadings[device.id] {
-            return "\(reading.metric.displayName) \(reading.displayText)"
+            // 数值与单位用不换行空格绑定：AX 字号下不能把「72」和「bpm」拆到两行。
+            let value = reading.displayText.replacingOccurrences(of: " ", with: "\u{00A0}")
+            return "\(reading.metric.displayName) \(value)"
         }
         switch cloudStates[device.id] {
         case .available(let cloud)?:
-            return "\(cloud.metricTitle) \(cloud.displayText)"
+            let value = cloud.displayText.replacingOccurrences(of: " ", with: "\u{00A0}")
+            return "\(cloud.metricTitle) \(value)"
         case .failed?:
             // 云端查询失败不等于设备没有读数，也不据此判定设备离线。
             return L10n.t("home.reading.unavailable")

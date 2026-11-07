@@ -211,7 +211,7 @@ final class HomeViewModelTests: XCTestCase {
 
 /// 首页布局与家庭管理房间分区的回归：名称 / 状态分行、分区头复用、底部留白、房间行数。
 final class HomeLayoutTests: XCTestCase {
-    /// 名称过长时最多两行，状态词必须完整可见，不再和名称挤在同一行被省略号吃掉。
+    /// 名称为自适应行数（卡片高度由首页实测），状态词必须完整可见，不再和名称挤在同一行被省略号吃掉。
     func testDeviceCardShowsFullStatusUnderLongName() {
         let cell = DeviceCardCell(frame: CGRect(x: 0, y: 0, width: 179, height: 164))
         let device = SavedDevice(
@@ -220,12 +220,20 @@ final class HomeLayoutTests: XCTestCase {
             remark: "客厅环境传感器一号机"
         )
         cell.configure(device: device, isConnected: false, readingText: "电量 66 %", rssi: -70, onTap: {})
+        // 卡片高度由首页按内容实测；这里按同样口径把单元格拉到可容纳多行名称的高度。
+        let fitting = cell.contentView.systemLayoutSizeFitting(
+            CGSize(width: 179, height: UIView.layoutFittingCompressedSize.height),
+            withHorizontalFittingPriority: .required,
+            verticalFittingPriority: .fittingSizeLevel
+        )
+        cell.frame = CGRect(x: 0, y: 0, width: 179, height: max(164, ceil(fitting.height)))
+        cell.setNeedsLayout()
         cell.layoutIfNeeded()
         cell.contentView.layoutIfNeeded()
 
         let nameLabel = firstLabel(in: cell, text: device.displayName)
         XCTAssertNotNil(nameLabel, "找到设备名标签")
-        XCTAssertEqual(nameLabel?.numberOfLines, 2, "设备名最多两行")
+        XCTAssertEqual(nameLabel?.numberOfLines, 0, "设备名不限制行数，由卡片高度容纳")
 
         guard let statusLabel = firstLabel(in: cell, text: L10n.t("home.status.disconnected")) else {
             return XCTFail("找到状态标签")
