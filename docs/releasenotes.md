@@ -2,7 +2,7 @@
 
 按 tag 记录真实变更。版本号与 `PJGoIoT` / `PKotlinApp` 保持同一序列；同一 tag 的 iOS 构建号见下表。
 
-> **CI 覆盖边界（v0.31.8，必读）**：`.github/workflows/ios.yml:84` 仍 pin `PJGoIoT` **v0.25.0**，`presence` / `lastSeenAt` 是 **v0.26.0** 字段。CI 的 `e2e-contract` **460 项通过不等于新字段已覆盖**：后端无 `presence` 时沿用**显式跳过**，日志打印 `[SKIP] /sync/changes 的 presence / lastSeenAt 断言 — 后端响应无 presence 字段（CI pin v0.25.0）；本项本轮未执行`，不会被算作通过；字段存在时（v0.26.0）是硬断言：`entity=user_device` 的 payload `presence` / `lastSeenAt` 与 `GET /my/devices/ios/{externalId}` 逐字一致，不降级成「存在即可」。验证：本地 v0.26.0 **460 通过 / 0 跳过 / 0 失败**；CI v0.25.0 预期 **460 通过 / 1 跳过 / 0 失败**；反向验证（字段存在但把期望改成 `online`）**459 通过 / 1 失败 / 结论 FAIL**。`e2e-postgres` 在真 Postgres 上断言 online、`/sync/changes` 游标推进与未知 `future_entity` 不阻断同步，以及回拨后的 offline。修改 pin 需要 `workflow` scope，当前推送凭证没有。
+> **CI 覆盖边界（v0.31.8，必读）**：`.github/workflows/ios.yml:84` 仍 pin `PJGoIoT` **v0.25.0**，`presence` / `lastSeenAt` 是 **v0.26.0** 字段。CI 的 `e2e-contract` **460 项通过不等于新字段已覆盖**：后端无 `presence` 时沿用**显式跳过**，日志打印 `[SKIP] /sync/changes 的 presence / lastSeenAt 断言 — 后端响应无 presence 字段（CI pin v0.25.0）；本项本轮未执行`，不会被算作通过；字段存在时（v0.26.0）是硬断言：`entity=user_device` 的 payload `presence` / `lastSeenAt` 与 `GET /my/devices/ios/{externalId}` 逐字一致，不降级成「存在即可」。验证：本地 v0.26.0 **460 通过 / 0 跳过 / 0 失败**；CI v0.25.0 实测 **460 通过 / 2 跳过 / 0 失败**（`/my/devices` 与 `/sync/changes` 两处 presence 断言均显式跳过）；反向验证（字段存在但把期望改成 `online`）**459 通过 / 1 失败 / 结论 FAIL**。`e2e-postgres` 在真 Postgres 上断言 online、`/sync/changes` 游标推进与未知 `future_entity` 不阻断同步，以及回拨后的 offline。修改 pin 需要 `workflow` scope，当前推送凭证没有。
 
 | Tag | MARKETING_VERSION | Build | 日期 | 对齐后端 |
 | --- | --- | --- | --- | --- |
