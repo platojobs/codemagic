@@ -698,13 +698,25 @@ Android 自 v0.22.0 起把服务端 `SCENE_*` 4xx 视为终态；iOS v0.24.0 对
 
 **2）整组文案去掉上帝视角。** 四个档位统一为「本机已连接 / 云端 15 分钟内有上报 / 云端上报已超时 / 云端从未收到上报」；时间行统一写「云端最近上报 X 前」（无服务端时间时才退回「本机最近扫描 X 前」）。`offline` 不再写「已离线」，`online` 也不再写「最近上报」冒充权威在线；房间汇总四行改为 `共 N 台` / `本机已连接 N · 云端 15 分钟内有上报 N` / `云端上报已超时 N · 云端从未收到上报 N` / `已标记 N · 本机不可连接 N`。旧键 `device.presence.*`、`room.detail.online / offline / lastReported / offlineWithTime / remoteOnlyShort`、`home.status.connected / crossPlatform / lastReported`、`device.cell.lastReported`、`device.detail.lastReported / offlineWithTime` 已从双语 strings 删除，避免旧口吻被再次引用。
 
-**3）跨平台不再遮住 presence。** `isConnectable == false` 只是附加的本机连接说明，不是第五档。首页状态行写「本机不可连接」，时间行同时给「云端上报已超时 · 云端最近上报 X 前」或「云端 15 分钟内有上报 · 云端最近上报 X 前」；房间详情第一行保留「来自 Android，本机不可连接」，第二行给云端状态与时间；AX 档同样同时保留两件事，并修掉 `metaText` AX 分支此前丢弃「已标记」的问题。
+**3）跨平台不再遮住 presence。** `isConnectable == false` 只是附加的本机连接说明，不是第五档。首页状态行写「本机不可连接」，时间行同时给「云端上报已超时」或「云端 15 分钟内有上报」，下一行给「云端最近上报 X 前」；房间详情第一行保留「来自 Android，本机不可连接」，第二段给云端状态与时间；AX 档同样同时保留两件事，并修掉 `metaText` AX 分支此前丢弃「已标记」的问题。<br>（v0.31.7 起 `secondaryText` 的两段改用 `\n` 连接，窄卡片不会出现行末悬挂的「·」。）
 
 **4）`unknown` 跳过云端读数请求。** 房间与首页的 `requestCloudReadings` 在 `presence == unknown` 时直接跳过（服务端从未接受过该设备读数，`metrics + limit=1` 只会白跑两次往返）；本机已有读数时也跳过（界面本机优先）。房间详情对被跳过的设备把云端读数状态标记为 `.empty`，不再显示「正在读取」。
 
-**测试与 e2e。** 新增 `DeviceLinkStatusTests`（四档、BLE 优先、900 秒边界、跨平台同时呈现、文案不含「在线」）与房间 / 首页「unknown 跳过云端请求」用例，单测合计 **495**（0 失败）。`e2e-contract` 的 presence 断言并入既有 check（总项数保持 **460**）：`GET /my/devices/{mac}` 对从未上报的设备断言 `presence = unknown` 且 `lastSeenAt` 为 `null`；曾临时把期望改为 `online` 做反向验证，结果为 **459 通过 / 1 失败 / 退出码 1**，证明断言确实会触发。真 Postgres 的 `e2e-postgres.sh` 增加两步：读数被接受后断言 `presence = online` 且 `lastSeenAt` 距当前 ≤ 60 秒（排除客户端 `recordedAt`）；把 `user_devices.last_seen_at` 回拨 20 分钟后断言 `presence = offline` 且仍保留最近上报时间。
+**测试与 e2e。** 新增 `DeviceLinkStatusTests`（四档、BLE 优先、900 秒边界、跨平台同时呈现、文案不含「在线」）与房间 / 首页「unknown 跳过云端请求」用例，单测合计 **495**（0 失败）。`e2e-contract` 的 presence 断言在 v0.26.0 下并入既有 check（总项数保持 **460**）：`GET /my/devices/{mac}` 对从未上报的设备断言 `presence = unknown` 且 `lastSeenAt` 为 `null`；曾临时把期望改为 `online` 做反向验证，结果为 **459 通过 / 1 失败 / 退出码 1**，证明断言确实会触发。真 Postgres 的 `e2e-postgres.sh` 增加两步：读数被接受后断言 `presence = online` 且 `lastSeenAt` 距当前 ≤ 60 秒（排除客户端 `recordedAt`）；把 `user_devices.last_seen_at` 回拨 20 分钟后断言 `presence = offline` 且仍保留最近上报时间。
 
 **CI 覆盖边界。** `ios.yml:84` 仍 pin `PJGoIoT` v0.25.0（无 presence 字段），CI 的 460 项全绿**不包含新字段断言**；本机推送凭证缺少 `workflow` scope，无法修改 workflow 文件。新字段只在本地 v0.26.0 验证，README 第 1 节与第 8.1 节已显著标注，避免被误读为已覆盖。
+
+### 3.30 v0.31.7：已发布 tag 纪律与 CI 兼容分支显式跳过
+
+**tag 纪律事故（如实记录）。** v0.31.6 在 09:22:27Z 推送到 `f227476` 后，tag 流水线已在该 commit 上跑过并失败（459 通过 / 1 失败，原因是 CI pin 的 v0.25.0 无 `presence` 字段）；随后该 tag 在 09:29:23Z 被删除并重建到 `399e4a6`。**已发布 tag 不移动、不删除、不重建**，失败后只能递增补发；正确的处置是保留失败的 `v0.31.6`、另发 `v0.31.7`。本轮 `v0.31.7` 即按此递增补发，`v0.31.6` 保持原样，releasenotes 已如实记录。发版前置检查：推送前用 `git ls-remote --tags origin` 确认目标 tag 名不存在。
+
+**兼容分支不再吞错。** 旧实现用 `hasPresenceField` 在断言内条件短路，后端无字段时整条 check 直接算通过，日志看不出该项没跑。现改为：
+- 后端返回 `presence` / `lastSeenAt`（v0.26.0）→ 单条硬断言 `status == 200 && presence == "unknown" && lastSeenAt == null`，不做「存在即可」降级；
+- 后端不返回该字段（CI pin v0.25.0）→ 先硬断言 `status == 200`，再 `report.skip("presence / lastSeenAt 断言", "后端响应无 presence 字段（CI pin v0.25.0）；本项本轮未执行")`，日志打印 `[SKIP]`，跳过项不计入通过。
+
+**验证结果。** 本地 v0.26.0：**460 通过 / 0 跳过 / 0 失败**；CI v0.25.0：**460 通过 / 1 跳过 / 0 失败**（`[SKIP]` 在日志可见）；反向验证（v0.26.0 下把期望改为 `online`，即字段存在但值错误）：**459 通过 / 1 失败 / 退出码 1** —— 兼容判定只看字段是否存在，值错误一律走硬断言失败。
+
+**截图同步。** 界面四档措辞与跨平台双行呈现变化后，用真实后端 v0.26.0 + `seed-demo-data.sh` 重拍受影响页面（iPhone 首页 6 张、房间详情 18 张、iPad 首页 3 张、iPad 房间详情 6 张），逐张核对画面与代码；`DeviceLinkStatus.secondaryText` 的云端状态与时间改为换行连接，窄卡片不再出现行末「·」。
 
 ## 4. 错误码
 

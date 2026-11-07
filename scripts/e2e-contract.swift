@@ -912,17 +912,25 @@ private func run() -> Int32 {
     let macPath = androidMAC
     let ownDevice = client.request("GET", "my/devices/\(macPath)", token: tokenA)
     let ownDeviceObject = jsonObject(ownDevice.body) ?? [:]
-    // CI 仍 pin 后端 v0.25.0（没有 presence 字段）；只有后端提供该字段时才断言，
-    // 既保持 460 项总数与 CI 兼容，也不会把「字段缺失」误判成「状态错误」。
+    // 兼容判定只看后端是否真的返回了字段：CI 仍 pin 后端 v0.25.0（响应里没有
+    // presence / lastSeenAt），此时显式 [SKIP] 并打印原因，让日志能看见这几条没跑，
+    // 而不是把「字段缺失」悄悄算成通过。字段存在时一律走硬断言，不做降级。
     let hasPresenceField = ownDeviceObject["presence"] != nil || ownDeviceObject["lastSeenAt"] != nil
-    report.check(
-        ownDevice.status == 200
-            && (!hasPresenceField
-                || (text(ownDeviceObject, "presence") == "unknown"
-                    && (ownDeviceObject["lastSeenAt"] == nil || ownDeviceObject["lastSeenAt"] is NSNull))),
-        "本人按 MAC 查询返回 200；后端有 presence 字段时须 presence=unknown / lastSeenAt=null",
-        "status=\(ownDevice.status) presence=\(text(ownDeviceObject, "presence")) lastSeenAt=\(ownDeviceObject["lastSeenAt"] ?? "nil")"
-    )
+    if hasPresenceField {
+        report.check(
+            ownDevice.status == 200
+                && text(ownDeviceObject, "presence") == "unknown"
+                && (ownDeviceObject["lastSeenAt"] == nil || ownDeviceObject["lastSeenAt"] is NSNull),
+            "本人按 MAC 查询返回 200，且 presence=unknown / lastSeenAt=null",
+            "status=\(ownDevice.status) presence=\(text(ownDeviceObject, "presence")) lastSeenAt=\(ownDeviceObject["lastSeenAt"] ?? "nil")"
+        )
+    } else {
+        report.check(ownDevice.status == 200, "本人按 MAC 查询返回 200", "status=\(ownDevice.status)")
+        report.skip(
+            "presence / lastSeenAt 断言",
+            "后端响应无 presence 字段（CI pin v0.25.0）；本项本轮未执行"
+        )
+    }
     report.check(text(ownDeviceObject, "alias") == sharedAlias, "服务端仍保留较新 alias，未被旧版本覆盖", "alias=\(text(ownDeviceObject, "alias"))")
     report.check(text(ownDeviceObject, "group") == sharedGroup, "服务端仍保留较新 group", "group=\(text(ownDeviceObject, "group"))")
 

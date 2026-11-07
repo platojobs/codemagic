@@ -32,7 +32,7 @@ final class SavedDeviceCell: UITableViewCell {
         // 两件事同时呈现，不互相遮蔽。
         let linkStatus = DeviceLinkStatus(isConnected: false, presence: device.presence(at: now))
         if let summary = linkStatus.secondaryText(
-            connectable: true,
+            connectable: device.isConnectable,
             serverLastSeenAt: device.serverLastSeenAt,
             localLastSeenAt: device.lastSeenAt,
             now: now

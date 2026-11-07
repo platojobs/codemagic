@@ -94,7 +94,7 @@ final class DeviceLinkStatusTests: XCTestCase {
         )
         XCTAssertEqual(
             secondary,
-            "\(L10n.t("device.link.cloudStale")) · "
+            "\(L10n.t("device.link.cloudStale"))\n"
                 + L10n.f("device.link.serverLastReported", RelativeTimeText.short(for: server, relativeTo: now))
         )
     }

@@ -25,8 +25,8 @@
 #   App 会拉取 /sync/changes 里的家庭、房间、设备与场景；读数只存在于服务端，
 #   房间详情与首页会按需查询云端最近读数（v0.31.3 起）。
 #   读数通过 /sync/push 上报，服务端据此写入 user_devices.last_seen_at，
-#   因此 seed 后 15 分钟内 presence 为 online，界面显示「最近上报 X 前」；
-#   超过 900 秒后自动转为 offline（显示「已离线 · 最近上报 X 前」），截图需在窗口内重拍。
+#   因此 seed 后 15 分钟内 presence 为 online，界面显示「云端 15 分钟内有上报 / 云端最近上报 X 前」；
+#   超过 900 秒后自动转为 offline（显示「云端上报已超时 / 云端最近上报 X 前」），截图需在窗口内重拍。
 #
 # 用法：
 #   ./scripts/seed-demo-data.sh

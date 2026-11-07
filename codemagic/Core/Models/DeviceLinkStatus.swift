@@ -107,6 +107,7 @@ struct DeviceLinkStatus: Equatable {
     }
 
     /// 时间行：跨平台设备补云端状态；本机已连接但云端超时时也说明超时，不隐藏服务端读数。
+    /// 云端状态与时间各自成行：窄卡片里不会出现行末悬挂的分隔符，也符合「本机不可连接 + 云端状态」双行呈现。
     func secondaryText(
         connectable: Bool,
         serverLastSeenAt: Date?,
@@ -121,14 +122,14 @@ struct DeviceLinkStatus: Equatable {
         if !connectable {
             return [cloudStatusText, time]
                 .compactMap { $0 }
-                .joined(separator: " · ")
+                .joined(separator: "\n")
         }
         switch tier {
         case .localConnected:
             // 本机连接时若云端已超时，仍要说明云端状态，不能只报「本机已连接」。
             return presence == .online ? time : [cloudStatusText, time]
                 .compactMap { $0 }
-                .joined(separator: " · ")
+                .joined(separator: "\n")
         case .cloudRecent, .cloudStale, .cloudUnknown:
             return time
         }

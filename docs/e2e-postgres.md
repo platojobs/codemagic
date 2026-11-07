@@ -124,4 +124,4 @@ PASS 注销: DELETE=204，旧 token 再访问=401
 
 GitHub Actions 的 macOS runner **无法运行 Docker**，因此本项 **不进 CI**，只在本地执行；CI 中仍只跑 `scripts/e2e-contract.sh`（fixture）。上表结果来自本机真实运行，不是 CI 截图。
 
-`e2e-contract.sh` 使用 **`STORE=fixture`**（后端 v0.26.0），fixture 不记录读数推送的服务端接收时间，因此 `presence` 恒为 `unknown`；它只断言从未上报设备的 `presence=unknown / lastSeenAt=null`，**不能证明 online / offline 推导**。online 与回拨后的 offline 由本文件的真实 Postgres 步骤覆盖。CI 还额外 pin 在 `PJGoIoT` v0.25.0（无 presence 字段），所以 CI 的 460 项全绿不代表新字段已被断言。
+`e2e-contract.sh` 使用 **`STORE=fixture`**（后端 v0.26.0），fixture 不记录读数推送的服务端接收时间，因此 `presence` 恒为 `unknown`；它只断言从未上报设备的 `presence=unknown / lastSeenAt=null`，**不能证明 online / offline 推导**。online 与回拨后的 offline 由本文件的真实 Postgres 步骤覆盖。CI 还额外 pin 在 `PJGoIoT` v0.25.0（无 presence 字段），所以 CI 的 460 项通过不代表新字段已被断言：v0.31.7 起该项在无字段时打印 `[SKIP] presence / lastSeenAt 断言 — 后端响应无 presence 字段（CI pin v0.25.0）；本项本轮未执行`，跳过不计入通过；字段存在时走硬断言（v0.26.0 下把期望改成错误值会得到 459 通过 / 1 失败 / 退出码 1）。

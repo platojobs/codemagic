@@ -216,7 +216,7 @@ final class RoomDetailTests: XCTestCase {
         XCTAssertEqual(viewModel.entries[0].statusText, L10n.t("device.link.localConnected"))
         XCTAssertEqual(
             viewModel.entries[0].presenceNote,
-            "\(L10n.t("device.link.cloudStale")) · "
+            "\(L10n.t("device.link.cloudStale"))\n"
                 + L10n.f(
                     "device.link.serverLastReported",
                     RelativeTimeText.short(for: now.addingTimeInterval(-3 * 60 * 60), relativeTo: now)
