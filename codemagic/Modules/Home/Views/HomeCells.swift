@@ -331,16 +331,22 @@ final class HomeErrorCell: UICollectionViewCell {
     }
 }
 
-/// 分区头（UICollectionReusableView 包装 `SectionHeaderView`），房间分区支持点击展开 / 收起。
+/// 分区头（UICollectionReusableView 包装 `SectionHeaderView`）。
+/// 房间分区支持点击展开 / 收起；提供 `onDetail` 时改为点击标题进入房间详情，
+/// 展开 / 收起由右侧 chevron 按钮承担。
 final class HomeSectionHeaderView: UICollectionReusableView {
     static let reuseIdentifier = "HomeSectionHeaderView"
     /// 当前展示的头视图；复用时会替换，不能只移除初始那一个，否则旧标题会叠在下面。
     private var header: SectionHeaderView?
     private var onToggle: (() -> Void)?
+    private var onDetail: (() -> Void)?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(handleTap)))
+        let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
+        // 不吞掉 chevron / 详情按钮的触摸，按钮自身的 action 才能触发。
+        tap.cancelsTouchesInView = false
+        addGestureRecognizer(tap)
     }
 
     @available(*, unavailable)
@@ -350,24 +356,62 @@ final class HomeSectionHeaderView: UICollectionReusableView {
 
     func configure(title: String) {
         onToggle = nil
+        onDetail = nil
         rebuild(title: title, trailing: nil)
     }
 
     func configure(title: String, collapsed: Bool, onToggle: @escaping () -> Void) {
-        let chevron = UIImageView(image: UIImage(systemName: collapsed ? "chevron.down" : "chevron.up"))
-        chevron.tintColor = AppTheme.Palette.secondaryText
-        chevron.preferredSymbolConfiguration = UIImage.SymbolConfiguration(textStyle: .caption1)
-        chevron.contentMode = .scaleAspectFit
-        chevron.setContentHuggingPriority(.required, for: .horizontal)
-        chevron.accessibilityIdentifier = "roomSectionChevron"
-        rebuild(title: title, trailing: chevron)
-        self.onToggle = onToggle
-        accessibilityLabel = title
-        accessibilityHint = collapsed ? L10n.t("room.expand") : L10n.t("room.collapse")
+        configure(title: title, collapsed: collapsed, onToggle: onToggle, onDetail: nil)
     }
 
-    @objc private func handleTap() {
-        onToggle?()
+    func configure(
+        title: String,
+        collapsed: Bool,
+        onToggle: @escaping () -> Void,
+        onDetail: (() -> Void)?
+    ) {
+        self.onToggle = onToggle
+        self.onDetail = onDetail
+        if onDetail != nil {
+            let chevron = UIButton(type: .system)
+            chevron.setImage(
+                UIImage(
+                    systemName: collapsed ? "chevron.down" : "chevron.up",
+                    withConfiguration: UIImage.SymbolConfiguration(textStyle: .caption1)
+                ),
+                for: .normal
+            )
+            chevron.tintColor = AppTheme.Palette.secondaryText
+            chevron.accessibilityIdentifier = "roomSectionChevron"
+            chevron.accessibilityLabel = collapsed
+                ? L10n.t("room.detail.expand")
+                : L10n.t("room.detail.collapse")
+            chevron.setContentHuggingPriority(.required, for: .horizontal)
+            chevron.addAction(UIAction { [weak self] _ in self?.onToggle?() }, for: .touchUpInside)
+            rebuild(title: title, trailing: chevron)
+        } else {
+            let chevron = UIImageView(image: UIImage(systemName: collapsed ? "chevron.down" : "chevron.up"))
+            chevron.tintColor = AppTheme.Palette.secondaryText
+            chevron.preferredSymbolConfiguration = UIImage.SymbolConfiguration(textStyle: .caption1)
+            chevron.contentMode = .scaleAspectFit
+            chevron.setContentHuggingPriority(.required, for: .horizontal)
+            chevron.accessibilityIdentifier = "roomSectionChevron"
+            rebuild(title: title, trailing: chevron)
+        }
+        accessibilityLabel = title
+        accessibilityHint = onDetail == nil
+            ? (collapsed ? L10n.t("room.expand") : L10n.t("room.collapse"))
+            : L10n.t("room.detail.openHint")
+    }
+
+    @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
+        let point = gesture.location(in: self)
+        if let hit = hitTest(point, with: nil), hit is UIControl { return }
+        if let onDetail {
+            onDetail()
+        } else {
+            onToggle?()
+        }
     }
 
     private func rebuild(title: String, trailing: UIView?) {

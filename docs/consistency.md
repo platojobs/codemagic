@@ -584,6 +584,18 @@ Android 自 v0.22.0 起把服务端 `SCENE_*` 4xx 视为终态；iOS v0.24.0 对
 - **界面口径**：设备管理列表 / 首页卡片对已标记设备显示「已标记」；仅写本机、尚未推送成功时显示「已标记 · 待同步」，**不得显示成已同步**。设备详情「标记」行可标记 / 取消标记，未同步时后缀「待同步」。
 - **测试**：单测覆盖三态解码（缺省 / `null` / `""` / 时间）、push 三态编码（省略 / `null` / RFC3339）、标记与取消实际进入 `devices[]`、旧 `updatedAt` 冲突以服务端为准、增量落地与 `null` 清除、换号后逐设备重传且不串、详情待同步展示、微秒往返不丢精度。e2e 在既有断言内（项数仍 460）覆盖：带微秒 `markedAt` push 后 `/my/devices` 回读一致、`null` 取消后回读为 `null`、`entity=user_device` 的 `change_log` payload 含 `markedAt`、幂等内容比较包含该字段。
 
+### 3.23 房间详情聚合与批量标记（v0.31.0，对齐 Android v0.32.4）
+
+- **入口**：首页房间分区标题点击进入 `RoomDetailViewController`；右侧 chevron 仍是独立的展开 / 收起按钮，两者互不吞触摸。未提供 `onDetail` 的旧调用保持原行为。
+- **数据口径**：只读本机 `saved_devices`（服务端同步可落地到同一张表），按 `room_id` 过滤，不再额外请求服务端。当前家庭存在时按 `household_id` 再过滤一次；个人家庭允许 `household_id IS NULL` 的本机设备。
+- **在线判定**：沿用首页 —— 本机可连接（`isConnectable`）且 CoreBluetooth 已连接，或 `last_seen_at` 落在最近 **15 分钟**内（与 Android `ONLINE_WINDOW_MS` 同口径）。跨平台设备没有本机扫描记录，按离线计数，行内追加「本机不可连接」。
+- **设备行**：名称、在线状态、最新一条真实读数（`readings` 按 `recorded_at DESC, rowid DESC LIMIT 1`）与标记状态；无读数显示「暂无读数」，不生成占位值。
+- **批量标记 / 取消标记**：`markAll` 只取未标记设备，`unmarkAll` 只取已标记设备；`SavedDeviceStore.updateMark(ids:markedAt:at:)` 用一条 SQL 更新整批（`marked_at` / `marked_at_patch` / `updated_at` / `sync_state = pending`），避免部分成功。之后走既有 `SyncEngine` push（`markedAt` 三态与字段级 LWW 不变）；无同步引擎或网络失败时保留本机变更并显示「待同步」，行内为「已标记 · 待同步」/「取消标记 · 待同步」。
+- **按钮状态**：无目标设备时对应按钮禁用，空房间隐藏批量操作区，不会出现「点了没反应」或「本地删了不同步」。
+- **权限**：`Household.capabilities.canManageRooms`（`isOwner`）为 false 时进页即显示「新建、改名、排序、删除房间仅家庭所有者可用」，不依赖服务端 403；批量标记仍可用（`user_device` 标记是当前用户自己的数据）。
+- **空态**：`RoomDetailEntry` 为空时显示「这个房间还没有设备」与扫描入口，不使用空白列表。
+- **测试**：`codemagicTests/RoomDetailTests.swift` 覆盖聚合与真实读数、在线 / 离线与跨平台、批量标记待同步、批量取消耗待同步、空批次无副作用、成员只读、owner 可管理、空态文案、跨家庭隔离；合计 466 单测 0 失败。e2e 仍 460 项（纯客户端聚合读取，未改契约）。
+
 ## 4. 错误码
 
 客户端错误码用于日志、空状态副标题与问题反馈，**两端含义一致**：

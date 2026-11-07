@@ -511,6 +511,25 @@ final class HomeDashboardViewController: UIViewController {
         collectionView.reloadData()
     }
 
+    /// 点房间分区标题进入详情：聚合本机与同步落地的同一份设备数据。
+    private func openRoomDetail(_ room: Room) {
+        let detailViewModel = RoomDetailViewModel(
+            room: room,
+            roomStore: environment.roomStore,
+            deviceStore: environment.savedDeviceStore,
+            readingsStore: environment.readingsStore,
+            bluetooth: environment.bluetooth,
+            householdService: environment.householdService,
+            syncEngine: environment.syncEngine
+        )
+        let controller = RoomDetailViewController(
+            viewModel: detailViewModel,
+            onSelectDevice: { [weak self] device in self?.openDetail(for: device) },
+            onScan: { [weak self] in self?.presentScanner() }
+        )
+        navigationController?.pushViewController(controller, animated: true)
+    }
+
     private func toggleUnassigned() {
         isUnassignedCollapsed.toggle()
         collectionView.reloadData()
@@ -794,9 +813,12 @@ extension HomeDashboardViewController: UICollectionViewDataSource {
                 ?? baseTitle
             if let room {
                 let collapsed = collapsedRoomIDs.contains(room.id)
-                header.configure(title: title, collapsed: collapsed) { [weak self] in
-                    self?.toggleRoom(room)
-                }
+                header.configure(
+                    title: title,
+                    collapsed: collapsed,
+                    onToggle: { [weak self] in self?.toggleRoom(room) },
+                    onDetail: { [weak self] in self?.openRoomDetail(room) }
+                )
             } else {
                 header.configure(title: title, collapsed: isUnassignedCollapsed) { [weak self] in
                     self?.toggleUnassigned()

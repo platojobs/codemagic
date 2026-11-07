@@ -122,6 +122,17 @@ final class ReadingsStore {
         return ReadingMetric.whitelist.filter { present.contains($0) }
     }
 
+    /// 该设备最新一条真实读数；没有记录时返回 `nil`，由界面显示「暂无读数」，不补造。
+    func latestReading(deviceID: UUID) throws -> DeviceReading? {
+        try database.query(
+            """
+            SELECT * FROM readings WHERE device_id = ?
+            ORDER BY recorded_at DESC, rowid DESC LIMIT 1;
+            """,
+            [.text(deviceID.uuidString)]
+        ).compactMap(Self.makeReading).first
+    }
+
     /// 该设备全部读数条数。
     func count(deviceID: UUID) throws -> Int {
         let rows = try database.query(

@@ -233,6 +233,28 @@ final class SavedDeviceStore {
         )
     }
 
+    /// 房间详情批量标记 / 取消标记：一次 SQL 更新整批设备，避免部分成功。
+    /// `markedAt = nil` 表示取消标记，仍写入 `marked_at_patch = "clear"` 等后续 push。
+    func updateMark(ids: [UUID], markedAt: Date?, at date: Date) throws {
+        guard !ids.isEmpty else { return }
+        let placeholders = ids.map { _ in "?" }.joined(separator: ", ")
+        let parameters: [SQLValue] =
+            [
+                markedAt.map { .double($0.timeIntervalSince1970) } ?? .null,
+                .text(markedAt == nil ? "clear" : "set"),
+                .double(date.timeIntervalSince1970),
+                .text(SyncState.pending.rawValue),
+            ] + ids.map { .text($0.uuidString) }
+        try database.execute(
+            """
+            UPDATE saved_devices
+            SET marked_at = ?, marked_at_patch = ?, updated_at = ?, sync_state = ?
+            WHERE id IN (\(placeholders));
+            """,
+            parameters
+        )
+    }
+
     /// 标记一批记录已同步（新增/修改/删除均适用）。
     /// 已上报成功的字段三态归零，下一次同步不会重复上报未修改的字段。
     func markSynced(ids: [UUID], at date: Date) throws {
