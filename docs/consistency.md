@@ -614,9 +614,46 @@ Android 自 v0.22.0 起把服务端 `SCENE_*` 4xx 视为终态；iOS v0.24.0 对
 - **幂等**：默认先 `TRUNCATE` 所有用户数据表（保留设备类型目录 / 固件 / 配件 / 迁移表）再按固定名称与数量重建；设备 `externalId` 固定为 `AA:BB:CC:00:00:01..13`，读数用确定性日周期而非随机数。连续执行两次，形状完全一致（见脚本输出）。`SEED_SKIP_RESET=1` 只追加，不建议。
 - **前置条件**：后端 `PJGoIoT` v0.25.x、迁移 **19**（`000019_device_marked_at`）；`DATABASE_URL` 可连（默认 `postgres://platojobs@127.0.0.1:5432/pjgoiot?sslmode=disable`）；API 以 `STORE=postgres` 启动并可访问 `SEED_BASE_URL`（默认 `http://127.0.0.1:8080`）；本机有 `psql` / `python3` / `curl`。
 - **账号**：脚本 `POST /auth/anonymous` 新建账号，结束时打印 10 分钟一次性 `pairingCode`；在 App「我的 → 用配对码恢复原账号」输入即可接管。成员截图用 `memberPairingCode`。接管会把本机已有设备 / 读数标记为 pending，所以截图前需全新安装 App。
-- **为什么房间详情是「离线 / 暂无读数」**：`/sync/changes` 只拉家庭 / 房间 / 设备 / 场景，不拉读数；房间详情只读本机 SQLite。同步落地的远程设备没有本机 `lastSeenAt`，按现有判定全部离线；平台 Android 时行内标注本机不可连接。这是实现口径，不是 seed 缺数据。
+- **为什么房间详情是「离线 / 暂无读数」**：`/sync/changes` 只拉家庭 / 房间 / 设备 / 场景，不拉读数；房间详情只读本机 SQLite。同步落地的远程设备没有本机 `lastSeenAt`，按现有判定全部离线；平台 Android 时行内标注本机不可连接。这是 v0.31.2 时的实现口径，**已在 v0.31.3 修正**（见 3.26）。
 - **`household_rooms = 0` 排查**：`e2e-contract.sh` 使用内存 fixture，`e2e-postgres.sh` 固定独立库 `pjgoiot_e2e`，均不会 TRUNCATE 开发库；开发库只剩余旧的手工重置 / 反复匿名登录残留。`e2e-postgres.sh` 已新增 DATABASE_URL 库名断言（必须为 `pjgoiot_e2e` 或含 `_e2e`），从源头避免误连开发库。
 - **测试**：本轮不改客户端逻辑，单测仍 **468** 0 失败；e2e 仍 **460** 项。
+
+### 3.26 云端最近读数与在线判定边界（v0.31.3，后端 v0.25.1 / 契约 0.20.0）
+
+**契约事实**（`PJGoIoT/api/openapi.yaml`）：
+
+- 版本 `0.20.0`（`:4`）。读数自 `0.4.0` 起随 `/sync/push` 写入、按设备分页查询与聚合，服务端保留 90 天（`:20-21`）；`0.5.0` 增加序列与指标清单（`:22-23`）。
+- **按设备的最近读数**：`GET /my/devices/{platform}/{externalId}/readings`（`:907-921`），按 `recordedAt` 倒序、不透明游标分页，`limit` 1–500（`:948-960`），`metric` 可选且必须小写 snake_case（`:917`、`:927-933`）。取「最近一条」用 `limit=1` 即可，无需新端点。
+- **哪条指标最新有服务端依据**：`GET .../readings/metrics`（`:1141-1153`）返回每个指标的 `count` / `firstAt` / `lastAt`，按 `lastAt` 倒序；`unit` 取该指标最近一条读数的单位（`:1149-1151`）；从未上报时 `items: []` + HTTP 200（`:1152`）。
+- 聚合接口：`.../readings/summary`（`:992-1025`，`metric` 必填、`hours` 默认 24）与 `.../readings/series`（`:1052-1069`）。
+- **`/sync/changes` 不含读数**：只返回 `changes`，`payload` 为 `UserDevice`（`:1185-1230`，`:1204`）；读数的写入通道是 `/sync/push` 的 `readings`（`:1297-1305`）。新成员 / 新设备登录以 `GET /households` 做基线（`:1222`），同样不含读数。
+- **没有服务端在线 / `lastSeen` 字段**：`UserDevice` schema（`:3355-3445`，required 见 `:3356`）只有元数据、`updatedAt`、`markedAt` 等；全文没有 `lastSeen` / `online` / `status`。服务端无法告诉客户端「这台设备现在是否在线」。
+
+**iOS 旧实现为什么显示成「一屋子死设备」**：
+
+- 房间详情读数只查本机 `readings` 表：`ReadingsStore.latestReading(deviceID:)`（`Core/Persistence/ReadingsStore.swift:126-134`，`ORDER BY recorded_at DESC, rowid DESC LIMIT 1`）；首页同样只遍历本机指标（`Modules/Home/ViewModels/HomeDashboardViewModel.swift:414-424`）。
+- 同步只落家庭 / 房间 / 设备 / 场景，不落读数。从另一台手机（或 seed）同步下来的 Android 设备，在本机从未采集过读数，因此**永远**是「暂无读数」。
+- 在线判定只有本机依据：已连接，或 `last_seen_at` 在 15 分钟内（`Modules/Rooms/ViewModels/RoomDetailViewModel.swift:243-254`）。跨平台设备没有本机扫描记录，旧实现统一按「离线」计数。
+
+**新实现**：
+
+- 新增 `Core/Networking/CloudLatestReadingsService.swift`：先 `GET /readings/metrics`，取 `count > 0 && lastAt != nil` 中 `lastAt` 最新的一条，再 `GET /readings?metric=<服务端原始指标名>&limit=1`。按设备缓存成功 60s / 失败 20s，同设备并发请求合并为一次，最多 3 台并行；404 → `.empty`（服务端确认无该设备数据），其余错误 → `.failed`。
+- 四态语义：`.loading` / `.available` / `.empty` / `.failed`。`.failed` **不判定设备离线，也不显示「暂无读数」**，分别显示「正在读取云端读数」「云端读数暂不可用」；只有本机与云端都确认无数据才显示「暂无读数」。
+- 指标展示：服务端指标为自定义小写 snake_case（`temperature_celsius` / `relative_humidity` / `cadence_rpm` / `wheel_speed_kmh` 等），`ReadingMetric` 枚举只覆盖本机常用指标。新增 `ReadingMetricPresentation` 只翻译标题与单位（`celsius` → `℃`、`fahrenheit` → `℉`），读数本身不归一化、不伪造；未知指标仍回退枚举展示名。
+- 请求必须使用服务端**原始**指标名。`Core/Networking/ReadingsAPIClient.swift` 新增 `metricName` 重载（查询参数 `metric=`），同时修复 `appendingPathComponent` 二次编码：MAC 的 `:` 原先被编码成 `%253A`，服务端收到 `%3A` 判 `INVALID_MAC`（400），这是云端读数一开始全部失败的根因，也影响既有读数页。
+- 房间详情（`Modules/Rooms/ViewModels/RoomDetailViewModel.swift`）：读数顺序为 本机 → 云端 `.available`（追加「云端 X 前上报」说明来源）→ `.failed`「云端读数暂不可用」→ `.empty` / 未接入「暂无读数」。状态：在线 →「本机在线」；可连接但未在线 →「本机离线」；跨平台 →「来自 Android，本机不可连接」。汇总改为「共 N 台 · 本机在线 N · 本机离线 N · 本机不可连接 N · 已标记 N」，跨平台不再计入离线。
+- 首页（`Modules/Home/ViewModels/HomeDashboardViewModel.swift`）：卡片读数同样本机 → 云端；时间行本机 `lastSeenAt` → 云端上报时间「云端 X 前上报」→「尚未连接」。跨平台卡片状态仍为「跨平台」，不写「离线」。
+- 无网 / 401 / 5xx：显示「云端读数暂不可用」，连接与标记状态不受影响；失败结果缓存 20s 后再试，避免整页刷新连续打点。
+
+**仍需后端补齐（本轮不伪造、不用夹具充数）**：
+
+1. `UserDevice`（`/my/devices` 与 `/sync/changes` payload）增加 `lastSeenAt`（服务端最后一次收到该设备读数 / 心跳的时间）与 `online`（服务端按固定窗口判定），或提供 `GET /my/devices?include=presence` 聚合字段。
+2. 契约写清在线窗口（例如 15 分钟）与 `lastSeenAt` 的精度 / 时区；客户端不得自行推断在线。
+3. 若要求跨平台设备读数实时刷新，需要推送或轮询语义；当前是按需查询 + 60s 缓存。
+
+在此之前，界面只声明「本机在线 / 本机离线 / 本机不可连接」与「云端上报时间」，不宣称服务端在线。
+
+**测试**：新增 12 个单测 —— `CloudLatestReadingsTests` 6 个（最新指标与单位映射、无指标为空且不再请求读数、404 为空、网络失败为 failed、读数失败为 failed、缓存命中不重复请求，并断言实际请求的指标名为 `temperature_celsius` 防止再被归一化）；`RoomDetailTests` 4 个（云端补齐缺失读数并保留来源边界、本机读数优先、云端失败显示不可用而非暂无读数、云端空且本机空仍暂无读数）；`RoomTests` 2 个（首页云端补齐读数与上报时间、云端失败不影响连接状态）。合计 **480** 单测 0 失败；e2e 仍 **460** 项。
 
 ## 4. 错误码
 

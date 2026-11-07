@@ -12,6 +12,17 @@ protocol ReadingsAPIServicing {
         cursor: String?,
         completion: @escaping (Result<ReadingsPage, AppError>) -> Void
     )
+    /// 按服务端原始指标名查询；用于服务端自定义指标（如 `temperature_celsius`）的最近读数。
+    func fetchReadings(
+        platform: String,
+        externalID: String,
+        metricName: String,
+        from: Date?,
+        to: Date?,
+        limit: Int,
+        cursor: String?,
+        completion: @escaping (Result<ReadingsPage, AppError>) -> Void
+    )
     func fetchSummary(
         platform: String,
         externalID: String,
@@ -33,6 +44,31 @@ protocol ReadingsAPIServicing {
         externalID: String,
         completion: @escaping (Result<ReadingMetrics, AppError>) -> Void
     )
+}
+
+extension ReadingsAPIServicing {
+    /// 未实现原始指标名查询的降级：把指标归一化后走原有枚举查询。
+    func fetchReadings(
+        platform: String,
+        externalID: String,
+        metricName: String,
+        from: Date?,
+        to: Date?,
+        limit: Int,
+        cursor: String?,
+        completion: @escaping (Result<ReadingsPage, AppError>) -> Void
+    ) {
+        fetchReadings(
+            platform: platform,
+            externalID: externalID,
+            metric: ReadingMetric.normalized(metricName),
+            from: from,
+            to: to,
+            limit: limit,
+            cursor: cursor,
+            completion: completion
+        )
+    }
 }
 
 /// `GET /api/v1/my/devices/{platform}/{externalId}/readings` 与 `.../readings/summary`。
@@ -62,8 +98,30 @@ final class ReadingsAPIClient: ReadingsAPIServicing {
         cursor: String? = nil,
         completion: @escaping (Result<ReadingsPage, AppError>) -> Void
     ) {
+        fetchReadings(
+            platform: platform,
+            externalID: externalID,
+            metricName: metric.rawValue,
+            from: from,
+            to: to,
+            limit: limit,
+            cursor: cursor,
+            completion: completion
+        )
+    }
+
+    func fetchReadings(
+        platform: String,
+        externalID: String,
+        metricName: String,
+        from: Date? = nil,
+        to: Date? = nil,
+        limit: Int = 100,
+        cursor: String? = nil,
+        completion: @escaping (Result<ReadingsPage, AppError>) -> Void
+    ) {
         var queryItems = [
-            URLQueryItem(name: "metric", value: metric.rawValue),
+            URLQueryItem(name: "metric", value: metricName),
             // 服务端上限 500；翻页时客户端先收敛，避免越界 400。
             URLQueryItem(name: "limit", value: String(APILimits.clamp(limit, to: APILimits.readings))),
         ]
@@ -135,8 +193,10 @@ final class ReadingsAPIClient: ReadingsAPIServicing {
 
     // MARK: - Private
 
+    /// 不预先百分号编码：`appendingPathComponent` 会再编码一次，
+    /// 像 `AA:BB:CC:00:00:02` 这样的 MAC 会被编码成 `%253A`，服务端收到 `%3A` 判为 INVALID_MAC。
     private func pathComponent(_ raw: String) -> String {
-        raw.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? raw
+        raw
     }
 
     private func send<T: Decodable>(

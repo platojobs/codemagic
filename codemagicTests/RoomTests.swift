@@ -213,9 +213,56 @@ final class RoomTests: XCTestCase {
         XCTAssertEqual(viewModel.roomName(for: moved), "客厅")
     }
 
+    // MARK: - 云端读数
+
+    func testHomeCardUsesCloudReadingWhenLocalMissing() throws {
+        let device = makeSavedDevice(name: "客厅温湿度计")
+        var remote = device
+        remote.platform = "android"
+        remote.externalID = "AA:BB:CC:00:00:01"
+        try deviceStore.upsert(remote)
+        let cloud = FakeCloudReadings()
+        cloud.states["android:\(remote.externalID)"] = .available(CloudLatestReading(
+            metric: .temperature,
+            rawMetric: "temperature_celsius",
+            value: 24.5,
+            unit: "celsius",
+            reportedAt: Date(timeIntervalSince1970: 1_799_999_000)
+        ))
+
+        let viewModel = try makeViewModel(cloudReadings: cloud)
+        viewModel.reload()
+
+        XCTAssertEqual(viewModel.readingText(for: remote), "温度 24.5 ℃")
+        XCTAssertEqual(
+            viewModel.cloudReportedAt(for: remote)?.timeIntervalSince1970,
+            1_799_999_000,
+            "时间行改用云端最近上报时间"
+        )
+    }
+
+    func testHomeCardShowsUnavailableOnCloudFailureInsteadOfNoReadings() throws {
+        let device = makeSavedDevice(name: "客厅温湿度计")
+        var remote = device
+        remote.platform = "android"
+        remote.externalID = "AA:BB:CC:00:00:02"
+        try deviceStore.upsert(remote)
+        let cloud = FakeCloudReadings()
+        cloud.states["android:\(remote.externalID)"] = .failed
+
+        let viewModel = try makeViewModel(cloudReadings: cloud)
+        viewModel.reload()
+
+        XCTAssertEqual(viewModel.readingText(for: remote), L10n.t("home.reading.unavailable"))
+        XCTAssertNil(viewModel.cloudReportedAt(for: remote))
+        XCTAssertFalse(viewModel.isConnected(remote), "拉取失败不影响连接状态判定")
+    }
+
     // MARK: - Helpers
 
-    private func makeViewModel() throws -> HomeDashboardViewModel {
+    private func makeViewModel(
+        cloudReadings: CloudLatestReadingsProviding? = nil
+    ) throws -> HomeDashboardViewModel {
         let settings = makeSettingsStore().store
         let scanLogStore = ScanLogStore(database: database)
         let coordinator = RuleAlertCoordinator(settingsStore: settings, notifications: NoopNotificationService())
@@ -238,7 +285,8 @@ final class RoomTests: XCTestCase {
             readingsStore: ReadingsStore(database: database),
             scenarioStore: ScenarioStore(database: database),
             roomStore: roomStore,
-            executor: executor
+            executor: executor,
+            cloudReadings: cloudReadings
         )
     }
 }

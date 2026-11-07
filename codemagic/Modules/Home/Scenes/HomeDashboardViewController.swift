@@ -520,7 +520,8 @@ final class HomeDashboardViewController: UIViewController {
             readingsStore: environment.readingsStore,
             bluetooth: environment.bluetooth,
             householdService: environment.householdService,
-            syncEngine: environment.syncEngine
+            syncEngine: environment.syncEngine,
+            cloudReadings: environment.cloudLatestReadings
         )
         let controller = RoomDetailViewController(
             viewModel: detailViewModel,
@@ -745,6 +746,7 @@ extension HomeDashboardViewController: UICollectionViewDataSource {
                 isConnected: viewModel.isConnected(device),
                 readingText: viewModel.readingText(for: device),
                 rssi: viewModel.rssi(for: device),
+                cloudReportedAt: viewModel.cloudReportedAt(for: device),
                 isUnsynced: viewModel.isUnsynced(device)
             ) { [weak self] in
                 self?.openDetail(for: device)

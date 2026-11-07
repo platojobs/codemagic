@@ -83,6 +83,7 @@ final class DeviceCardCell: UICollectionViewCell {
         isConnected: Bool,
         readingText: String,
         rssi: Int?,
+        cloudReportedAt: Date? = nil,
         isUnsynced: Bool = false,
         onTap: @escaping () -> Void
     ) {
@@ -102,7 +103,10 @@ final class DeviceCardCell: UICollectionViewCell {
         signalView.rssi = rssi ?? -100
         let timeText: String
         if let lastSeenAt = device.lastSeenAt {
-            timeText = Self.relativeFormatter.localizedString(for: lastSeenAt, relativeTo: Date())
+            timeText = RelativeTimeText.short(for: lastSeenAt)
+        } else if let cloudReportedAt {
+            // 本机没扫描过这台设备，用云端最近上报时间说明读数来源，不写成「尚未连接」。
+            timeText = L10n.f("home.cloudReported", RelativeTimeText.short(for: cloudReportedAt))
         } else {
             timeText = L10n.t("home.status.notConnectedYet")
         }
@@ -118,13 +122,6 @@ final class DeviceCardCell: UICollectionViewCell {
         card.onTap(onTap)
         accessibilityLabel = L10n.f("home.a11y.card", device.displayName, statusLabel.text ?? "", readingText)
     }
-
-    private static let relativeFormatter: RelativeDateTimeFormatter = {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.locale = Locale.current
-        formatter.unitsStyle = .short
-        return formatter
-    }()
 }
 
 /// 快捷场景卡：图标、名称、动作数量与「仅本机」标记。

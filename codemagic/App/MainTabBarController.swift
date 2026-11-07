@@ -60,7 +60,8 @@ final class MainTabBarController: UITabBarController {
                     scenarioStore: environment.scenarioStore,
                     roomStore: environment.roomStore,
                     executor: environment.scenarioExecutor,
-                    householdService: environment.householdService
+                    householdService: environment.householdService,
+                    cloudReadings: environment.cloudLatestReadings
                 ),
                 environment: environment
             ),

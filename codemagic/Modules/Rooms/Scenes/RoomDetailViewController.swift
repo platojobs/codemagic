@@ -215,16 +215,30 @@ final class RoomDetailViewController: UIViewController {
     }
 
     private func metaText(for entry: RoomDetailEntry) -> String {
-        var parts = [entry.isOnline ? L10n.t("room.detail.online") : L10n.t("room.detail.offline")]
-        if let remoteOnly = entry.device.connectUnavailableText {
-            parts.append(remoteOnly)
-        }
-        parts.append(entry.readingText)
+        var contextParts = [entry.statusText]
         if let markText = entry.markText {
-            parts.append(markText)
+            contextParts.append(markText)
         }
-        let separator = traitCollection.preferredContentSizeCategory.isAccessibilityCategory ? "\n" : " · "
-        return parts.joined(separator: separator)
+        var readingParts: [String] = []
+        if let cloudNote = entry.cloudNote {
+            readingParts.append(cloudNote)
+        }
+        readingParts.append(entry.readingText)
+
+        if traitCollection.preferredContentSizeCategory.isAccessibilityCategory {
+            // AX 档每项一行；跨平台状态用带显式换行的文案，避免「本机不可连接」被拆字。
+            var parts = contextParts
+            parts[0] = entry.statusTextForAccessibility
+            return (parts + readingParts).joined(separator: "\n")
+        }
+        // 云端来源 + 读数另起一行，避免“来自 Android，本机不可连接 · 云端 … · 心率 72 bpm”
+        // 在窄屏上把“心率”拆成两行。
+        if entry.cloudNote != nil {
+            return contextParts.joined(separator: " · ")
+                + "\n"
+                + readingParts.joined(separator: " · ")
+        }
+        return (contextParts + readingParts).joined(separator: " · ")
     }
 }
 

@@ -26,8 +26,10 @@ final class HomeDashboardViewModel {
     private let roomStore: RoomStore
     private let executor: ScenarioExecutor
     private let householdService: HouseholdService?
+    private let cloudReadings: CloudLatestReadingsProviding?
     private var recentRSSI: [UUID: Int] = [:]
     private var latestReadings: [UUID: DeviceReading] = [:]
+    private var cloudStates: [UUID: CloudLatestReadingState] = [:]
 
     init(
         bluetooth: BluetoothServicing,
@@ -39,7 +41,8 @@ final class HomeDashboardViewModel {
         scenarioStore: ScenarioStore,
         roomStore: RoomStore,
         executor: ScenarioExecutor,
-        householdService: HouseholdService? = nil
+        householdService: HouseholdService? = nil,
+        cloudReadings: CloudLatestReadingsProviding? = nil
     ) {
         self.bluetooth = bluetooth
         self.savedDeviceStore = savedDeviceStore
@@ -51,6 +54,7 @@ final class HomeDashboardViewModel {
         self.roomStore = roomStore
         self.executor = executor
         self.householdService = householdService
+        self.cloudReadings = cloudReadings
         self.sort = settingsStore.deviceSort
     }
 
@@ -85,6 +89,7 @@ final class HomeDashboardViewModel {
             lastError = .database(L10n.f("home.loadFailed", String(describing: error)))
         }
         onChange?()
+        requestCloudReadings()
     }
 
     // MARK: - 告警摘要
@@ -203,8 +208,25 @@ final class HomeDashboardViewModel {
     }
 
     func readingText(for device: SavedDevice) -> String {
-        guard let reading = latestReadings[device.id] else { return L10n.t("device.detail.noReadings") }
-        return "\(reading.metric.displayName) \(reading.displayText)"
+        if let reading = latestReadings[device.id] {
+            return "\(reading.metric.displayName) \(reading.displayText)"
+        }
+        switch cloudStates[device.id] {
+        case .available(let cloud)?:
+            return "\(cloud.metricTitle) \(cloud.displayText)"
+        case .failed?:
+            // 云端查询失败不等于设备没有读数，也不据此判定设备离线。
+            return L10n.t("home.reading.unavailable")
+        default:
+            return L10n.t("device.detail.noReadings")
+        }
+    }
+
+    /// 云端最近上报时间；仅在本机没有读数时用于卡片时间行。
+    func cloudReportedAt(for device: SavedDevice) -> Date? {
+        guard latestReadings[device.id] == nil, case .available(let cloud)? = cloudStates[device.id]
+        else { return nil }
+        return cloud.reportedAt
     }
 
     /// 真实连接状态：仅本机可连接设备才查询 CoreBluetooth。
@@ -376,6 +398,18 @@ final class HomeDashboardViewModel {
     }
 
     // MARK: - Private
+
+    /// 本机没有读数的设备补查云端最近读数；失败只记录状态，不当作离线。
+    private func requestCloudReadings() {
+        guard let cloudReadings else { return }
+        for device in devices {
+            cloudReadings.latestReading(platform: device.platform, externalID: device.externalID) { [weak self] state in
+                guard let self, self.cloudStates[device.id] != state else { return }
+                self.cloudStates[device.id] = state
+                self.onChange?()
+            }
+        }
+    }
 
     private func latestReading(deviceID: UUID) -> DeviceReading? {
         var newest: DeviceReading?

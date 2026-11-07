@@ -4,13 +4,51 @@ import Foundation
 struct RoomDetailEntry: Equatable {
     let device: SavedDevice
     let isOnline: Bool
+    /// 本机 SQLite 中的最新读数；有则优先展示。
     let reading: DeviceReading?
+    /// 云端最近读数状态；`nil` 表示未接入云端读数服务。
+    let cloudReading: CloudLatestReadingState?
 
     var readingText: String {
-        guard let reading else { return L10n.t("room.detail.noReading") }
-        // 数值与单位之间用不换行空格，避免大字号下 “24.5” 与 “℃” 被拆到两行。
-        let value = reading.displayText.replacingOccurrences(of: " ", with: "\u{00A0}")
-        return "\(reading.metric.displayName)\u{00A0}\(value)"
+        if let reading {
+            // 数值与单位之间用不换行空格，避免大字号下 “24.5” 与 “℃” 被拆到两行。
+            let value = reading.displayText.replacingOccurrences(of: " ", with: "\u{00A0}")
+            return "\(reading.metric.displayName)\u{00A0}\(value)"
+        }
+        switch cloudReading {
+        case .available(let cloud)?:
+            let value = cloud.displayText.replacingOccurrences(of: " ", with: "\u{00A0}")
+            return "\(cloud.metricTitle)\u{00A0}\(value)"
+        case .failed?:
+            // 拉不到 ≠ 没有读数，明确写数据来源不可用，不显示成「暂无读数」或设备离线。
+            return L10n.t("room.detail.cloudUnavailable")
+        case .loading?:
+            return L10n.t("room.detail.readingLoading")
+        case .empty?, nil:
+            // 本机与云端都确认没有读数时才显示「暂无读数」。
+            return L10n.t("room.detail.noReading")
+        }
+    }
+
+    /// 本机可判定时的在线状态；跨平台设备本机没有连接依据，不宣称离线。
+    var statusText: String {
+        if isOnline { return L10n.t("room.detail.online") }
+        if device.isConnectable { return L10n.t("room.detail.offline") }
+        return device.connectUnavailableText ?? L10n.t("room.detail.remoteOnlyShort")
+    }
+
+    /// AX 档用的状态文案：跨平台说明在「来自 X」后显式换行，
+    /// 避免最大字号下「本机不可连接」被拆成「本 / 机不可连接」。
+    var statusTextForAccessibility: String {
+        if isOnline { return L10n.t("room.detail.online") }
+        if device.isConnectable { return L10n.t("room.detail.offline") }
+        return L10n.f("device.remoteOnlyAX", String(describing: device.platformDisplayName))
+    }
+
+    /// 使用云端读数时标注上报时间，说明数据来源；本机读数不追加。
+    var cloudNote: String? {
+        guard reading == nil, case .available(let cloud)? = cloudReading else { return nil }
+        return L10n.f("room.detail.cloudReported", RelativeTimeText.short(for: cloud.reportedAt))
     }
 
     /// 标记状态：已标记 / 已标记 · 待同步 / 已取消标记 · 待同步；未标记且无待上传变更时为 nil。
@@ -26,12 +64,13 @@ struct RoomDetailEntry: Equatable {
     }
 }
 
-/// 房间详情聚合视图：本机 SQLite 与服务端同步落地的是同一份 `saved_devices`，
-/// 因此总数 / 在线 / 已标记与设备行都直接从这里读取，不另行请求服务端。
+/// 房间详情聚合视图：设备列表来自本机 SQLite 与服务端同步落地的同一份 `saved_devices`；
+/// 读数优先取本机，本机没有时查询服务端按设备读数接口。
 ///
-/// 在线沿用首页现有判定：本机可连接且 CoreBluetooth 已连接，或最近 15 分钟内出现过
-/// （与 Android 首页 `ONLINE_WINDOW_MS` 同口径）。跨平台设备没有本机扫描记录，按离线展示，
-/// 行内会明确标注「本机不可连接」。
+/// 在线判定只使用本机依据：CoreBluetooth 已连接，或本机最近 15 分钟内扫描到过
+/// （与 Android 首页 `ONLINE_WINDOW_MS` 同口径）。契约 `0.20.0` 的 `UserDevice`
+/// 没有服务端 `lastSeen` / `online` 字段，因此跨平台设备不宣称「离线」，
+/// 只如实标注「本机不可连接」，读数来源由云端上报时间说明。
 final class RoomDetailViewModel {
     private static let onlineWindow: TimeInterval = 15 * 60
 
@@ -49,7 +88,11 @@ final class RoomDetailViewModel {
     private let bluetooth: BluetoothServicing
     private let householdService: HouseholdService?
     private let syncEngine: SyncEngine?
+    private let cloudReadings: CloudLatestReadingsProviding?
     private let now: () -> Date
+
+    private var roomDevices: [SavedDevice] = []
+    private var cloudStates: [UUID: CloudLatestReadingState] = [:]
 
     init(
         room: Room,
@@ -59,6 +102,7 @@ final class RoomDetailViewModel {
         bluetooth: BluetoothServicing,
         householdService: HouseholdService? = nil,
         syncEngine: SyncEngine? = nil,
+        cloudReadings: CloudLatestReadingsProviding? = nil,
         now: @escaping () -> Date = Date.init
     ) {
         self.room = room
@@ -68,12 +112,17 @@ final class RoomDetailViewModel {
         self.bluetooth = bluetooth
         self.householdService = householdService
         self.syncEngine = syncEngine
+        self.cloudReadings = cloudReadings
         self.now = now
     }
 
     var totalCount: Int { entries.count }
+    /// 本机有真实连接 / 最近扫描依据的在线数。
     var onlineCount: Int { entries.filter(\.isOnline).count }
-    var offlineCount: Int { totalCount - onlineCount }
+    /// 本机可连接但当前没有在线依据的数量。
+    var localOfflineCount: Int { totalCount - onlineCount - remoteCount }
+    /// 跨平台设备数量：本机没有在线判定依据，单独计数，不计入「离线」。
+    var remoteCount: Int { entries.filter { !$0.device.isConnectable }.count }
     var markedCount: Int { entries.filter { $0.device.markedAt != nil }.count }
     /// 标记 / 取消标记已写本机但尚未 push 的数量。
     var pendingMarkCount: Int { entries.filter { $0.device.markedAtPatch != .absent }.count }
@@ -84,7 +133,8 @@ final class RoomDetailViewModel {
     var summaryText: String {
         L10n.f(
             "room.detail.summary",
-            String(totalCount), String(onlineCount), String(offlineCount), String(markedCount)
+            String(totalCount), String(onlineCount), String(localOfflineCount),
+            String(remoteCount), String(markedCount)
         )
     }
 
@@ -106,30 +156,49 @@ final class RoomDetailViewModel {
         do {
             let household = householdService?.currentHousehold()
             canManageRooms = household?.canManageRooms ?? true
-            let onlineSince = now().addingTimeInterval(-Self.onlineWindow)
-            let roomDevices = try deviceStore.fetchAll().filter { device in
+            roomDevices = try deviceStore.fetchAll().filter { device in
                 guard device.roomID == room.id else { return false }
                 guard let household else { return true }
                 guard let deviceHousehold = device.householdID else { return household.isPersonal }
                 return deviceHousehold == household.id
             }
-            entries = roomDevices.map { device in
-                RoomDetailEntry(
-                    device: device,
-                    isOnline: Self.isOnline(device, bluetooth: bluetooth, onlineSince: onlineSince),
-                    reading: try? readingsStore.latestReading(deviceID: device.id)
-                )
-            }.sorted { lhs, rhs in
-                if lhs.isOnline != rhs.isOnline { return lhs.isOnline }
-                let leftName = lhs.device.displayName
-                let rightName = rhs.device.displayName
-                if leftName != rightName { return leftName < rightName }
-                return lhs.device.id.uuidString < rhs.device.id.uuidString
-            }
+            rebuildEntries()
         } catch {
             notice = L10n.f("room.detail.loadFailed", error.localizedDescription)
         }
         onChange?()
+        requestCloudReadings()
+    }
+
+    private func rebuildEntries() {
+        let onlineSince = now().addingTimeInterval(-Self.onlineWindow)
+        entries = roomDevices.map { device in
+            RoomDetailEntry(
+                device: device,
+                isOnline: Self.isOnline(device, bluetooth: bluetooth, onlineSince: onlineSince),
+                reading: try? readingsStore.latestReading(deviceID: device.id),
+                cloudReading: cloudReadings == nil ? nil : (cloudStates[device.id] ?? .loading)
+            )
+        }.sorted { lhs, rhs in
+            if lhs.isOnline != rhs.isOnline { return lhs.isOnline }
+            let leftName = lhs.device.displayName
+            let rightName = rhs.device.displayName
+            if leftName != rightName { return leftName < rightName }
+            return lhs.device.id.uuidString < rhs.device.id.uuidString
+        }
+    }
+
+    /// 逐台补云端最近读数；结果在主队列回调，只重建条目，不重复发起整页刷新。
+    private func requestCloudReadings() {
+        guard let cloudReadings else { return }
+        for device in roomDevices {
+            cloudReadings.latestReading(platform: device.platform, externalID: device.externalID) { [weak self] state in
+                guard let self, self.cloudStates[device.id] != state else { return }
+                self.cloudStates[device.id] = state
+                self.rebuildEntries()
+                self.onChange?()
+            }
+        }
     }
 
     /// 批量标记房间内尚未标记的设备；先落本机（标记 + 待同步），再触发 push。

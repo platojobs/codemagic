@@ -185,6 +185,7 @@
 "device.detail.vendor" = "Vendor";
 "device.group.none" = "No group";
 "device.remoteOnly" = "From %@; not connectable on this device";
+"device.remoteOnlyAX" = "From %@;\nNot connectable here";
 "devices.alias" = "Alias";
 "devices.deleteFailed" = "Failed to delete the device: %@";
 "devices.deleteMessage" = "Local rules for this device will also be deleted. Data is soft-deleted so it can be synced later.";
@@ -287,6 +288,8 @@
 "home.status.crossPlatform" = "Cross-platform";
 "home.status.disconnected" = "Not connected";
 "home.status.notConnectedYet" = "Not connected yet";
+"home.cloudReported" = "Cloud %@";
+"home.reading.unavailable" = "Cloud readings unavailable";
 "home.stop" = "Stop";
 "home.subtitle" = "Devices, scenarios, and today's alerts";
 "home.unauthorizedMessage" = "Open Settings from the Me tab, grant Bluetooth permission, and try again.";
@@ -323,11 +326,15 @@
 "market.refresh" = "Refresh";
 "market.vendorShort" = "Vendor %@";
 "metric.battery" = "Battery";
+"metric.bodyFat" = "Body fat";
+"metric.cadence" = "Cadence";
 "metric.heartRate" = "Heart rate";
 "metric.humidity" = "Humidity";
 "metric.other" = "Other";
 "metric.pressure" = "Pressure";
+"metric.speed" = "Speed";
 "metric.temperature" = "Temperature";
+"metric.weight" = "Weight";
 "notification.ruleAlert.recovered" = "Recovered · %@";
 "notification.ruleAlert.title" = "Rule alert · %@";
 "onboarding.action.continue" = "Continue";
@@ -487,8 +494,12 @@
 "room.detail.markDone" = "Marked %@ devices";
 "room.detail.markFailed" = "Failed to mark devices: %@";
 "room.detail.noReading" = "No readings yet";
-"room.detail.offline" = "Offline";
-"room.detail.online" = "Online";
+"room.detail.offline" = "Offline on this phone";
+"room.detail.online" = "Online on this phone";
+"room.detail.remoteOnlyShort" = "Not connectable from this phone";
+"room.detail.cloudReported" = "Cloud reading %@";
+"room.detail.cloudUnavailable" = "Cloud readings unavailable";
+"room.detail.readingLoading" = "Loading cloud readings";
 "room.detail.expand" = "Expand room";
 "room.detail.collapse" = "Collapse room";
 "room.detail.openHint" = "Tap the title to open room details; use the arrow to expand or collapse";
@@ -496,7 +507,7 @@
 "room.detail.readonlyNote" = "You are a household member: creating, renaming, reordering and deleting rooms is owner-only. You can view this room and mark devices here.";
 "room.detail.readonlyNoteAX" = "You are a household member:\ncreating, renaming, reordering\nand deleting rooms is owner-only.\nYou can view this room and mark devices here.";
 "room.detail.scan" = "Scan to add devices";
-"room.detail.summary" = "%@ devices · %@ online · %@ offline · %@ marked";
+"room.detail.summary" = "%@ devices · %@ online on this phone · %@ offline on this phone\n%@ not connectable from this phone · %@ marked";
 "room.detail.syncPendingNotice" = "Mark changes are saved on this device and will sync automatically when online.";
 "room.detail.unmark" = "Unmark";
 "room.detail.unmarkDone" = "Unmarked %@ devices";

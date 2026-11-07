@@ -185,6 +185,7 @@
 "device.detail.vendor" = "厂商";
 "device.group.none" = "未分组";
 "device.remoteOnly" = "来自 %@，本机不可连接";
+"device.remoteOnlyAX" = "来自 %@，\n本机不可连接";
 "devices.alias" = "备注名";
 "devices.deleteFailed" = "删除设备失败：%@";
 "devices.deleteMessage" = "将同时删除该设备关联的本地规则，数据采用软删除以便后续同步。";
@@ -287,6 +288,8 @@
 "home.status.crossPlatform" = "跨平台";
 "home.status.disconnected" = "未连接";
 "home.status.notConnectedYet" = "尚未连接";
+"home.cloudReported" = "云端 %@";
+"home.reading.unavailable" = "云端读数暂不可用";
 "home.stop" = "停止";
 "home.subtitle" = "设备、场景与今日告警";
 "home.unauthorizedMessage" = "请到「我的」页跳转系统设置，开启蓝牙权限后重试。";
@@ -323,11 +326,15 @@
 "market.refresh" = "刷新";
 "market.vendorShort" = "厂商 %@";
 "metric.battery" = "电量";
+"metric.bodyFat" = "体脂率";
+"metric.cadence" = "踏频";
 "metric.heartRate" = "心率";
 "metric.humidity" = "湿度";
 "metric.other" = "其他";
 "metric.pressure" = "气压";
+"metric.speed" = "速度";
 "metric.temperature" = "温度";
+"metric.weight" = "体重";
 "notification.ruleAlert.recovered" = "已恢复 · %@";
 "notification.ruleAlert.title" = "规则告警 · %@";
 "onboarding.action.continue" = "继续";
@@ -487,8 +494,12 @@
 "room.detail.markDone" = "已标记 %@ 台设备";
 "room.detail.markFailed" = "标记设备失败：%@";
 "room.detail.noReading" = "暂无读数";
-"room.detail.offline" = "离线";
-"room.detail.online" = "在线";
+"room.detail.offline" = "本机离线";
+"room.detail.online" = "本机在线";
+"room.detail.remoteOnlyShort" = "本机不可连接";
+"room.detail.cloudReported" = "云端 %@上报";
+"room.detail.cloudUnavailable" = "云端读数暂不可用";
+"room.detail.readingLoading" = "正在读取云端读数";
 "room.detail.expand" = "展开房间";
 "room.detail.collapse" = "收起房间";
 "room.detail.openHint" = "点击标题打开房间详情，右侧箭头展开或收起";
@@ -496,7 +507,7 @@
 "room.detail.readonlyNote" = "当前为家庭成员：新建、改名、排序、删除房间仅家庭所有者可用；本页可查看房间并标记设备。";
 "room.detail.readonlyNoteAX" = "当前为家庭成员：\n新建、改名、排序、删除房间\n仅家庭所有者可用；\n本页可查看房间并标记设备。";
 "room.detail.scan" = "扫描添加设备";
-"room.detail.summary" = "共 %@ 台 · 在线 %@ · 离线 %@ · 已标记 %@";
+"room.detail.summary" = "共 %@ 台 · 本机在线 %@ · 本机离线 %@\n本机不可连接 %@ · 已标记 %@";
 "room.detail.syncPendingNotice" = "标记变更已保存在本机，联网后会自动同步";
 "room.detail.unmark" = "取消标记";
 "room.detail.unmarkDone" = "已取消 %@ 台设备的标记";

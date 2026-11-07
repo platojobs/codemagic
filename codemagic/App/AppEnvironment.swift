@@ -24,6 +24,8 @@ final class AppEnvironment {
     let bluetooth: BluetoothServicing
     let readingsStore: ReadingsStore
     let readingsService: ReadingsAPIServicing
+    /// 云端最近读数：房间详情与首页共用同一份缓存与并发上限。
+    let cloudLatestReadings: CloudLatestReadingsProviding
     let readingsIngestor: ReadingsIngestor
     let syncMetadataStore: SyncMetadataStore
     let tokenStore: TokenStoring
@@ -217,6 +219,8 @@ final class AppEnvironment {
                 startupWarning = L10n.f("app.env.productsUnavailable", AppError.configuration("").code)
             }
         }
+
+        cloudLatestReadings = CloudLatestReadingsService(api: readingsService)
 
         let pushService = PushRegistrationService(
             api: pushAPI,

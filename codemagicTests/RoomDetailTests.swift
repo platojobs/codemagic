@@ -60,11 +60,12 @@ final class RoomDetailTests: XCTestCase {
 
         XCTAssertEqual(viewModel.totalCount, 2, "只聚合本房间设备")
         XCTAssertEqual(viewModel.onlineCount, 1)
-        XCTAssertEqual(viewModel.offlineCount, 1)
+        XCTAssertEqual(viewModel.localOfflineCount, 1)
+        XCTAssertEqual(viewModel.remoteCount, 0)
         XCTAssertEqual(viewModel.markedCount, 1)
         XCTAssertEqual(
             viewModel.summaryText,
-            L10n.f("room.detail.summary", "2", "1", "1", "1")
+            L10n.f("room.detail.summary", "2", "1", "1", "0", "1")
         )
         XCTAssertEqual(viewModel.entries.map(\.device.displayName), ["面板", "温度计"], "在线优先，其次按名称")
         XCTAssertEqual(viewModel.entries[0].readingText, L10n.t("room.detail.noReading"), "无读数不补造")
@@ -89,11 +90,14 @@ final class RoomDetailTests: XCTestCase {
         viewModel.reload()
 
         XCTAssertEqual(viewModel.onlineCount, 2)
-        XCTAssertEqual(viewModel.offlineCount, 2)
+        XCTAssertEqual(viewModel.localOfflineCount, 1)
+        XCTAssertEqual(viewModel.remoteCount, 1, "跨平台设备单独计数，不并入本机离线")
+        let crossPlatformEntry = viewModel.entries.first { $0.device.displayName == "安卓设备" }
+        XCTAssertEqual(crossPlatformEntry?.isOnline, false, "本机没有连接依据，不判定在线")
         XCTAssertEqual(
-            viewModel.entries.first { $0.device.displayName == "安卓设备" }?.isOnline,
-            false,
-            "跨平台设备本机不可连接，按离线计数"
+            crossPlatformEntry?.statusText,
+            crossPlatformEntry?.device.connectUnavailableText,
+            "本机不可连接时如实说明来源边界，不宣称离线"
         )
     }
 
@@ -203,7 +207,7 @@ final class RoomDetailTests: XCTestCase {
         XCTAssertEqual(viewModel.totalCount, 0)
         XCTAssertEqual(
             viewModel.summaryText,
-            L10n.f("room.detail.summary", "0", "0", "0", "0")
+            L10n.f("room.detail.summary", "0", "0", "0", "0", "0")
         )
         XCTAssertFalse(L10n.t("room.detail.emptyTitle").isEmpty)
         XCTAssertFalse(L10n.t("room.detail.emptyMessage").isEmpty)
@@ -284,7 +288,96 @@ final class RoomDetailTests: XCTestCase {
         XCTAssertEqual(button.bounds.height, Layout.buttonH, accuracy: 0.5, "常规字号仍保持 48pt 高度")
     }
 
+    // MARK: - 云端读数
+
+    func testCloudReadingFillsMissingLocalReadingAndKeepsSourceBoundary() throws {
+        let room = try roomStore.create(name: "客厅", at: now)
+        let device = makeDevice(name: "客厅温湿度计", roomID: room.id, platform: "android")
+        try deviceStore.upsert(device)
+        let cloud = FakeCloudReadings()
+        cloud.states[cloudKey(for: device)] = .available(CloudLatestReading(
+            metric: .temperature,
+            rawMetric: "temperature_celsius",
+            value: 24.5,
+            unit: "celsius",
+            reportedAt: now.addingTimeInterval(-600)
+        ))
+
+        let viewModel = makeViewModel(room: room, cloudReadings: cloud)
+        viewModel.reload()
+
+        let entry = try XCTUnwrap(viewModel.entries.first)
+        XCTAssertTrue(entry.readingText.contains("温度"), "服务端指标名映射为本地化标题")
+        XCTAssertTrue(entry.readingText.contains("24.5"))
+        XCTAssertEqual(entry.readingText, "温度\u{00A0}24.5\u{00A0}℃")
+        XCTAssertNotNil(entry.cloudNote, "使用云端数据时标注上报时间")
+        XCTAssertEqual(entry.statusText, device.connectUnavailableText, "跨平台设备不宣称离线")
+    }
+
+    func testLocalReadingTakesPrecedenceOverCloud() throws {
+        let room = try roomStore.create(name: "客厅", at: now)
+        let device = makeDevice(name: "面板", roomID: room.id)
+        try deviceStore.upsert(device)
+        try readingsStore.insert(DeviceReading(
+            deviceID: device.id,
+            metric: .temperature,
+            value: 21.2,
+            unit: "℃",
+            recordedAt: now.addingTimeInterval(-120),
+            syncState: .synced
+        ))
+        let cloud = FakeCloudReadings()
+        cloud.states[cloudKey(for: device)] = .available(CloudLatestReading(
+            metric: .humidity,
+            rawMetric: "relative_humidity",
+            value: 52,
+            unit: "%",
+            reportedAt: now.addingTimeInterval(-60)
+        ))
+
+        let viewModel = makeViewModel(room: room, cloudReadings: cloud)
+        viewModel.reload()
+
+        let entry = try XCTUnwrap(viewModel.entries.first)
+        XCTAssertTrue(entry.readingText.contains("21.2"), "本机读数优先")
+        XCTAssertNil(entry.cloudNote, "未使用云端数据时不标注云端来源")
+    }
+
+    func testCloudFailureShowsUnavailableRatherThanNoReading() throws {
+        let room = try roomStore.create(name: "客厅", at: now)
+        let device = makeDevice(name: "客厅温湿度计", roomID: room.id, platform: "android")
+        try deviceStore.upsert(device)
+        let cloud = FakeCloudReadings()
+        cloud.states[cloudKey(for: device)] = .failed
+
+        let viewModel = makeViewModel(room: room, cloudReadings: cloud)
+        viewModel.reload()
+
+        let entry = try XCTUnwrap(viewModel.entries.first)
+        XCTAssertEqual(entry.readingText, L10n.t("room.detail.cloudUnavailable"), "拉不到不等于没有读数")
+        XCTAssertEqual(entry.statusText, device.connectUnavailableText, "查询失败不能显示成设备离线")
+    }
+
+    func testCloudEmptyAndNoLocalReadingStaysNoReading() throws {
+        let room = try roomStore.create(name: "客厅", at: now)
+        let device = makeDevice(name: "客厅温湿度计", roomID: room.id, platform: "android")
+        try deviceStore.upsert(device)
+        let cloud = FakeCloudReadings()
+        cloud.states[cloudKey(for: device)] = .empty
+
+        let viewModel = makeViewModel(room: room, cloudReadings: cloud)
+        viewModel.reload()
+
+        let entry = try XCTUnwrap(viewModel.entries.first)
+        XCTAssertEqual(entry.readingText, L10n.t("room.detail.noReading"))
+        XCTAssertNil(entry.cloudNote)
+    }
+
     // MARK: - Helpers
+
+    private func cloudKey(for device: SavedDevice) -> String {
+        "\(device.platform):\(device.externalID)"
+    }
 
     private func makeViewController(room: Room) -> RoomDetailViewController {
         let viewModel = makeViewModel(room: room)
@@ -314,7 +407,8 @@ final class RoomDetailTests: XCTestCase {
     private func makeViewModel(
         room: Room,
         bluetooth: FakeBluetoothService = FakeBluetoothService(),
-        householdService: HouseholdService? = nil
+        householdService: HouseholdService? = nil,
+        cloudReadings: CloudLatestReadingsProviding? = nil
     ) -> RoomDetailViewModel {
         RoomDetailViewModel(
             room: room,
@@ -324,6 +418,7 @@ final class RoomDetailTests: XCTestCase {
             bluetooth: bluetooth,
             householdService: householdService,
             syncEngine: nil,
+            cloudReadings: cloudReadings,
             now: { [now] in now }
         )
     }
@@ -379,5 +474,21 @@ final class RoomDetailTests: XCTestCase {
             logStore: ScanLogStore(database: database),
             now: { [now] in now }
         )
+    }
+}
+
+/// 同步返回的云端读数替身：按 `platform:externalID` 预设状态。
+final class FakeCloudReadings: CloudLatestReadingsProviding {
+    var states: [String: CloudLatestReadingState] = [:]
+    private(set) var requested: [String] = []
+
+    func latestReading(
+        platform: String,
+        externalID: String,
+        completion: @escaping (CloudLatestReadingState) -> Void
+    ) {
+        let key = "\(platform):\(externalID)"
+        requested.append(key)
+        completion(states[key] ?? .empty)
     }
 }
