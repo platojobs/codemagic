@@ -59,17 +59,62 @@ final class RoomDetailViewController: UIViewController {
         sizeHeaderIfNeeded()
     }
 
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        guard previousTraitCollection?.preferredContentSizeCategory
+            != traitCollection.preferredContentSizeCategory else { return }
+        applyHeaderTextStyles()
+        updateActionsLayout()
+        reload()
+        tableView.reloadData()
+        sizeHeaderIfNeeded()
+    }
+
+    /// 标题类文案随动态字号重算；按钮横排在大字号下改为上下堆叠，避免标题折成两行。
+    private func applyHeaderTextStyles() {
+        let trait = traitCollection
+        summaryLabel.font = AppText.headline.font(compatibleWith: trait)
+        summaryLabel.textColor = Palette.textPrimary
+        pendingLabel.font = AppText.footnote.font(compatibleWith: trait)
+        pendingLabel.textColor = Palette.warning
+        noticeLabel.font = AppText.footnote.font(compatibleWith: trait)
+        noticeLabel.textColor = Palette.textSecondary
+        readOnlyLabel.font = AppText.footnote.font(compatibleWith: trait)
+        readOnlyLabel.textColor = Palette.textSecondary
+        for label in [summaryLabel, pendingLabel, noticeLabel, readOnlyLabel] {
+            label.adjustsFontForContentSizeCategory = true
+            // 避免大字号下把“设备”这类两字词拆成单字行。
+            label.lineBreakStrategy = .pushOut
+        }
+    }
+
+    private func updateActionsLayout() {
+        actionsRow.axis = traitCollection.preferredContentSizeCategory.isAccessibilityCategory
+            ? .vertical
+            : .horizontal
+    }
+
+    /// AX 档使用带显式换行点的本地化文案，避免“设备”“卡片”等词被拆成两行。
+    private var usesAccessibilityText: Bool {
+        traitCollection.preferredContentSizeCategory.isAccessibilityCategory
+    }
+
     private func configureTable() {
         tableView.dataSource = self
         tableView.delegate = self
         tableView.backgroundColor = Palette.canvas
         tableView.translatesAutoresizingMaskIntoConstraints = false
+        tableView.rowHeight = UITableView.automaticDimension
+        tableView.estimatedRowHeight = Layout.row3
         view.addSubview(tableView)
+        let fillWidth = tableView.widthAnchor.constraint(equalTo: view.widthAnchor)
+        fillWidth.priority = .defaultHigh
         NSLayoutConstraint.activate([
             tableView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
-            tableView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            tableView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            tableView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            tableView.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor),
+            tableView.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            tableView.widthAnchor.constraint(lessThanOrEqualToConstant: Layout.contentMaxWidth),
+            fillWidth,
         ])
 
         emptyView.isHidden = true
@@ -77,20 +122,14 @@ final class RoomDetailViewController: UIViewController {
     }
 
     private func configureHeader() {
-        summaryLabel.apply(.headline, color: Palette.textPrimary)
         summaryLabel.numberOfLines = 0
-
-        pendingLabel.apply(.footnote, color: Palette.warning)
         pendingLabel.numberOfLines = 0
         pendingLabel.isHidden = true
-
-        noticeLabel.apply(.footnote, color: Palette.textSecondary)
         noticeLabel.numberOfLines = 0
         noticeLabel.isHidden = true
-
-        readOnlyLabel.apply(.footnote, color: Palette.textSecondary)
         readOnlyLabel.numberOfLines = 0
         readOnlyLabel.isHidden = true
+        applyHeaderTextStyles()
 
         markButton.addAction(UIAction { [weak self] _ in self?.viewModel.markAll() }, for: .touchUpInside)
         markButton.accessibilityIdentifier = "roomDetailMarkAll"
@@ -102,6 +141,7 @@ final class RoomDetailViewController: UIViewController {
         actionsRow.distribution = .fillEqually
         actionsRow.addArrangedSubview(markButton)
         actionsRow.addArrangedSubview(unmarkButton)
+        updateActionsLayout()
 
         headerStack.axis = .vertical
         headerStack.spacing = Layout.space8
@@ -123,12 +163,20 @@ final class RoomDetailViewController: UIViewController {
 
     private func reload() {
         title = viewModel.room.name
-        summaryLabel.text = viewModel.summaryText
+        if traitCollection.preferredContentSizeCategory.isAccessibilityCategory {
+            // AX 档每项单独一行，避免“已标记”这类词被拆到两行。
+            summaryLabel.text = viewModel.summaryText.replacingOccurrences(of: " · ", with: "\n")
+        } else {
+            summaryLabel.text = viewModel.summaryText
+        }
+        summaryLabel.isHidden = viewModel.isEmpty
         pendingLabel.text = viewModel.pendingHint
         pendingLabel.isHidden = viewModel.pendingHint == nil
         noticeLabel.text = viewModel.notice
         noticeLabel.isHidden = viewModel.notice == nil
-        readOnlyLabel.text = viewModel.readOnlyNote
+        readOnlyLabel.text = usesAccessibilityText
+            ? L10n.t("room.detail.readonlyNoteAX")
+            : viewModel.readOnlyNote
         readOnlyLabel.isHidden = viewModel.readOnlyNote == nil
 
         actionsRow.isHidden = viewModel.isEmpty
@@ -139,8 +187,8 @@ final class RoomDetailViewController: UIViewController {
         if viewModel.isEmpty {
             emptyView.configure(
                 symbolName: "square.stack.3d.up",
-                title: L10n.t("room.detail.emptyTitle"),
-                message: L10n.t("room.detail.emptyMessage"),
+                title: L10n.t(usesAccessibilityText ? "room.detail.emptyTitleAX" : "room.detail.emptyTitle"),
+                message: L10n.t(usesAccessibilityText ? "room.detail.emptyMessageAX" : "room.detail.emptyMessage"),
                 actionTitle: onScan == nil ? nil : L10n.t("room.detail.scan")
             ) { [weak self] in
                 self?.onScan?()
@@ -175,7 +223,8 @@ final class RoomDetailViewController: UIViewController {
         if let markText = entry.markText {
             parts.append(markText)
         }
-        return parts.joined(separator: " · ")
+        let separator = traitCollection.preferredContentSizeCategory.isAccessibilityCategory ? "\n" : " · "
+        return parts.joined(separator: separator)
     }
 }
 
@@ -195,10 +244,11 @@ extension RoomDetailViewController: UITableViewDataSource, UITableViewDelegate {
         let entry = viewModel.entries[indexPath.row]
         var content = cell.defaultContentConfiguration()
         content.text = entry.device.displayName
-        content.textProperties.font = AppText.body.font()
+        content.textProperties.font = AppText.body.font(compatibleWith: traitCollection)
         content.textProperties.color = Palette.textPrimary
+        content.textProperties.numberOfLines = 0
         content.secondaryText = metaText(for: entry)
-        content.secondaryTextProperties.font = AppText.caption.font()
+        content.secondaryTextProperties.font = AppText.caption.font(compatibleWith: traitCollection)
         content.secondaryTextProperties.color = entry.isOnline ? Palette.success : Palette.textSecondary
         content.secondaryTextProperties.numberOfLines = 0
         cell.contentConfiguration = content
@@ -222,4 +272,10 @@ extension RoomDetailViewController {
     var summaryTextForTesting: String { summaryLabel.text ?? "" }
     var pendingTextForTesting: String? { pendingLabel.isHidden ? nil : pendingLabel.text }
     var readOnlyTextForTesting: String? { readOnlyLabel.isHidden ? nil : readOnlyLabel.text }
+    var tableViewForTesting: UITableView { tableView }
+    var actionsRowForTesting: UIStackView { actionsRow }
+    var markButtonForTesting: AppButton { markButton }
+    var unmarkButtonForTesting: AppButton { unmarkButton }
+    var summaryLabelNumberOfLinesForTesting: Int { summaryLabel.numberOfLines }
+    var readOnlyLabelNumberOfLinesForTesting: Int { readOnlyLabel.numberOfLines }
 }

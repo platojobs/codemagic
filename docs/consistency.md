@@ -596,6 +596,18 @@ Android 自 v0.22.0 起把服务端 `SCENE_*` 4xx 视为终态；iOS v0.24.0 对
 - **空态**：`RoomDetailEntry` 为空时显示「这个房间还没有设备」与扫描入口，不使用空白列表。
 - **测试**：`codemagicTests/RoomDetailTests.swift` 覆盖聚合与真实读数、在线 / 离线与跨平台、批量标记待同步、批量取消耗待同步、空批次无副作用、成员只读、owner 可管理、空态文案、跨家庭隔离；合计 466 单测 0 失败。e2e 仍 460 项（纯客户端聚合读取，未改契约）。
 
+### 3.24 房间详情大字号与 iPad 宽度适配（v0.31.1）
+
+- **走查档位**：AX5 = `accessibilityExtraExtraExtraLarge`；「200%」= AX2 `accessibilityLarge`（Body 33pt / 默认 17pt ≈194%）。iOS 没有 Android `fontScale` 的 200% 档，文档与截图中统一标注为「200%（AX2 近似）」。
+- **汇总行**：`preferredContentSizeCategory.isAccessibilityCategory` 为真时把 `" · "` 换成换行，四项逐项成行；常规字号保持单行。
+- **设备行**：名称 / 在线 / 读数 / 标记状态 `numberOfLines = 0`，表格 `rowHeight = automaticDimension`；AX 档 `metaText` 用换行而非 `" · "`；读数数值与单位之间用不换行空格 `\u{00A0}`，避免 `24.5` 与 `℃` 拆行。
+- **批量按钮**：`AppButton` 高度约束由固定 48pt 改为 `greaterThanOrEqualToConstant`，标题字体用 `UIFontMetrics` 随字号缩放；AX 档 `actionsRow.axis = .vertical`（全宽竖排），常规字号 / iPad 保持横排等宽。
+- **空态与成员只读**：新增 AX 专用文案 `room.detail.emptyTitleAX` / `emptyMessageAX` / `readonlyNoteAX`，在语义标点处显式换行，由 `Localizable.strings` 提供，View 源码不硬编码中文；空态说明在 AX 档使用 footnote。
+- **底部安全区**：表格底部约束到 `safeAreaLayoutGuide.bottomAnchor`，内容不被悬浮 Tab 条带覆盖。
+- **iPad 宽度**：表格 `centerX` + 宽 `<= Layout.contentMaxWidth (760)` + 高优先级 `fillWidth`，13 英寸下居中限宽，按钮不溢出；常规字号按钮高度保持 48pt。
+- **测试**：`RoomDetailTests` 新增 2 项布局测试（AX5 430×900：按钮竖排、文本行数不限、按钮高度 > 单行标题；iPad 1024×1366：表格宽 760、水平居中、按钮横排且不超宽），合计 468 单测 0 失败；e2e 仍 460 项。
+- **截图**：18 张（AX5 / 200% / iPad 各 6 张）使用本机 SQLite 过渡夹具，非 seed 后端数据；seed 库当前无房间数据、无法重建首页同源画面，后续如恢复 seed 可重截。
+
 ## 4. 错误码
 
 客户端错误码用于日志、空状态副标题与问题反馈，**两端含义一致**：

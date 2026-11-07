@@ -8,7 +8,9 @@ struct RoomDetailEntry: Equatable {
 
     var readingText: String {
         guard let reading else { return L10n.t("room.detail.noReading") }
-        return "\(reading.metric.displayName) \(reading.displayText)"
+        // 数值与单位之间用不换行空格，避免大字号下 “24.5” 与 “℃” 被拆到两行。
+        let value = reading.displayText.replacingOccurrences(of: " ", with: "\u{00A0}")
+        return "\(reading.metric.displayName)\u{00A0}\(value)"
     }
 
     /// 标记状态：已标记 / 已标记 · 待同步 / 已取消标记 · 待同步；未标记且无待上传变更时为 nil。

@@ -111,6 +111,8 @@ enum Layout {
     static let cardGap: CGFloat = 12
     static let sectionGap: CGFloat = 24
     static let sectionHeaderH: CGFloat = 40
+    /// iPad 等宽屏上的内容最大宽度：列表与按钮保持居中、不横跨整屏。
+    static let contentMaxWidth: CGFloat = 760
 
     static let row1: CGFloat = 56
     static let row2: CGFloat = 72
@@ -393,10 +395,15 @@ extension UIViewController {
 }
 
 extension UILabel {
-    func apply(_ text: AppText, color: UIColor, alignment: NSTextAlignment = .natural) {
+    func apply(
+        _ text: AppText,
+        color: UIColor,
+        alignment: NSTextAlignment = .natural,
+        compatibleWith trait: UITraitCollection? = nil
+    ) {
         self.attributedText = NSAttributedString(
             string: self.text ?? "",
-            attributes: text.attributes(color: color, alignment: alignment)
+            attributes: text.attributes(color: color, alignment: alignment, trait: trait)
         )
     }
 

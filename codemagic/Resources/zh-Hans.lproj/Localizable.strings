@@ -479,7 +479,9 @@
 "room.deviceCount" = "%@ 台设备";
 "room.detail.devices" = "房间设备 · %@ 台";
 "room.detail.emptyMessage" = "这个房间还没有设备。扫描附近的设备，并在详情页或长按卡片把它移入这个房间。";
+"room.detail.emptyMessageAX" = "这个房间还没有设备。\n扫描附近的设备，\n并在详情页或长按卡片\n把它移入这个房间。";
 "room.detail.emptyTitle" = "这个房间还没有设备";
+"room.detail.emptyTitleAX" = "这个房间\n还没有设备";
 "room.detail.loadFailed" = "读取房间设备失败：%@";
 "room.detail.mark" = "标记";
 "room.detail.markDone" = "已标记 %@ 台设备";
@@ -492,6 +494,7 @@
 "room.detail.openHint" = "点击标题打开房间详情，右侧箭头展开或收起";
 "room.detail.pendingHint" = "%@ 台设备的标记变更待同步，联网后自动上传";
 "room.detail.readonlyNote" = "当前为家庭成员：新建、改名、排序、删除房间仅家庭所有者可用；本页可查看房间并标记设备。";
+"room.detail.readonlyNoteAX" = "当前为家庭成员：\n新建、改名、排序、删除房间\n仅家庭所有者可用；\n本页可查看房间并标记设备。";
 "room.detail.scan" = "扫描添加设备";
 "room.detail.summary" = "共 %@ 台 · 在线 %@ · 离线 %@ · 已标记 %@";
 "room.detail.syncPendingNotice" = "标记变更已保存在本机，联网后会自动同步";

@@ -223,7 +223,93 @@ final class RoomDetailTests: XCTestCase {
         XCTAssertEqual(viewModel.entries.map(\.device.displayName), ["本家庭"])
     }
 
+    // MARK: - 大字号 / iPad 布局
+
+    func testRoomDetailLayoutAtAX5StacksActionsAndKeepsTextUntruncated() throws {
+        let room = try roomStore.create(name: "客厅", at: now)
+        let online = makeDevice(name: "客厅温湿度计（较长的设备名称用于折行）", roomID: room.id, lastSeenAt: now)
+        let offline = makeDevice(name: "客厅心率带", roomID: room.id, lastSeenAt: now.addingTimeInterval(-3_600))
+        for device in [online, offline] {
+            try deviceStore.upsert(device)
+        }
+
+        let controller = makeViewController(room: room)
+        let window = host(
+            controller,
+            size: CGSize(width: 430, height: 900),
+            category: .accessibilityExtraExtraExtraLarge
+        )
+        _ = window
+
+        XCTAssertEqual(controller.actionsRowForTesting.axis, .vertical, "AX 档批量按钮改为上下堆叠")
+        XCTAssertEqual(controller.summaryLabelNumberOfLinesForTesting, 0)
+        XCTAssertEqual(controller.readOnlyLabelNumberOfLinesForTesting, 0)
+
+        let button = controller.markButtonForTesting
+        let lineHeight = try XCTUnwrap(button.titleLabel?.font.lineHeight)
+        XCTAssertGreaterThan(button.bounds.height, lineHeight, "按钮高度必须容纳放大后的标题，不能被 48pt 固定高度裁掉")
+        XCTAssertGreaterThan(button.titleLabel?.font.pointSize ?? 0, AppText.body.size, "按钮标题跟随 Dynamic Type")
+
+        let cell = controller.tableView(controller.tableViewForTesting, cellForRowAt: IndexPath(row: 0, section: 0))
+        let content = try XCTUnwrap(cell.contentConfiguration as? UIListContentConfiguration)
+        XCTAssertEqual(content.textProperties.numberOfLines, 0, "设备名称在 AX 档必须允许折行")
+        XCTAssertEqual(content.secondaryTextProperties.numberOfLines, 0)
+        XCTAssertGreaterThan(cell.systemLayoutSizeFitting(
+            CGSize(width: controller.tableViewForTesting.bounds.width, height: UIView.layoutFittingCompressedSize.height),
+            withHorizontalFittingPriority: .required,
+            verticalFittingPriority: .fittingSizeLevel
+        ).height, Layout.buttonH, "AX 档设备行高度随两行元信息增长")
+    }
+
+    func testRoomDetailOnIPadWidthStaysCenteredAndButtonsDoNotOverflow() throws {
+        let room = try roomStore.create(name: "客厅", at: now)
+        try deviceStore.upsert(makeDevice(name: "客厅温湿度计", roomID: room.id, lastSeenAt: now))
+
+        let controller = makeViewController(room: room)
+        let window = host(
+            controller,
+            size: CGSize(width: 1024, height: 1366),
+            category: .large
+        )
+        _ = window
+
+        let table = controller.tableViewForTesting
+        XCTAssertEqual(table.bounds.width, Layout.contentMaxWidth, "iPad 宽度下内容限制在 760pt")
+        XCTAssertEqual(table.frame.midX, controller.view.bounds.midX, accuracy: 0.5, "内容水平居中，不挤在左侧")
+        XCTAssertEqual(controller.actionsRowForTesting.axis, .horizontal)
+
+        let button = controller.markButtonForTesting
+        XCTAssertGreaterThan(button.bounds.width, 0)
+        XCTAssertLessThanOrEqual(button.bounds.maxX, table.bounds.width, "按钮不超出内容宽度")
+        XCTAssertEqual(button.bounds.height, Layout.buttonH, accuracy: 0.5, "常规字号仍保持 48pt 高度")
+    }
+
     // MARK: - Helpers
+
+    private func makeViewController(room: Room) -> RoomDetailViewController {
+        let viewModel = makeViewModel(room: room)
+        return RoomDetailViewController(viewModel: viewModel, onSelectDevice: { _ in })
+    }
+
+    /// 放进带内容尺寸覆盖的窗口，让 Dynamic Type 真正传播到 VC 及其子视图。
+    private func host(
+        _ controller: RoomDetailViewController,
+        size: CGSize,
+        category: UIContentSizeCategory
+    ) -> UIWindow {
+        let window = UIWindow(frame: CGRect(origin: .zero, size: size))
+        if #available(iOS 17.0, *) {
+            window.traitOverrides.preferredContentSizeCategory = category
+            controller.traitOverrides.preferredContentSizeCategory = category
+        }
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        window.layoutIfNeeded()
+        window.layoutIfNeeded()
+        controller.view.layoutIfNeeded()
+        controller.tableViewForTesting.tableHeaderView?.layoutIfNeeded()
+        return window
+    }
 
     private func makeViewModel(
         room: Room,

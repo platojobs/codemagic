@@ -34,9 +34,9 @@ final class EmptyStateView: UIView {
             withConfiguration: UIImage.SymbolConfiguration(pointSize: Layout.icon48, weight: .regular)
         )
         titleLabel.text = title
-        titleLabel.apply(.headline, color: Palette.textPrimary, alignment: .center)
+        titleLabel.apply(.headline, color: Palette.textPrimary, alignment: .center, compatibleWith: traitCollection)
         messageLabel.text = message
-        messageLabel.apply(.body, color: Palette.textSecondary, alignment: .center)
+        messageLabel.apply(messageStyle(), color: Palette.textSecondary, alignment: .center, compatibleWith: traitCollection)
         var configuration = actionButton.configuration
         configuration?.title = actionTitle
         actionButton.configuration = configuration
@@ -81,5 +81,18 @@ final class EmptyStateView: UIView {
     override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
         super.traitCollectionDidChange(previousTraitCollection)
         imageView.tintColor = Palette.textTertiary
+        // attributedText 不会自动跟随 Dynamic Type，内容尺寸变化时按当前档位重排。
+        if let title = titleLabel.text, !title.isEmpty {
+            titleLabel.apply(.headline, color: Palette.textPrimary, alignment: .center, compatibleWith: traitCollection)
+        }
+        if let message = messageLabel.text, !message.isEmpty {
+            messageLabel.apply(messageStyle(), color: Palette.textSecondary, alignment: .center, compatibleWith: traitCollection)
+        }
+        setNeedsLayout()
+    }
+
+    /// AX 档说明文字降为 footnote，避免大字号下长句被拆成过多行。
+    private func messageStyle() -> AppText {
+        traitCollection.preferredContentSizeCategory.isAccessibilityCategory ? .footnote : .body
     }
 }

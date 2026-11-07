@@ -49,10 +49,10 @@ final class AppButton: UIButton {
             bottom: isChip ? Layout.space8 : Layout.space12,
             trailing: isChip ? Layout.space12 : Layout.space20
         )
-        configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
+        configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { [weak self] incoming in
             var outgoing = incoming
-            // 筛选 chip 用 caption 字号，三个 chip 在常规字号下可完整同屏。
-            outgoing.font = (isChip ? AppText.caption : AppText.body).font(weight: .medium)
+            // 标题字号跟随 Dynamic Type；`traitCollectionDidChange` 时重新计算。
+            outgoing.font = self?.titleFont()
             outgoing.foregroundColor = nil
             return outgoing
         }
@@ -76,7 +76,8 @@ final class AppButton: UIButton {
             // 高度随动态字号增长，避免 AX 档文字被固定高度裁掉。
             heightAnchor.constraint(greaterThanOrEqualToConstant: Layout.chipH).isActive = true
         } else {
-            heightAnchor.constraint(equalToConstant: Layout.buttonH).isActive = true
+            // 常规字号下保持 48pt；AX 档随标题行高增长，不裁字也不挤成两行。
+            heightAnchor.constraint(greaterThanOrEqualToConstant: Layout.buttonH).isActive = true
         }
 
         switch style {
@@ -114,6 +115,13 @@ final class AppButton: UIButton {
         applyEnabledColors()
     }
 
+    /// 标题字体按当前 Dynamic Type 档位计算；按钮标题不再依赖创建时的字号。
+    private func titleFont() -> UIFont {
+        let text: AppText = style == .filterChip ? .caption : .body
+        let base = UIFont.systemFont(ofSize: text.size, weight: .medium)
+        return UIFontMetrics(forTextStyle: text.textStyle).scaledFont(for: base, compatibleWith: traitCollection)
+    }
+
     private func applyEnabledColors() {
         alpha = 1
         if !isEnabled {
@@ -138,6 +146,11 @@ final class AppButton: UIButton {
 
     override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
         super.traitCollectionDidChange(previousTraitCollection)
+        if previousTraitCollection?.preferredContentSizeCategory != traitCollection.preferredContentSizeCategory {
+            setNeedsUpdateConfiguration()
+            invalidateIntrinsicContentSize()
+            titleLabel?.font = titleFont()
+        }
         refreshDynamicLayerColors()
     }
 
