@@ -195,7 +195,9 @@ final class SectionHeaderView: UIView {
             stack.trailingAnchor.constraint(equalTo: trailingAnchor),
             stack.topAnchor.constraint(equalTo: topAnchor),
             stack.bottomAnchor.constraint(equalTo: bottomAnchor),
-            heightAnchor.constraint(equalToConstant: Layout.sectionHeaderH),
+            // 40pt 是常规字号的视觉高度；AX 档 callout 行高会涨到约 51pt，用下界而不是等高，
+            // 否则标题上下各被切掉约 5pt（拉丁文的下伸部直接消失）。
+            heightAnchor.constraint(greaterThanOrEqualToConstant: Layout.sectionHeaderH),
         ])
     }
 

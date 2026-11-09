@@ -1,8 +1,8 @@
-# App Store 上架材料（iOS v0.31.8）
+# App Store 上架材料（iOS v0.31.9）
 
 > 状态：**材料已补齐，但尚未上传 App Store Connect、尚未提交审核、未上架**。
 > 本机没有 Apple Developer Program 账号，也没有任何 App Store 审核记录；仓库中没有分发证书、
-> Provisioning Profile 与 APNs 推送证书。`MARKETING_VERSION 0.31.8` / `CURRENT_PROJECT_VERSION 48`
+> Provisioning Profile 与 APNs 推送证书。`MARKETING_VERSION 0.31.9` / `CURRENT_PROJECT_VERSION 49`
 > 只用于模拟器构建与 CI，不能直接提交商店。
 >
 > 本文只描述仓库中**已实现并有代码证据**的能力。未实现的能力（账号密码、云备份、OTA、
@@ -170,7 +170,7 @@ bluetooth,ble,sensor,readings,heart rate,chart,alerts,home,devices
 
 **8 类一致性**：`PrivacyInfo.xcprivacy` 的 `NSPrivacyCollectedDataTypes` **恰好 8 个键**，与上表 8 个「清单键」逐项一致；上表有 9 行数据，但「BLE 外设 UUID」与「APNs 推送令牌」两行同属 `DeviceID`，不是第 9 类。`PrivacyManifestTests` 会解析清单与本文并断言键集合完全相同，防止一边 8 类、另一边另一套。
 
-**APNs 令牌当前不采集**：当前二进制（0.31.8/build 48）没有 `aps-environment` entitlement，`registerForRemoteNotifications` 拿不到令牌，`PushRegistrationService` 停在 `missingToken`，本地 `push_devices` 仅记录状态与错误，**不写占位 token、不调用 `POST /push/devices`**。因此隐私问卷中 DeviceID 的实际内容只有 BLE 外设 UUID。启用推送时必须同步修改：① 工程增加 `aps-environment` entitlement 与 APNs 证书；② `Core/Notifications/APNSTokenProvider.swift` 取真实令牌；③ 本表「触发条件」改为「配置推送后即采集」；④ 审核备注移除「推送服务当前未配置」；⑤ `docs/privacy-policy.md` 与 `docs/app-privacy.md` 同步改写；⑥ `PrivacyManifestTests` 复核。完整清单见 [`app-privacy.md`](app-privacy.md) 2.2 节。
+**APNs 令牌当前不采集**：当前二进制（0.31.9/build 49）没有 `aps-environment` entitlement，`registerForRemoteNotifications` 拿不到令牌，`PushRegistrationService` 停在 `missingToken`，本地 `push_devices` 仅记录状态与错误，**不写占位 token、不调用 `POST /push/devices`**。因此隐私问卷中 DeviceID 的实际内容只有 BLE 外设 UUID。启用推送时必须同步修改：① 工程增加 `aps-environment` entitlement 与 APNs 证书；② `Core/Notifications/APNSTokenProvider.swift` 取真实令牌；③ 本表「触发条件」改为「配置推送后即采集」；④ 审核备注移除「推送服务当前未配置」；⑤ `docs/privacy-policy.md` 与 `docs/app-privacy.md` 同步改写；⑥ `PrivacyManifestTests` 复核。完整清单见 [`app-privacy.md`](app-privacy.md) 2.2 节。
 
 > v0.27.0 在清单中新增 `OtherDataTypes`、`OtherUserContactInfo`、`OtherDiagnosticData` 三类以覆盖传感器指标、反馈可选联系方式与客户端诊断；v0.28.0 **未新增类别**，只把 APNs 令牌的「当前不采集」边界写清；v0.31.5 接入后端 `lastSeenAt` / `presence` 后**仍未新增类别**——设备最近上报时间属于「使用数据 → 其他使用数据」（同步元数据），`PrivacyInfo.xcprivacy` 键集合仍恰好 8 类。`plutil -lint` 已通过。
 

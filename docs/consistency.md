@@ -730,6 +730,22 @@ Android 自 v0.22.0 起把服务端 `SCENE_*` 4xx 视为终态；iOS v0.24.0 对
 
 **4）文档版本头。** `docs/app-privacy.md`、`docs/e2e-postgres.md`、`docs/store-listing.md` 的版本头与 build 号从 v0.31.5 同步到 v0.31.8 / 48；`docs/store-listing.md` 中「当前二进制」的版本标注一并更新。
 
+### 3.32 v0.31.9：UI 细节与布局错位的数值化修复
+
+本版无后端与契约变更，只处理三处经真实视图层级测量确认的布局缺陷，完整前后数值与截图见 [ui-polish.md](ui-polish.md)。
+
+**1）首页空态卡按内容自适配。** `scenarioEmpty` / `roomEmpty` / `roomsEmpty` / `devicesEmpty` 原先分别固定 200 / 220 / 280pt。361pt 宽下内容实际需要：常规字号 **228pt**（固定 200pt 裁掉 28pt，说明少一行且「扫描附近设备」按钮完全不可见），AX5 **403.3pt**（裁掉 203.3pt，标题被压成单行「这个房间还」）。现统一改为 `NSCollectionLayoutDimension.estimated(...)`，由卡片内容决定高度；快捷场景卡仍固定 124pt（内容由卡片自身保证完整）。
+
+**2）分区头随行高增长。** `SectionHeaderView` 与首页 boundary supplementary 原为固定 40pt。常规字号 callout 行高约 20pt 无问题；AX5 实测行高 **51.33pt**，固定 40pt 上下各裁 **5.7pt**。现视图侧改为 `heightAnchor >= Layout.sectionHeaderH`，布局侧改为 `.estimated(Layout.sectionHeaderH)`，实测布局高度 51.33pt，常规字号仍 40pt。
+
+**3）规则卡自适应行高不再按单行计算。** `RuleCell` 的文本尾部约束原为 `textStack.trailingAnchor <= toggle.leadingAnchor - 12`，宽度在自适应行高测量阶段不收敛，`UITableView.automaticDimension` 先按单行返回：AX5 下规则名标签 frame **57.33pt**（渲染成「设备断开…」），而实际需要 **114.67pt**（2 行），**隐藏 57.34pt**；说明也被卡片底边切断。现改为与 `SceneAutomationCell` 一致的水平 `UIStackView`（`equal` 宽度），标签保持 `numberOfLines = 0`，不按字号切换行数。修复后 AX5 名称 114.67pt、说明 196pt、行高 **345.67pt**；常规字号行高 **86.67pt**，名称 20.33pt / 说明 31.33pt，保持单行紧凑。
+
+**4）市场页表格分区头同样改为自适配。** `MarketViewController` 的 `heightForHeaderInSection` 原先固定 40pt。现改为 `sectionHeaderHeight = UITableView.automaticDimension` + `estimatedSectionHeaderHeight = 40`，`heightForHeaderInSection` 返回 `automaticDimension`。真实 `UITableView` 复测：常规 40pt、AX5 **51.33pt**（旧实现上下各裁 5.7pt）。
+
+**5）回归测试与截图。** 新增 `LayoutPolishTests` 5 个用例：空态卡常规 / AX5 自适配、分区头常规 40pt / AX5 51.33pt、`.estimated` 分区头在真实 compositional layout 中取到 51.33pt、`RuleCell` 在常规与 AX5 下均无垂直裁切（逐标签比较 frame 与 `sizeThatFits`）、真实 `UITableView` 表头常规 40pt / AX5 51.33pt。截图覆盖 iPhone 常规 / AX5 / AX5 底部与 iPad 13 英寸 AX5，以及智能页常规 / AX5 前后对照，归档在 `docs/screenshots/ui-polish-*.png`。
+
+**保留为设计取舍（检查过，不是缺陷）**：帮助中心 / 关于 / 扫码日志 / 反馈详情依赖滚动视图安全区自动 inset，实测「关于」末尾距悬浮 Tab 仍有 57pt，不额外加自定义 inset；`DevicesViewController` / `SavedDeviceCell` 当前无入口引用，调整内边距不会出现在任何界面，保留待入口恢复时处理。`RSISignalView.signalLevel` 注释与实现的 -84…-90 区间不一致属数据映射问题，需与 Android 端统一阈值，本轮不改。
+
 ## 4. 错误码
 
 客户端错误码用于日志、空状态副标题与问题反馈，**两端含义一致**：

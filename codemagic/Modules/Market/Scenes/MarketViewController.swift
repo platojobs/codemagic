@@ -101,6 +101,8 @@ final class MarketViewController: UIViewController {
         tableView.delegate = self
         tableView.rowHeight = UITableView.automaticDimension
         tableView.estimatedRowHeight = Layout.row2
+        // 分区头随字高自适配：AX 档 callout 行高约 51pt，固定 40pt 会裁切标题。
+        tableView.estimatedSectionHeaderHeight = Layout.sectionHeaderH
         view.addSubview(tableView)
 
         NSLayoutConstraint.activate([
@@ -466,6 +468,6 @@ extension MarketViewController: UITableViewDelegate {
     }
 
     func tableView(_ tableView: UITableView, heightForHeaderInSection section: Int) -> CGFloat {
-        self.tableView(tableView, titleForHeaderInSection: section) == nil ? 0 : Layout.sectionHeaderH
+        self.tableView(tableView, titleForHeaderInSection: section) == nil ? 0 : UITableView.automaticDimension
     }
 }

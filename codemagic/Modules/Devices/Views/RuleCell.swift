@@ -45,30 +45,33 @@ final class RuleCell: UITableViewCell {
 
         toggle.translatesAutoresizingMaskIntoConstraints = false
         toggle.addTarget(self, action: #selector(handleToggle), for: .valueChanged)
+        toggle.setContentHuggingPriority(.required, for: .horizontal)
+        toggle.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        // 名称与说明在 AX 档都要完整换行：横向用栈把宽度定死，
+        // 早先用 trailing 「<=」约束时宽度在自适应行高测量阶段不收敛，
+        // 单元格高度按单行算出，规则名被截成「设备断开…」。
+        let row = UIStackView(arrangedSubviews: [textStack, toggle])
+        row.axis = .horizontal
+        row.spacing = Layout.space12
+        row.alignment = .center
+        row.translatesAutoresizingMaskIntoConstraints = false
 
         container.styleAsCardSurface()
         container.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(container)
-        container.addSubview(textStack)
-        container.addSubview(toggle)
+        container.addSubview(row)
 
         NSLayoutConstraint.activate([
             container.topAnchor.constraint(equalTo: contentView.topAnchor, constant: Layout.space4),
             container.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: Layout.pageMargin),
             container.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -Layout.pageMargin),
             container.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -Layout.space4),
-            textStack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: Layout.cardPadding),
-            textStack.topAnchor.constraint(equalTo: container.topAnchor, constant: Layout.space12),
-            textStack.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -Layout.space12),
-            textStack.trailingAnchor.constraint(
-                lessThanOrEqualTo: toggle.leadingAnchor,
-                constant: -Layout.space12
-            ),
-            toggle.trailingAnchor.constraint(
-                equalTo: container.trailingAnchor,
-                constant: -Layout.cardPadding
-            ),
-            toggle.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+            row.topAnchor.constraint(equalTo: container.topAnchor, constant: Layout.space12),
+            row.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: Layout.cardPadding),
+            row.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -Layout.cardPadding),
+            row.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -Layout.space12),
+            toggle.widthAnchor.constraint(greaterThanOrEqualToConstant: Layout.touchMin),
         ])
     }
 

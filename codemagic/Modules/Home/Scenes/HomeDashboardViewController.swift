@@ -315,8 +315,9 @@ final class HomeDashboardViewController: UIViewController {
 
         case .scenarios, .scenarioEmpty:
             let base: CGFloat = section == .scenarios ? 124 : 200
-            // 快捷场景卡与空态卡在 AX 档同样按内容自适配高，名称与说明不被固定高度裁切。
-            let height: NSCollectionLayoutDimension = isAccessibilityText()
+            // 空态卡常规字号下也按内容自适配：200pt 装不下「图标 + 标题 + 两行说明 + 按钮」的 228pt，
+            // 会让说明末尾被压掉一行。快捷场景卡仍按 124pt 固定高（内容由卡片自身布局保证）。
+            let height: NSCollectionLayoutDimension = section == .scenarioEmpty || isAccessibilityText()
                 ? .estimated(base)
                 : .absolute(base)
             let item = NSCollectionLayoutItem(
@@ -386,11 +387,13 @@ final class HomeDashboardViewController: UIViewController {
             return layoutSection
 
         case .roomEmpty:
+            // 空房间卡按内容自适配：AX 档说明会到 6 行，220pt 固定高会把标题和说明裁掉。
+            let height: NSCollectionLayoutDimension = .estimated(220)
             let item = NSCollectionLayoutItem(
-                layoutSize: NSCollectionLayoutSize(widthDimension: .fractionalWidth(1), heightDimension: .absolute(220))
+                layoutSize: NSCollectionLayoutSize(widthDimension: .fractionalWidth(1), heightDimension: height)
             )
             let group = NSCollectionLayoutGroup.vertical(
-                layoutSize: NSCollectionLayoutSize(widthDimension: .fractionalWidth(1), heightDimension: .absolute(220)),
+                layoutSize: NSCollectionLayoutSize(widthDimension: .fractionalWidth(1), heightDimension: height),
                 subitems: [item]
             )
             let layoutSection = NSCollectionLayoutSection(group: group)
@@ -401,11 +404,12 @@ final class HomeDashboardViewController: UIViewController {
             return layoutSection
 
         case .roomsEmpty:
+            let height: NSCollectionLayoutDimension = .estimated(220)
             let item = NSCollectionLayoutItem(
-                layoutSize: NSCollectionLayoutSize(widthDimension: .fractionalWidth(1), heightDimension: .absolute(220))
+                layoutSize: NSCollectionLayoutSize(widthDimension: .fractionalWidth(1), heightDimension: height)
             )
             let group = NSCollectionLayoutGroup.vertical(
-                layoutSize: NSCollectionLayoutSize(widthDimension: .fractionalWidth(1), heightDimension: .absolute(220)),
+                layoutSize: NSCollectionLayoutSize(widthDimension: .fractionalWidth(1), heightDimension: height),
                 subitems: [item]
             )
             let layoutSection = NSCollectionLayoutSection(group: group)
@@ -416,11 +420,12 @@ final class HomeDashboardViewController: UIViewController {
             return layoutSection
 
         case .devicesEmpty:
+            let height: NSCollectionLayoutDimension = .estimated(280)
             let item = NSCollectionLayoutItem(
-                layoutSize: NSCollectionLayoutSize(widthDimension: .fractionalWidth(1), heightDimension: .absolute(280))
+                layoutSize: NSCollectionLayoutSize(widthDimension: .fractionalWidth(1), heightDimension: height)
             )
             let group = NSCollectionLayoutGroup.vertical(
-                layoutSize: NSCollectionLayoutSize(widthDimension: .fractionalWidth(1), heightDimension: .absolute(280)),
+                layoutSize: NSCollectionLayoutSize(widthDimension: .fractionalWidth(1), heightDimension: height),
                 subitems: [item]
             )
             let layoutSection = NSCollectionLayoutSection(group: group)
@@ -447,7 +452,8 @@ final class HomeDashboardViewController: UIViewController {
 
     private func makeHeader() -> NSCollectionLayoutBoundarySupplementaryItem {
         NSCollectionLayoutBoundarySupplementaryItem(
-            layoutSize: NSCollectionLayoutSize(widthDimension: .fractionalWidth(1), heightDimension: .absolute(Layout.sectionHeaderH)),
+            // 分区头随字高自适配：AX 档 callout 行高约 51pt，固定 40pt 会切掉上下各 5pt。
+            layoutSize: NSCollectionLayoutSize(widthDimension: .fractionalWidth(1), heightDimension: .estimated(Layout.sectionHeaderH)),
             elementKind: UICollectionView.elementKindSectionHeader,
             alignment: .top
         )
