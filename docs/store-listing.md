@@ -1,8 +1,8 @@
-# App Store 上架材料（iOS v0.31.9）
+# App Store 上架材料（iOS v0.31.10）
 
 > 状态：**材料已补齐，但尚未上传 App Store Connect、尚未提交审核、未上架**。
 > 本机没有 Apple Developer Program 账号，也没有任何 App Store 审核记录；仓库中没有分发证书、
-> Provisioning Profile 与 APNs 推送证书。`MARKETING_VERSION 0.31.9` / `CURRENT_PROJECT_VERSION 49`
+> Provisioning Profile 与 APNs 推送证书。`MARKETING_VERSION 0.31.10` / `CURRENT_PROJECT_VERSION 50`
 > 只用于模拟器构建与 CI，不能直接提交商店。
 >
 > 本文只描述仓库中**已实现并有代码证据**的能力。未实现的能力（账号密码、云备份、OTA、

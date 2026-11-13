@@ -109,8 +109,9 @@ final class DeviceCardCell: UICollectionViewCell {
             statusLabel.textColor = Palette.textTertiary
         }
         readingLabel.text = readingText
-        signalView.isSignalUnavailable = rssi == nil
-        signalView.rssi = rssi ?? -100
+        // 仅本机已连接时显示信号条：未连接时最近一次扫描值可能已过期，不在卡片上保留。
+        signalView.isHidden = !isConnected || !RSISignalView.isValid(rssi)
+        signalView.rssi = rssi
         let timeText: String?
         if !device.isConnectable {
             timeText = linkStatus.secondaryText(

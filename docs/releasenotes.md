@@ -6,6 +6,7 @@
 
 | Tag | MARKETING_VERSION | Build | 日期 | 对齐后端 |
 | --- | --- | --- | --- | --- |
+| `v0.31.10` | 0.31.10 | 50 | 2026-11-13 | PJGoIoT v0.26.0（无契约变更；RSSI 分档按 `PKotlinApp/docs/rssi-signal-tiers.md` 对齐：`≥-55` 四格、`-66…-56` 三格、`-75…-67` 两格、`-85…-76` 一格、`≤-86` 零格、未知 0 格且不显示 dBm；`0` / `127` 等非负占位值按未知处理；未本机连接首页卡隐藏信号条；详情新增 dBm + 格数 + 读数时间；新增 `RSISignalTests` 9 个用例，单测 512、e2e 460） |
 | `v0.31.9` | 0.31.9 | 49 | 2026-11-09 | PJGoIoT v0.26.0（无契约变更；UI 细节与布局错位打磨，四处缺陷均以 frame 数值确认并修复：① 首页空态卡（场景 / 房间 / 设备）由固定 200 / 220 / 280pt 改为 `.estimated` —— 常规字号内容需 228pt（旧实现裁 28pt，说明少一行、按钮不可见），AX5 需 403.3pt（旧实现裁 203.3pt）；② 分区头固定 40pt 改为 `.estimated(40)` + `>=40` 下界 —— AX5 callout 行高 51.33pt，旧实现上下各裁 5.7pt；③ 智能页 `RuleCell` 的 `trailing <=` 约束使自适应行高按单行计算 —— AX5 规则名 frame 57.33pt 而实际需要 114.67pt（隐藏 57.34pt，渲染成「设备断开…」），改为水平栈后名称 114.67pt、说明 196pt、行高 345.67pt，常规仍 86.67pt 单行紧凑；④ 市场页表格分区头固定 40pt 改为 `automaticDimension` + `estimatedSectionHeaderHeight = 40` —— 真实表格 `rectForHeader` 常规 40pt / AX5 51.33pt。新增 `LayoutPolishTests` 5 个回归用例；截图与逐图说明见 `docs/ui-polish.md`，归档在 `docs/screenshots/ui-polish-*.png`；单测 503、e2e 460） |
 | `v0.31.8` | 0.31.8 | 48 | 2026-11-07 | PJGoIoT v0.26.0（契约 0.21.0 不变；按 `PKotlinApp/docs/consistency-presence.md` 二次对账修复 iOS 一处真缺陷与三处遗漏：① 设备列表与设备详情不再把 `isConnected` 写死 `false`，改由 `DeviceLinkStatus.isConnected(device:bluetooth:)` 统一从本机 BLE 读取，首页 / 房间详情 / 设备列表 / 设备详情对同一设备给出同一档；跨平台设备不声称本机连接。② 新增「显式 `null` 清空本地 `serverLastSeenAt`」独立单测，与「字段缺失保留本地值」分开断言。③ `e2e-contract` 推送读数后拉 `/sync/changes`，断言 `entity=user_device` payload 的 `presence` / `lastSeenAt` 与设备读接口逐字一致、增量页游标覆盖全部实体（总项数仍 460；CI pin v0.25.0 显式 `[SKIP]` 并打印原因）；`e2e-postgres` 在真 Postgres 上断言 `presence=online`、游标推进，并直接写入 `future_entity` 验证未知 entity 不阻断同步。④ `docs/app-privacy.md` / `docs/e2e-postgres.md` / `docs/store-listing.md` 版本头同步到 v0.31.8。单测 498、e2e 460；`v0.31.6` / `v0.31.7` 已发布 tag 保持原样不动） |
 | `v0.31.7` | 0.31.7 | 47 | 2026-11-07 | PJGoIoT v0.26.0（契约 0.21.0 不变；**递增补发**：v0.31.6 的 tag 在首次推送 `f227476` 的 tag CI 失败后被删除并重建到 `399e4a6`，违反「已发布 tag 不移动」纪律；本轮保留失败的 `v0.31.6` 原样，另发 `v0.31.7`。变更：① `e2e-contract` 的 CI 兼容分支改为显式 `[SKIP]`，后端无 `presence` 时先硬断言 200、再打印「本项本轮未执行」，字段存在时仍是硬断言 `presence=unknown / lastSeenAt=null`，不降级成「存在即可」；② 在 v0.26.0 下把期望改成错误值做反向验证 → 459 通过 / 1 失败 / 退出码 1，证明兼容分支不会吞错；本地 v0.26 460 通过 / 0 跳过 / 0 失败，CI v0.25 460 通过 / 1 跳过 / 0 失败；③ 云端状态与上报时间改为分行呈现，窄卡片行末不再悬挂「·」，设备列表跨平台设备改用同一 `secondaryText` 同时给出「云端状态 + 时间」；④ 用真实后端 v0.26.0 + seed 重拍 iPhone 首页 6 张、房间详情 18 张、iPad 首页 3 张、iPad 房间详情 6 张，逐张核对四档措辞与「本机不可连接 + 云端状态」双行；单测 495、e2e 460） |
@@ -56,6 +57,19 @@
 | `v0.1.0` | — | 1 | 2026-11-05 | — |
 
 ---
+
+## v0.31.10（build 50）
+
+**主题：RSSI 分档对齐 Android 定稿规范**
+
+- **唯一口径**：`RSISignalView` 从旧的 `-55 / -67 / -78 / -90` 改为 `≥-55` 四格、`-66…-56` 三格、`-75…-67` 两格、`-85…-76` 一格、`≤-86` 零格，每档含下限；`-55` 是四格、`-56` 是三格、`-85` 仍一格、`-86` 起零格。
+- **注释**：删除文件头自称「与 Android 一致」却写 `≥-78 两格 / ≥-90 一格` 的错误注释，改为直接指向 `PKotlinApp/docs/rssi-signal-tiers.md`，不再复述数字。
+- **未知与极弱**：两者都是 0 格，但档位与文案区分（「无信号数据」/「信号极弱」）；未知不显示 dBm。iOS 继续用 `nil` 表示未知，不引入 `Int.MIN_VALUE` 哨兵，`-100` 仍是合法极弱值。
+- **无效值**：合法 dBm 恒为负，`0` / `127` 等非负值按未知处理——信号视图不点亮、扫描行不显示 dBm 文本、首页排序按未知处理。
+- **未连接设备卡**：仅在本机已连接且读数合法时显示信号条，不再展示可能过期数小时的扫描缓存。
+- **设备详情**：新增「信号强度」行，展示 dBm、对应格数与最近一次扫描的读数时间（`RecentDeviceStore.fetch(peripheralID:)`）；未知时只写「无信号数据」。
+- **规则比较符**：确认 iOS 现状为 `<=`（`RuleEvaluator` 的 `rssi <= threshold`、`SceneEngine` 的 `rssi > threshold` 重置语义等价），本轮未改。
+- **验证**：新增 `RSISignalTests` 9 个用例（八个边界、全区间单调 / 相邻档差 / 无空隙、未知与极弱区分、非负值未知、越界负数极弱、设备卡显示条件、详情未知无 dBm、详情读数与时间），全量单测 **512 个 0 失败**；e2e **460 通过 / 0 跳过 / 0 失败**；`BUILD SUCCEEDED`。
 
 ## v0.31.4（build 44）
 

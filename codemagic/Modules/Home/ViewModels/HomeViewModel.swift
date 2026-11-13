@@ -334,7 +334,7 @@ final class HomeViewModel {
                     HomeDeviceRow(
                         peripheralID: $0.peripheralID,
                         name: $0.name,
-                        rssi: $0.rssi,
+                        rssi: RSISignalView.isValid($0.rssi) ? $0.rssi : nil,
                         lastSeenAt: $0.lastSeenAt,
                         isSaved: $0.isSaved
                     )

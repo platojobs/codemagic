@@ -35,13 +35,11 @@ final class ScannedDeviceCell: UITableViewCell {
         nameLabel.text = row.name
         identifierLabel.text = L10n.f("scanned.identifier", String(describing: row.peripheralID.uuidString.prefix(8)))
 
-        if let rssi = row.rssi {
-            signalView.isSignalUnavailable = false
-            signalView.rssi = rssi
+        let validRSSI = RSISignalView.isValid(row.rssi)
+        signalView.rssi = validRSSI ? row.rssi : nil
+        if let rssi = row.rssi, validRSSI {
             rssiLabel.text = "\(AppDateFormat.rssi(rssi)) · \(AppDateFormat.relative(row.lastSeenAt))"
         } else {
-            signalView.isSignalUnavailable = true
-            signalView.rssi = -100
             rssiLabel.text = L10n.f("scanned.lastSeen", String(describing: AppDateFormat.relative(row.lastSeenAt)))
         }
 

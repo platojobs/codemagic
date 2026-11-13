@@ -45,6 +45,12 @@ final class DeviceDetailViewModel {
         }
     }
 
+    /// 详情页展示的信号读数：来自最近一次扫描记录，未知时 `rssi` 为 nil。
+    struct SignalReading: Equatable {
+        let rssi: Int?
+        let readAt: Date?
+    }
+
     private(set) var state: State = .idle {
         didSet { onChange?() }
     }
@@ -73,6 +79,8 @@ final class DeviceDetailViewModel {
     private let exportService: ReadingsExportService
     private let roomStore: RoomStore?
     private let householdService: HouseholdService?
+    /// 最近一次扫描记录：详情页据此展示 dBm 与读数时间。
+    private let recentDeviceStore: RecentDeviceStore?
     private var refreshPolicy: ReadingsRefreshPolicy
     private var remoteRefreshWorkItem: DispatchWorkItem?
     /// 详情页是否可见；不可见时不发任何远端读数请求。
@@ -92,6 +100,7 @@ final class DeviceDetailViewModel {
         exportService: ReadingsExportService? = nil,
         roomStore: RoomStore? = nil,
         householdService: HouseholdService? = nil,
+        recentDeviceStore: RecentDeviceStore? = nil,
         refreshPolicy: ReadingsRefreshPolicy = ReadingsRefreshPolicy()
     ) {
         self.device = device
@@ -108,6 +117,7 @@ final class DeviceDetailViewModel {
         )
         self.roomStore = roomStore
         self.householdService = householdService
+        self.recentDeviceStore = recentDeviceStore
         self.refreshPolicy = refreshPolicy
     }
 
@@ -632,6 +642,17 @@ final class DeviceDetailViewModel {
     }
 
     // MARK: - Display
+
+    /// 最近一次扫描得到的信号读数；占位值 / 非负值一律按未知处理，连读数时间也不展示。
+    var signalReading: SignalReading {
+        guard let recentDeviceStore,
+              let recent = try? recentDeviceStore.fetch(peripheralID: device.peripheralID),
+              RSISignalView.isValid(recent.rssi)
+        else {
+            return SignalReading(rssi: nil, readAt: nil)
+        }
+        return SignalReading(rssi: recent.rssi, readAt: recent.lastSeenAt)
+    }
 
     var product: ProductModel? {
         switch state {

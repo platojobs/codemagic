@@ -744,7 +744,19 @@ Android 自 v0.22.0 起把服务端 `SCENE_*` 4xx 视为终态；iOS v0.24.0 对
 
 **5）回归测试与截图。** 新增 `LayoutPolishTests` 5 个用例：空态卡常规 / AX5 自适配、分区头常规 40pt / AX5 51.33pt、`.estimated` 分区头在真实 compositional layout 中取到 51.33pt、`RuleCell` 在常规与 AX5 下均无垂直裁切（逐标签比较 frame 与 `sizeThatFits`）、真实 `UITableView` 表头常规 40pt / AX5 51.33pt。截图覆盖 iPhone 常规 / AX5 / AX5 底部与 iPad 13 英寸 AX5，以及智能页常规 / AX5 前后对照，归档在 `docs/screenshots/ui-polish-*.png`。
 
-**保留为设计取舍（检查过，不是缺陷）**：帮助中心 / 关于 / 扫码日志 / 反馈详情依赖滚动视图安全区自动 inset，实测「关于」末尾距悬浮 Tab 仍有 57pt，不额外加自定义 inset；`DevicesViewController` / `SavedDeviceCell` 当前无入口引用，调整内边距不会出现在任何界面，保留待入口恢复时处理。`RSISignalView.signalLevel` 注释与实现的 -84…-90 区间不一致属数据映射问题，需与 Android 端统一阈值，本轮不改。
+**保留为设计取舍（检查过，不是缺陷）**：帮助中心 / 关于 / 扫码日志 / 反馈详情依赖滚动视图安全区自动 inset，实测「关于」末尾距悬浮 Tab 仍有 57pt，不额外加自定义 inset；`DevicesViewController` / `SavedDeviceCell` 当前无入口引用，调整内边距不会出现在任何界面，保留待入口恢复时处理。`RSISignalView.signalLevel` 注释与实现的 -84…-90 区间不一致属数据映射问题，已在 v0.31.10 按规范统一，见 3.33。
+
+### 3.33 v0.31.10：RSSI 分档对齐 Android 定稿规范
+
+`PKotlinApp/docs/rssi-signal-tiers.md` 定稿后，iOS 从旧的 `-55 / -67 / -78 / -90` 改为同一口径（每档含下限）：`≥ -55` 四格、`-66…-56` 三格、`-75…-67` 两格、`-85…-76` 一格、`≤ -86` 零格；`nil` / 非负占位值为未知（0 格且不显示 dBm）。颜色仍按档着色（绿 / 橙 / 红），这只是展示选择，不影响档位语义。
+
+**实现。** `RSISignalView` 改为 `rssi: Int?` + `Tier` + `tier(for:)`，未知与极弱格数同为 0 但文案区分（「无信号数据」/「信号极弱」）；删除文件头自称「与 Android 一致」却写 `≥ -78 两格 / ≥ -90 一格` 的错误注释，改为直接指向规范，不再复述数字。`0` / `127` 等非负值统一按未知处理：信号视图不点亮，扫描行不显示 dBm 文本，首页排序也按未知处理。首页设备卡仅在**本机已连接且读数合法**时显示信号条，不再展示可能过期数小时的扫描缓存；设备详情新增「信号强度」行，展示 dBm、`RSISignalView` 格数与最近一次扫描的读数时间（`RecentDeviceStore.fetch(peripheralID:)`），未知时只写「无信号数据」。iOS 侧不引入 `Int.MIN_VALUE` 哨兵，继续用 `nil`；`-100` 是合法极弱值，不再被当作未知。
+
+**规则阈值比较符。** iOS 现状确认为 `<=`：`RuleEvaluator.swift` 的 `rssi <= rule.threshold`，`SceneEngine.swift` 的 `if rssi > threshold { reset }` 语义等价；本轮未改，Android 将改为一致。
+
+**测试。** 新增 `RSISignalTests` 9 个用例：八个边界值逐值锁定；`-200…-1` 全区间扫描断言单调、相邻档差仅 0/1、五个有效档全部覆盖、切换点恰为 `-85 / -75 / -66 / -55`；未知与极弱文案区分且未知不出现 dBm；`0 / 1 / 64 / 127 / 255` 与 `nil` 均为未知；越界负数归极弱；设备卡未连接 / 非法读数不显示信号条；详情未知态无 dBm；详情 ViewModel 从最近扫描记录取 dBm 与时间并过滤占位值。全量单测 **512 个 0 失败**，e2e 仍 **460 通过 / 0 跳过 / 0 失败**。
+
+**保留差异（符合规范第 8 节）。** iOS 继续用 `nil` 表示未知、保留按档着色；详情没有连接后 `readRSSI` 轮询，展示的是最近一次扫描读数并明确标注读数时间，不伪装成实时值。
 
 ## 4. 错误码
 

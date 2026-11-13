@@ -678,7 +678,8 @@ final class HomeDashboardViewController: UIViewController {
             readingsStore: environment.readingsStore,
             readingsService: environment.readingsService,
             readingsIngestor: environment.readingsIngestor,
-            roomStore: environment.roomStore
+            roomStore: environment.roomStore,
+            recentDeviceStore: environment.recentDeviceStore
         )
         navigationController?.pushViewController(DeviceDetailViewController(viewModel: detailViewModel), animated: true)
     }

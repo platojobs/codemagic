@@ -16,6 +16,7 @@ final class DeviceDetailViewController: UIViewController {
         case roomPicker
         case mark
         case export
+        case signal(reading: DeviceDetailViewModel.SignalReading)
         case emptyState
     }
 
@@ -126,6 +127,7 @@ final class DeviceDetailViewController: UIViewController {
         tableView.register(UITableViewCell.self, forCellReuseIdentifier: "DetailCell")
         tableView.register(ReadingsChartCell.self, forCellReuseIdentifier: ReadingsChartCell.reuseIdentifier)
         tableView.register(ReadingsRangeCell.self, forCellReuseIdentifier: ReadingsRangeCell.reuseIdentifier)
+        tableView.register(DeviceSignalCell.self, forCellReuseIdentifier: DeviceSignalCell.reuseIdentifier)
         tableView.dataSource = self
         tableView.delegate = self
         tableView.rowHeight = UITableView.automaticDimension
@@ -199,6 +201,11 @@ final class DeviceDetailViewController: UIViewController {
                 value: device.lastSeenAt.map { AppDateFormat.absolute($0) } ?? L10n.t("device.detail.noScanRecord")
             ),
             Row(title: L10n.t("device.detail.presence"), value: presenceText(for: device)),
+            Row(
+                title: L10n.t("device.detail.signal"),
+                value: "",
+                kind: .signal(reading: viewModel.signalReading)
+            ),
         ]
 
         if let product = viewModel.product {
@@ -472,6 +479,16 @@ extension DeviceDetailViewController: UITableViewDataSource {
             let cell = makeDetailCell(row: row, secondaryText: row.value)
             cell.accessoryType = .disclosureIndicator
             cell.selectionStyle = .default
+            return cell
+
+        case .signal(let reading):
+            guard let cell = tableView.dequeueReusableCell(
+                withIdentifier: DeviceSignalCell.reuseIdentifier,
+                for: indexPath
+            ) as? DeviceSignalCell else {
+                return UITableViewCell()
+            }
+            cell.configure(reading: reading)
             return cell
 
         case .emptyState:

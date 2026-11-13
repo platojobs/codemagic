@@ -19,6 +19,19 @@ final class RecentDeviceStore {
         return rows.compactMap(Self.makeDevice)
     }
 
+    /// 单个设备最近一次扫描记录；详情页需要展示 dBm 与读数时间。
+    func fetch(peripheralID: UUID) throws -> RecentDevice? {
+        let rows = try database.query(
+            """
+            SELECT * FROM recent_devices
+            WHERE peripheral_id = ? AND deleted_at IS NULL
+            LIMIT 1;
+            """,
+            [.text(peripheralID.uuidString)]
+        )
+        return rows.compactMap(Self.makeDevice).first
+    }
+
     func upsert(peripheralID: UUID, name: String, rssi: Int, lastSeenAt: Date) throws {
         try database.execute(
             """

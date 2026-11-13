@@ -167,6 +167,9 @@
 "device.detail.readingInfoProgress" = "正在读取设备信息…";
 "device.detail.recentRecords" = "最近记录";
 "device.detail.selectMetric" = "选择指标";
+"device.detail.signal" = "信号强度";
+"device.detail.signalDetail" = "%@ · 读数于 %@";
+"device.detail.signalValue" = "%@ dBm · %@/4 格";
 "device.detail.sourceCloudBuckets" = "云端分桶序列";
 "device.detail.sourceCloudSummary" = "云端汇总";
 "device.detail.sourceLocal" = "本地数据";
@@ -645,8 +648,14 @@
 "settings.background.none" = "当前无连接设备";
 "settings.background.off" = "已关闭 · 进入后台会断开蓝牙连接，不再接收读数";
 "settings.background.on" = "已开启 · %@；后台继续接收读数，系统省电策略可能延后唤醒";
-"signal.unknown" = "信号强度：未获取";
-"signal.value" = "信号强度：%@ dBm，4 格中的 %@ 格";
+"signal.unknown" = "信号强度：无信号数据";
+"signal.a11y.known" = "信号强度：%@，%@ dBm";
+"signal.tier.unknown" = "无信号数据";
+"signal.tier.strong" = "信号很强";
+"signal.tier.good" = "信号良好";
+"signal.tier.fair" = "信号一般";
+"signal.tier.weak" = "信号较弱";
+"signal.tier.veryWeak" = "信号极弱";
 "smart.allDevices" = "全部设备";
 "smart.deleteNote" = "删除仅影响本机数据。";
 "smart.deleteRuleTitle" = "删除规则「%@」？";

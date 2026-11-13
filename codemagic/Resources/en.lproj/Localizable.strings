@@ -167,6 +167,9 @@
 "device.detail.readingInfoProgress" = "Reading device info…";
 "device.detail.recentRecords" = "Recent records";
 "device.detail.selectMetric" = "Select metric";
+"device.detail.signal" = "Signal strength";
+"device.detail.signalDetail" = "%@ · read at %@";
+"device.detail.signalValue" = "%@ dBm · %@/4 bars";
 "device.detail.sourceCloudBuckets" = "Cloud bucket series";
 "device.detail.sourceCloudSummary" = "Cloud summary";
 "device.detail.sourceLocal" = "Local data";
@@ -645,8 +648,14 @@
 "settings.background.none" = "No devices connected";
 "settings.background.off" = "Off · Bluetooth disconnects in the background and no readings are received.";
 "settings.background.on" = "On · %@. Readings keep arriving in the background; power-saving may delay wake-ups.";
-"signal.unknown" = "Signal strength: unavailable";
-"signal.value" = "Signal strength: %@ dBm, %@ of 4 bars";
+"signal.unknown" = "Signal strength: no signal data";
+"signal.a11y.known" = "Signal strength: %@, %@ dBm";
+"signal.tier.unknown" = "No signal data";
+"signal.tier.strong" = "Strong signal";
+"signal.tier.good" = "Good signal";
+"signal.tier.fair" = "Fair signal";
+"signal.tier.weak" = "Weak signal";
+"signal.tier.veryWeak" = "Very weak signal";
 "smart.allDevices" = "All devices";
 "smart.deleteNote" = "Deletion affects local data only.";
 "smart.deleteRuleTitle" = "Delete rule “%@”?";

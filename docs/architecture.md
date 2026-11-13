@@ -83,7 +83,7 @@ CoreBluetoothService.discoveryHandler
 
 | 组件 | 位置 | 说明 |
 | --- | --- | --- |
-| `RSISignalView` | `DesignSystem/RSISignalView.swift` | 自绘 `UIView`。`draw(_:)` 画 4 根圆角信号柱，按 RSSI 分档（≥-55:4、≥-67:3、≥-78:2、≥-90:1），无信号时灰色，带 accessibilityLabel。 |
+| `RSISignalView` | `DesignSystem/RSISignalView.swift` | 自绘 `UIView`。`draw(_:)` 画 4 根圆角信号柱；分档阈值以 `PKotlinApp/docs/rssi-signal-tiers.md` 为唯一真源（`Tier` + `tier(for:)`），未知与极弱均为 0 格但文案区分，非负占位值按未知处理；带 accessibilityLabel。 |
 | `EmptyStateView` | `DesignSystem/EmptyStateView.swift` | 完全由代码组装 `UIStackView + UIImageView + UILabel + UIButton`，`configure(...)` 支持可选按钮，被首页、设备、产品、市场、日志页复用。 |
 
 两者不使用 XIB / Storyboard，也不使用 iOS 16+ 的 `ContentUnavailableView`。
