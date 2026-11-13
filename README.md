@@ -20,7 +20,7 @@
 | 单元测试 | **523 个用例，0 失败**（Xcode 27.2 / iPhone 17 模拟器，`** TEST SUCCEEDED **`；v0.31.13 扩为 2 个非法值处理用例） |
 | e2e | **460 通过 / 0 跳过 / 0 失败**（本地 `PJGoIoT` v0.26.0，fixture）；CI pin v0.25.0 时 presence 相关 2 项显式 `[SKIP]` |
 | 模拟器构建 | `** BUILD SUCCEEDED **` |
-| CI | [main run 43388352309](https://github.com/platojobs/codemagic/actions/runs/43388352309) / [tag run 43388357132](https://github.com/platojobs/codemagic/actions/runs/43388357132)，均 success |
+| CI | [main run 43395819663](https://github.com/platojobs/codemagic/actions/runs/43395819663) / [tag run 43395833142](https://github.com/platojobs/codemagic/actions/runs/43395833142)，均 success（tag 首轮因既有网络桩用例超时重跑后通过） |
 | 真机 / 签名 | **未验证**：无真机、无 Apple 开发者账号；BLE、后台任务、APNs 需真机自测 |
 | 上架 | **未上架**：材料已备，无 App Store Connect 上传与审核记录 |
 
