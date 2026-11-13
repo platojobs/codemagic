@@ -251,8 +251,8 @@ final class RSISignalTests: XCTestCase {
         viewModel.teardown()
     }
 
-    /// 非负值不是真实 dBm：直接进入未知态，不显示 0 dBm / 满格。
-    func testInvalidConnectedValueFallsBackToUnknown() throws {
+    /// 成功回调返回非法值且从未成功读过：显示「读取失败，暂无读数」，无 dBm、不满格。
+    func testInvalidValueWithoutSuccessfulReadShowsReadFailed() throws {
         let testDatabase = try TestDatabase()
         defer { testDatabase.cleanUp() }
         let device = makeSavedDevice()
@@ -264,7 +264,52 @@ final class RSISignalTests: XCTestCase {
         viewModel.setVisible(true)
         XCTAssertNil(viewModel.signalReading.rssi)
         XCTAssertNil(viewModel.signalReading.readAt)
-        XCTAssertEqual(viewModel.signalReading.status, .unknown)
+        XCTAssertEqual(viewModel.signalReading.status, .readFailed)
+
+        let cell = DeviceSignalCell(style: .default, reuseIdentifier: nil)
+        cell.configure(reading: viewModel.signalReading)
+        let texts = allLabelTexts(in: cell)
+        XCTAssertTrue(texts.contains(L10n.t("device.detail.signalReadFailed")))
+        XCTAssertFalse(texts.contains { $0.contains("dBm") })
+        XCTAssertFalse(texts.contains(L10n.t("signal.tier.unknown")), "读取失败不是「无信号数据」")
+        viewModel.teardown()
+    }
+
+    /// 成功回调返回非法值时保留上次成功读到的值与时间，状态标为刷新失败。
+    func testInvalidValueKeepsLastSuccessfulReadingAndMarksRefreshFailed() throws {
+        let testDatabase = try TestDatabase()
+        defer { testDatabase.cleanUp() }
+        let device = makeSavedDevice()
+        let bluetooth = FakeBluetoothService()
+        bluetooth.markConnected(device.peripheralID)
+        bluetooth.rssiResult = .success(-68)
+        let liveAt = Date(timeIntervalSince1970: 1_700_000_120)
+        var currentDate = liveAt
+        let viewModel = makeDetailViewModel(
+            device: device,
+            database: testDatabase,
+            bluetooth: bluetooth,
+            now: { currentDate }
+        )
+
+        viewModel.setVisible(true)
+        XCTAssertEqual(viewModel.signalReading, .init(rssi: -68, readAt: liveAt, status: .live))
+
+        currentDate = liveAt.addingTimeInterval(10)
+        bluetooth.rssiResult = .success(0)
+        viewModel.pollSignal()
+
+        XCTAssertEqual(
+            viewModel.signalReading,
+            .init(rssi: -68, readAt: liveAt, status: .refreshFailed),
+            "非法值按本次读取失败处理，保留上次成功值与时间"
+        )
+
+        let cell = DeviceSignalCell(style: .default, reuseIdentifier: nil)
+        cell.configure(reading: viewModel.signalReading)
+        let texts = allLabelTexts(in: cell)
+        XCTAssertTrue(texts.contains { $0.contains("-68 dBm") })
+        XCTAssertTrue(texts.contains { $0.contains("刷新失败") })
         viewModel.teardown()
     }
 

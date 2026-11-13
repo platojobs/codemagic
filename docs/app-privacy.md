@@ -1,4 +1,4 @@
-# App 隐私清单对照（v0.31.12）
+# App 隐私清单对照（v0.31.13）
 
 隐私清单文件：[`codemagic/Resources/PrivacyInfo.xcprivacy`](../codemagic/Resources/PrivacyInfo.xcprivacy)。工程使用 Xcode 文件系统同步组，新增资源会自动进入 `codemagic` target 的 Resources 阶段（`Info.plist` 是唯一例外）。
 

@@ -45,7 +45,9 @@ final class DeviceSignalCell: UITableViewCell {
     func configure(reading: DeviceDetailViewModel.SignalReading) {
         guard let rssi = reading.rssi, let readAt = reading.readAt, RSISignalView.isValid(rssi) else {
             signalView.rssi = nil
-            valueLabel.text = L10n.t("signal.tier.unknown")
+            valueLabel.text = reading.status == .readFailed
+                ? L10n.t("device.detail.signalReadFailed")
+                : L10n.t("signal.tier.unknown")
             detailLabel.text = nil
             detailLabel.isHidden = true
             return
@@ -60,7 +62,7 @@ final class DeviceSignalCell: UITableViewCell {
             detailKey = "device.detail.signalDetailLive"
         case .refreshFailed:
             detailKey = "device.detail.signalDetailFailed"
-        case .lastScan, .unknown:
+        case .lastScan, .readFailed, .unknown:
             detailKey = "device.detail.signalDetailScan"
         }
         detailLabel.text = L10n.f(

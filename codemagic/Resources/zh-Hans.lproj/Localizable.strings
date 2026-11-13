@@ -171,6 +171,7 @@
 "device.detail.signalDetailLive" = "%@ · 实时读数 · 读数于 %@";
 "device.detail.signalDetailScan" = "%@ · 最近一次扫描 · 读数于 %@";
 "device.detail.signalDetailFailed" = "%@ · 刷新失败，显示上次读数 · 读数于 %@";
+"device.detail.signalReadFailed" = "读取失败，暂无读数";
 "device.detail.signalValue" = "%@ dBm · %@/4 格";
 "device.detail.sourceCloudBuckets" = "云端分桶序列";
 "device.detail.sourceCloudSummary" = "云端汇总";

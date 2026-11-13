@@ -171,6 +171,7 @@
 "device.detail.signalDetailLive" = "%@ · live · read at %@";
 "device.detail.signalDetailScan" = "%@ · last scan · read at %@";
 "device.detail.signalDetailFailed" = "%@ · refresh failed, showing last reading · read at %@";
+"device.detail.signalReadFailed" = "Read failed; no reading yet";
 "device.detail.signalValue" = "%@ dBm · %@/4 bars";
 "device.detail.sourceCloudBuckets" = "Cloud bucket series";
 "device.detail.sourceCloudSummary" = "Cloud summary";

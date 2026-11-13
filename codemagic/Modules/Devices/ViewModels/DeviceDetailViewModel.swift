@@ -52,9 +52,11 @@ final class DeviceDetailViewModel {
             case live
             /// 未连接，展示最近一次扫描值。
             case lastScan
-            /// 本机连接中但本次读取失败，保留上一次值。
+            /// 本机连接中但本次读取失败（含成功回调返回非法值），保留上一次值。
             case refreshFailed
-            /// 无可用读数，或读到非负等非法值。
+            /// 本机连接中读取失败且从未成功过，无可用读数。
+            case readFailed
+            /// 无可用读数（未连接且无扫描记录）。
             case unknown
         }
 
@@ -762,16 +764,16 @@ final class DeviceDetailViewModel {
         case .success(let rssi) where RSISignalView.isValid(rssi):
             currentSignalReading = SignalReading(rssi: rssi, readAt: now(), status: .live)
 
-        case .success:
-            // 非负值不是真实 dBm，按未知处理，不能显示成 0 dBm 或满格。
-            currentSignalReading = .unknown
-
-        case .failure:
-            // 读取失败保留上一次成功值并标记状态；没有历史值时才落到未知。
-            if let rssi = currentSignalReading.rssi, let readAt = currentSignalReading.readAt {
+        case .success, .failure:
+            // 成功回调返回非法值（0 / 127 / Int.min）与读取失败同口径：本质是坏数据，
+            // 保留上一次成功读到的值并标记刷新失败；从未成功读过才显示读取失败且无读数。
+            // 扫描值不算「成功读取」，不能冒充连接后的上次读数。
+            if let rssi = currentSignalReading.rssi,
+               let readAt = currentSignalReading.readAt,
+               currentSignalReading.status == .live || currentSignalReading.status == .refreshFailed {
                 currentSignalReading = SignalReading(rssi: rssi, readAt: readAt, status: .refreshFailed)
             } else {
-                currentSignalReading = .unknown
+                currentSignalReading = SignalReading(rssi: nil, readAt: nil, status: .readFailed)
             }
         }
         onChange?()
