@@ -1,956 +1,110 @@
-# 双端一致性说明（Android / iOS）
+# 跨端一致性（现行口径）
 
-本文件是 **Android `PKotlinApp` 与 iOS `codemagic` 共用的行为说明**，用于保证两端在模块划分、数据来源、字段命名、错误码、空状态与权限行为上口径一致。
+> 只记录 iOS / Android 必须一致的行为。历史对账与逐版本审计已删除；验证以单测、e2e 与截图为准。
 
-- Android 侧口径以 `PKotlinApp/README.md` 与 `PJGoIoT/api/openapi.yaml` 为准。
-- iOS 侧以本仓库 `README.md`、`docs/architecture.md` 为准。
-- 后端 `PJGoIoT/api/openapi.yaml` 在 **v0.5.1** 起包含读数链路（v0.4.0 首次引入，v0.5.0 新增 `readings/series` 与 `readings/metrics`）。`v0.5.1` 修正 4 处契约表述：`/readings/metrics` 补 400 响应、`PushReading.unit` 允许空串（0–16）、9 个公共端点补 `security: []`、`compatibility` 的 nullable 写法；这些均不影响客户端逻辑。iOS v0.5.0（`MARKETING_VERSION 0.5.0`，build 13）在此基础上实现：推送 `readings`（≤500/批、按 `id` 幂等）、查询 `readings`（倒序、cursor）、`readings/summary`（24h min/max/avg/last）、**`readings/series`（1m/1h/1d 分桶）与 `readings/metrics`（指标清单）**；服务端保留 90 天，客户端本地保留 7 天。v0.4.1 起两端读数解析以 **3.8 黄金用例表**为唯一口径；v0.5.0 的长周期图表口径见 **3.9**。
-- **v0.8.0（iOS）** 无后端契约变更：新增设计令牌（`Palette` / `Layout` / `AppText`）与米家信息架构，新增仅本机的 `scenarios` 表（迁移 v6，不同步）；口径见 **3.12**。
+## 1. 底部导航
 
----
-
-## 1. 五模块命名与顺序
-
-两端底部导航以本表为目标口径；**iOS v0.8.0 已落地，Android 端尚未跟进**（见下方变更说明），不得在单端随意增删或调换。
-
-| 序号 | 名称 | Android | iOS |
+| 序号 | 名称 | iOS | Android |
 | --- | --- | --- | --- |
-| 1 | 首页 | `ui/home/HomeFragment` | `Modules/Home`（设备卡片网格 + 快捷场景 + 告警摘要） |
-| 2 | 智能 | —（尚未跟进） | `Modules/Smart`（自动化 + 场景） |
-| 3 | 产品 | `ui/products/ProductsFragment` | `Modules/Products` |
-| 4 | 市场 | `ui/market/MarketFragment` | `Modules/Market` |
-| 5 | 我的 | `ui/profile/ProfileFragment` | `Modules/Profile` |
+| 1 | 首页 | `Modules/Home`（设备卡片 + 快捷场景 + 告警摘要） | `ui/home/HomeFragment` |
+| 2 | 智能 | `Modules/Smart`（自动化 + 场景） | 尚未跟进 |
+| 3 | 产品 | `Modules/Products` | `ui/products/ProductsFragment` |
+| 4 | 市场 | `Modules/Market` | `ui/market/MarketFragment` |
+| 5 | 我的 | `Modules/Profile` | `ui/profile/ProfileFragment` |
 
-> **v0.8.0 变更（iOS 先行）**：iOS 已按米家信息架构重组为 **首页 / 智能 / 产品 / 市场 / 我的**，取消原「设备」Tab，设备管理（搜索 / 排序 / 分组）并入首页，规则与场景集中到「智能」；Android 端尚未跟进，本轮不强制对齐。`Modules/Devices` 保留设备详情、规则编辑与读数图表，不再作为底部 Tab。
-
-iOS 设备详情页独立于底部导航：`Modules/Devices/Scenes/DeviceDetailViewController`（Android 为 `ui/detail/DeviceDetailActivity`）。
-
----
+原「设备」Tab 已取消，设备管理并入首页，规则与场景集中在「智能」；设备详情独立于底部导航。
 
 ## 2. 每模块数据来源
 
-| 模块 | 数据来源 | Android 实现 | iOS 实现 |
-| --- | --- | --- | --- |
-| 首页 | CoreBluetooth / BLE 真实扫描 + 本地最近设备 + 本地已保存设备 + 本地场景 | `BluetoothLeScanner` + `ScanCallback` → Room | `CBCentralManager` → `CoreBluetoothService`；卡片读 `SavedDeviceStore` / `ReadingsStore` / `RecentDeviceStore`，告警数读 `ScanLogStore`，场景读 `ScenarioStore` |
-| 智能 | 本地规则 + 本地触发日志 + 本地场景 | Room `rules` / `scan_logs` | SQLite `rules` / `scan_logs` / `scenarios`（场景仅本机） |
-| 产品 | 网络型号库 | Retrofit `GET api/products` | `GET /api/v1/catalog/device-types`（类型 / GATT / 指标 / 限制 / 兼容性）+ `GET /api/v1/device-types/{type}/catalog`（仅固件 / 配件）；本地 SQLite 仅缓存与断网兜底 |
-| 市场 | 网络配件与固件信息 | Retrofit `GET api/market` | `GET /api/v1/device-types/{type}/catalog` 聚合 firmware + accessories |
-| 我的 | 系统权限状态 + 本地扫描日志 + 版本信息 + 同步状态 | 系统 API + Room `scan_logs` + 同步引擎 | `CBManager.authorization` + SQLite `scan_logs` + `SyncEngine` 状态 |
-| 设备详情 | 连接蓝牙后拉取设备信息，失败降级本地缓存；读数来自本地采集 + 云端汇总 | Retrofit `GET /api/v1/devices/{mac}` + Room 缓存 | `GET /api/v1/my/devices/ios/{externalId}`（复合键）优先；云端字段缺失或断网时降级 SQLite `device_info_cache` / `saved_devices`；读数折线/最近记录读 SQLite `readings`，24h 汇总优先 `.../readings/summary`，失败回退本地计算并标注「离线：本地数据」 |
-| 同步（后台） | 后端 `/api/v1/sync/*` + Keychain token | Android 同步客户端 | `Core/Sync/SyncEngine` + `SyncAPIClient` + `KeychainTokenStore` |
+- **首页**：CoreBluetooth / BLE 扫描 + `saved_devices` / `recent_devices` / `readings` / `scenarios`。
+- **智能**：本地 `rules` / `scan_logs` + 服务端场景。
+- **产品 / 市场**：`GET /catalog/device-types`（类型 / GATT / 指标 / 限制 / 兼容性）+ `GET /device-types/{type}/catalog`（固件 / 配件）；本地 SQLite 仅缓存与断网兜底。
+- **我的**：系统权限状态 + 扫描日志 + 同步状态。
+- **设备详情**：云端 `GET /my/devices/ios/{externalId}` 优先，失败降级本地缓存；读数来自本地采集与云端汇总。
+- 跨平台设备（`platform = android`）标注「来自 Android，本机不可连接」，不进入本机连接流程。
 
-规则/日志/最近设备均为本地数据，**不依赖网络**；断网时首页、设备、我的仍可用，同步进入降级状态并保留待上传记录。
+## 3. 网络契约
 
-跨平台设备（从服务端拉回、`platform = android`）只在本机占位展示：列表会标注「来自 Android，本机不可连接」并禁用连接入口，不进入设备详情。只有本机扫描得到的 `platform = ios` 设备可通过 CoreBluetooth 连接。
+Base URL 由构建配置注入，不写死在源码：iOS 为 `Info.plist` 的 `BASE_URL`（`Config/*.xcconfig`，拼接 `/api/v1`）；Android 为 `BuildConfig.API_BASE_URL`。
 
----
-
-## 3. 网络端点与字段命名规则
-
-### 3.1 端点
-
-| 用途 | Android | iOS | 说明 |
-| --- | --- | --- | --- |
-| 匿名登录 | `POST /api/v1/auth/anonymous` | `POST /api/v1/auth/anonymous` | 返回 `{userId, token, expiresAt}`；token 存 Keychain，到期日只读展示 |
-| 产品 / 市场类型目录 | — | `GET /api/v1/catalog/device-types` | 唯一事实源：`{version, generatedAt, items[]}`，支持 `If-None-Match` / `If-Modified-Since` → 304；匿名可读 |
-| 产品列表 | `GET api/products` | `GET /api/v1/catalog/device-types` + `.../{type}/catalog` | 见 3.4 |
-| 市场列表 | `GET api/market` | `GET /api/v1/device-types/{type}/catalog` | 仅聚合 firmware + accessories |
-| 设备信息 | `GET /api/v1/devices/{mac}` | `GET /api/v1/my/devices/ios/{externalId}` | iOS 用复合键，不依赖 MAC |
-| 型号元数据 | `GET /api/v1/device-types/{type}` | `GET /api/v1/device-types/{type}` | Android 使用；iOS 目录字段改由 `catalog/device-types` 提供 |
-| 增量拉取 | `GET /api/v1/sync/changes?cursor=&limit=` | 同左 | 返回 `{changes[], nextCursor, hasMore}`；cursor 失效返回 410，客户端以 0 全量重拉 |
-| 批量推送 | `POST /api/v1/sync/push` | 同左 | 批量 + `Idempotency-Key` |
-| 型号 catalog | `GET /api/v1/device-types/{type}/catalog` | 同左 | 一次返回 `deviceType` + `firmwares` + `accessories`；产品 / 市场的数据源 |
-| 用户设备列表 | `GET /api/v1/my/devices` | — | iOS App 未使用（拉取走 `sync/changes`）；仅 E2E 校验鉴权 |
-| 用户设备详情（复合键） | `GET /api/v1/my/devices/ios/{externalId}` | 同左 | iOS 设备详情主数据源；需要 Bearer token；跨用户返回 404 |
-| 用户设备详情（按 MAC） | `GET /api/v1/my/devices/{mac}` | — | iOS 不再使用；仅 E2E 校验越权 |
-| 公共设备元数据（按 MAC） | `GET /api/v1/devices/{mac}` | 同左 | 仍可用，但**仅 Android 使用**；iOS 无 MAC 不走该端点 |
-| 读数查询 | — | `GET /api/v1/my/devices/{platform}/{externalId}/readings?metric=&from=&to=&limit=100&cursor=` | 返回 `{items[], nextCursor, hasMore}`，按 `recordedAt` 倒序 |
-| 读数汇总 | — | `GET /api/v1/my/devices/{platform}/{externalId}/readings/summary?metric=&hours=24` | 返回 `{metric, unit, count, min, max, avg, last, windowStart, windowEnd}` |
-| 家庭（v0.14.0） | — | `GET/POST /api/v1/households`、`GET/PATCH/DELETE /households/{id}` | 返回 `{items}` / 单个家庭；个人家庭不可删（403）；v0.15.0 起 `memberCount` / `deviceCount` / `roomCount` 均为服务端真实值 |
-| 家庭成员 / 邀请码（v0.14.0） | — | `GET /households/{id}/members`、`POST /households/{id}/invitations`、`POST /households/invitations/claim` | 邀请码 201 + `{code, expiresAt}`，8 位一次性、大小写不敏感 |
-| 成员移除 / 退出（v0.15.0） | — | `DELETE /households/{id}/members/{userId}`、`POST /households/{id}/leave` | 均 204；owner 还有其他成员时退出 409 `CONFLICT`（可读 message）；被移除成员访问家庭 404，设备回个人家庭、房间清空 |
-| 邀请码管理（v0.15.0） | — | `GET /households/{id}/invitations`、`DELETE .../invitations/{invitationId}` | 列表只返回 `codeHashPrefix` / `status` / `attempts` / `expiresAt`，无明文；撤销 204，撤销后 claim 404 |
-| 家庭房间（v0.14.0） | — | `GET/POST /households/{id}/rooms`、`PATCH/DELETE /rooms/{roomId}` | 仅 owner 可写，member 403 `FORBIDDEN` |
-| 房间整段排序（v0.15.0） | — | `PUT /households/{id}/rooms/order` | 请求 `{roomIds}` 必须是完整集合；缺项 / 多项 / 重复 409（v0.13.0 `CONFLICT`，后续 `ROOM_SET_MISMATCH`） |
-| 设备归属（v0.14.0） | — | `PATCH /api/v1/my/devices/{platform}/{externalId}` | `alias` / `roomId` / `householdId` 三态（缺失 / 空串 / 非空） |
-
-Base URL 均由构建配置注入，**不写死在源码**：
-
-- Android：`BuildConfig.API_BASE_URL`（`app/build.gradle.kts`）。
-- iOS：`Info.plist` 的 `BASE_URL` ← `Config/Debug.xcconfig` / `Config/Release.xcconfig`。
-- `/api/v1/*` 路径由客户端在 `BASE_URL` 后拼接，因此 Debug 下 `http://127.0.0.1:8080` 可直接访问本地 `PJGoIoT`。
-
-### 3.2 字段命名（canonical，openapi 0.3.3）
-
-设备信息 / 型号条目统一使用：
-
-```
-mac, vendor, deviceType, firmwareVersion, compatibility,
-gattServices: [{ uuid, name, characteristics? }]
-```
-
-`GET /api/v1/my/devices/{platform}/{externalId}`（`UserDevice`）与 `POST /api/v1/sync/push`（`PushDevice`）字段：
-
-| 字段 | 类型 | 0.3.3 语义 | iOS 处理 |
-| --- | --- | --- | --- |
-| `platform` | string | `ios` / `android`，与 `externalId` 组成唯一键 | 必填，`ios` |
-| `externalId` | string | iOS 为大写 UUID，Android 为大写 MAC | 必填 |
-| `alias` | string | **用户别名**（用户编辑产生的名字） | 用户编辑只写 `alias`；未修改时省略 |
-| `advertisedName` | string | **设备广播名**（BLE Local Name） | 扫描只写 `advertisedName`；未修改时省略 |
-| `group` | string | 分组名；`""` 表示未分组 | 用户清空分组必须上报 `"group": ""`；未修改时省略 |
-| `deviceType` | string \| null | 型号 id（如 `nordic_uart`） | **可 null**；null/空串 → 不展示、不落库、推送不带 |
-| `vendor` | string \| null | 厂商名，服务端按 `deviceType` / MAC 补全 | **可 null**；null/空串 → `nil` |
-| `firmwareVersion` | string \| null | 固件版本字符串 | **可 null**；null/空串 → `nil` |
-| `compatibility` | object \| null | 结构见下 | **可 null**；`displayItems` 供展示、`filterTags` 供筛选 |
-| `mac` / `note` | string | 与 0.3.1 一致 | 与固件/厂商缺失无关，始终展示 |
-
-**缺省字段三态（0.3.3 核心语义）**
-
-| 状态 | JSON 表现 | 语义 | iOS 实现 |
-| --- | --- | --- | --- |
-| absent | 键完全省略 | 未上报，服务端保持原值 | `Patch.absent`（默认；未修改字段） |
-| clear | `""` | 显式清除（仅 `alias` / `advertisedName` / `group`） | `Patch.clear` |
-| set | 具体值 | 上报新值 | `Patch.set(value)` |
-
-- 构造 `PushDevice` 与幂等键时，**只有被上报的字段参与**；absent 字段不写入 JSON，因此不会因空值进入哈希。
-- `nil`（absent）与 `""`（clear）绝不可混淆：解码时缺省 → `nil` → 保留本地值；显式空串 → 清空。
-
-**展示顺序（列表 / 详情一致）**：用户别名 `alias` → 广播名 `advertisedName` → 型号名/型号键 `deviceType` → 「未命名设备」。
-
-`catalog` 的 `firmwares[]` / `accessories[]`：
-
-| 字段 | 类型 | 0.3.2 语义 |
-| --- | --- | --- |
-| `vendor` | string | 厂商名；**未核实时为空串**（不是 null） |
-| `compatibility` | object | 兼容性描述对象，`accessories` 用 `deviceTypes` 表达适用型号 |
-
-`Compatibility` 为 `additionalProperties: true` 的开放对象，当前已知 key：
-
-- `platforms`：字符串数组，如 `["ios", "android"]`；
-- `minAppVersion`：字符串，最低 App 版本；
-- `protocol` / `protocolName`：字符串，如 `ble-gatt`；
-- `features`：字符串数组，如 `["dfu"]`；
-- `deviceTypes`：字符串数组（配件专用，表示适用型号）。
-
-未知 key 不丢弃：iOS 解析为 `extras` 并按「显示名：值」摊平。
-
-**null 语义（全端统一）**
-
-- `null`、字段缺失、空串 `""`、纯空白串，在 iOS 模型层一律归一为 `nil`，**绝不渲染为字符串 `"null"` 或空串占位**。
-- 展示层：`deviceType` 为 `nil` → 「型号未知」；`vendor` / `firmwareVersion` 为 `nil` → 「—」；`compatibility` 为 `nil` → 「暂无兼容性说明」。
-- `null` 不等于 0 值：不写入本地缓存，不参与推送（`PushDevice` 用 `encodeIfPresent`，字段整体省略而不是 `null`）。
-- 服务端补全失败时返回 `null` 而非猜测值；客户端**不得自行编造厂商/型号/兼容性**。
-
-其他通用规则：
-
-- 字段名使用 **lowerCamelCase**，与后端 JSON 一致。
-- 未知字段必须忽略，不得因未知字段导致整包解析失败。
-- 缺失字段给空值（字符串 `""`、数组 `[]`），不得抛错。
-- `compatibility` 允许字符串、字符串数组、对象三种形态；对象按 key 排序后摊平为字符串数组。
-
-为与 Android 现有 DTO / mock 兼容，iOS 额外接受以下别名（**只读兼容，不写入缓存**）：
-
-| canonical | 兼容别名 | 来源 |
-| --- | --- | --- |
-| `deviceType` | `model` | Android `ProductDto` |
-| `gattServices` | `services` | Android `ProductDto` |
-| `name` | `title` | Android `MarketItemDto` |
-| `kind` | `category`（「固件」→ firmware，「配件」→ accessory，其余 → other） | Android `MarketItemDto` |
-| `summary` | `description` | Android `MarketItemDto` |
-| `note` | — | Android `ProductDto.note`（可选展示） |
-
-`GET /api/v1/catalog/device-types` 返回 `{version, generatedAt, items[]}`（无包裹层）；`catalog` 直接返回对象。目录是类型 / GATT / 指标 / 限制 / 兼容性的唯一事实源；逐型号 `{type}/catalog` 仅补充固件与配件。旧 `{"products":[...]}` / `{"marketItems":[...]}` 客户端已不再请求（历史别名解析仍保留在 `ProductModel` / `MarketItem` 中以兼容本地缓存）。
-
-### 3.3 设备标识符（与 openapi 一致）
-
-- 服务端设备唯一键为 **`(user_id, platform, external_id)`**，与 MAC 无关。
-- iOS `platform = "ios"`，`externalId = CBPeripheral.identifier.uuidString`（**统一大写**）；`mac` 允许为空。
-- Android `platform = "android"`、`externalId` 必须为 MAC（规范化为**大写**、冒号分隔）；未传时由 `mac` 派生，`mac` 与 `externalId` 不一致返回 400。
-- 服务端只做大小写规范化，不改写格式：iOS 的 `externalId` 必须是 UUID，Android 的必须是 6 字节 MAC，否则 400 `INVALID_MAC` / `BAD_REQUEST`。
-- 设备表同时保留本机 `peripheral_id`（CoreBluetooth 标识）与服务端键 `platform + external_id`；迁移 v2 由 `peripheral_id` 回填 `external_id`。
-- 迁移 **v4** 新增 `advertised_name`，并从历史 `name` 列回填广播名；`name` 列为 v4 前的遗留列，与 `advertised_name` 同值写入以兼容降级版本。同版本新增 `alias_patch` / `advertised_name_patch` / `group_patch` 记录待上报三态，`markSynced` 成功后归零。
-- iOS 的型号目录字段来自 `GET /api/v1/catalog/device-types`，固件 / 配件来自 `GET /api/v1/device-types/{type}/catalog`；单台设备详情使用 `GET /api/v1/my/devices/ios/{externalId}`，均不依赖 MAC。
-- `PushDevice` / `UserDevice` **不再缺型号字段**（openapi 0.3.2）：`UserDevice` 已含 `deviceType` / `vendor` / `firmwareVersion` / `compatibility`；`PushDevice.deviceType` 为**可选**字段。
-- openapi 0.3.3 起 `UserDevice` 新增 `advertisedName`：扫描只写广播名，用户编辑只写别名，二者互不覆盖；本地展示名回落顺序为 alias → advertisedName → deviceType。
-- iOS 推送 `deviceType` 的真实来源：设备详情从 `GET /my/devices/ios/{externalId}` 或 catalog 匹配拿到型号后写回 `saved_devices.device_type`，下次推送带上；无法推导时**保持 NULL 不传**，不填假值。`vendor` / `firmwareVersion` 仍为展示用元数据，不参与同类设备归类。
-- iOS 与 Android 即使 `mac` 相同，也按 `platform` 分为两条独立记录（键为 `(platform, externalId)`）。
-- 拉回的 Android 设备保留 `mac` 但没有可用的 `CBPeripheral.identifier`，因此 iOS 列表标注「来自 Android，本机不可连接」并禁用连接。
-
-### 3.4 与 `openapi.yaml` 的对齐状态
-
-`PJGoIoT/api/openapi.yaml`（后端 v0.18.0，契约 0.14.0）提供 `POST /auth/anonymous`、`GET /sync/changes`、`POST /sync/push`、`GET /catalog/device-types`、`GET /device-types/{type}/catalog`、`GET /my/devices/{platform}/{externalId}`、`/households*`、`/households/{id}/rooms*`、`/households/{id}/members/{userId}`、`/households/{id}/leave`、`/households/{id}/invitations*`、`/households/{id}/rooms/order`、`PATCH /my/devices/{platform}/{externalId}` 等。逐项核对结果：
-
-| 项 | 状态 |
+| 用途 | 端点 |
 | --- | --- |
-| `platform` / `externalId` 设备唯一键 | **已对齐**：iOS 迁移 v2 已补齐字段并参与推送；E2E 校验双平台形状与大写规范化 |
-| `POST /api/v1/auth/anonymous` + Bearer token | **已对齐**：token 存 Keychain，`Authorization: Bearer <token>` |
-| `GET /api/v1/sync/changes` 游标分页 | **已对齐**：`cursor` 持久化，`hasMore` 循环拉取（最多 10 页） |
-| `POST /api/v1/sync/push` + `Idempotency-Key` | **已对齐**：幂等键由批次**上报字段**的规范化 JSON 哈希得到，`absent` 字段不进入哈希，重试复用；E2E 校验重放返回 `Idempotent-Replayed: true` 且不产生重复变更 |
-| 冲突 `conflicts[].reason`（`server_newer` / `clock_clamped` / `key_taken`） | **已对齐**：服务端获胜并提示「另一台设备改过这条」；冲突响应中缺省的可选字段按 `absent` 解析（保留本地值）；E2E 校验旧版本 push 返回 `server_newer` 且服务端数据未被覆盖 |
-| `deleted` / `deletedAt` tombstone | **已对齐**：软删除上传 `deleted: true`，拉取删除写本地 tombstone |
-| 错误体 `{"error":{"code","message"}}` | **已对齐**：客户端解析为 `AppError.api`，保留服务端 code；错误码枚举见第 4 节 |
-| `GET /api/v1/catalog/device-types`（0.14.0） | **已对齐**：类型列表 / GATT / 指标 / 限制 / 兼容性唯一来源；匿名 200；`ETag` / `Last-Modified` / `Cache-Control`；`If-None-Match` / `If-Modified-Since` 命中 304；SQLite 迁移 v13 缓存原始 JSON |
-| `GET /api/v1/device-types/{type}/catalog` | **已对齐**：仅补充固件 + 配件与型号厂商；不再提供类型 / GATT / 指标 / 限制 / 兼容性判定；E2E 校验结构 |
-| `GET /api/v1/my/devices/ios/{externalId}` | **已对齐**：iOS 设备详情主数据源，携带 Bearer token；E2E 校验 200 与跨用户 404 |
-| `UserDevice.deviceType` / `vendor` / `firmwareVersion` / `compatibility`（0.3.2） | **已对齐**：四个字段均可 null；`ProductModel` 解析后参与详情页展示，`deviceType` 同时写回本地供推送；E2E 校验已注册型号（`nordic_uart` → `vendor=Nordic Semiconductor`、`compatibility.platforms` 含 `ios`）与未注册型号（三字段均为 `null`，`alias` / `group` 仍返回） |
-| catalog `firmwares[]` / `accessories[]` 的 `vendor` / `compatibility`（0.3.2） | **已对齐**：固件与配件均解析 `vendor` 与兼容性对象；市场条目展示真实厂商与兼容性，筛选维度直接取自这些字段；E2E 校验固件全部带 `vendor` 与 `compatibility.platforms`、配件全部带 `compatibility` |
-| `PushDevice.deviceType`（0.3.2，可选） | **已对齐**：本地新增 `saved_devices.device_type`（迁移 v3）；已知型号才编码该字段，未知时省略；E2E 覆盖带 `deviceType` 的推送与拉回比对 |
-| `UserDevice.advertisedName` + `PushDevice` 别名/广播名分离（0.3.3） | **已对齐**：本地迁移 v4 新增 `advertised_name`；扫描只上报 `advertisedName`，用户编辑只上报 `alias`；E2E 校验扫描上报后 `advertisedName` 落库、别名仍为空，随后编辑别名不覆盖广播名 |
-| 缺省字段 / 显式清除三态（0.3.3） | **已对齐**：`Patch<String>` 三态 + 自定义 `encode`，absent 省略键、clear 编码 `""`；清空分组上报 `"group": ""` 且再次同步不复活；未修改字段不参与 LWW 与幂等哈希；E2E 覆盖缺省 group 不覆盖原值、显式空串清除、同内容换键不 409 |
-| `GET /api/v1/my/devices` / `GET /api/v1/my/devices/{mac}` | **v0.14.0 起使用**：`GET my/devices` 用于成员可见设备的契约校验；iOS 设备详情仍走复合键；E2E 校验鉴权与越权 |
-| `households` / `invitations` / `rooms` / `PATCH my/devices`（0.8.0） | **已对齐**：家庭落库与当前家庭持久化；邀请码 201 + `expiresAt`；房间以服务端为准（local / pending / synced）；设备归属独立 PATCH，三态（缺失 / 空串 / 非空）；member 403 `FORBIDDEN`、跨家庭 404、个人家庭不可删；E2E 第 9 节覆盖完整链路 |
-| 成员移除 / 退出 / 邀请码管理 / 房间整段排序（0.9.0，v0.15.0） | **已对齐**：`DELETE /households/{id}/members/{userId}` 与 `POST /households/{id}/leave` 均 204；owner 带成员退出 409 `CONFLICT`，客户端按 HTTP 状态 + 端点上下文机读判定并映射为「请先转让所有权或移除其他成员」，不解析 message；`GET /invitations` 只取 `codeHashPrefix` / `status` / `attempts` / `expiresAt`（模型无 `code`），撤销 204 且撤销后 claim 404；`PUT /rooms/order` 整段提交，缺项 / 多项 / 重复 409 后自动重新 GET 并提示「房间列表已变化，已刷新」；`GET /households` 计数直接用服务端值；E2E 第 9 节与真 Postgres 脚本均覆盖 |
-| 产品 / 市场 / 设备详情（iOS） | **已切到目录端点**：类型 / GATT / 指标 / 限制 / 兼容性读 `catalog/device-types`，固件 / 配件读逐型号 catalog；不再请求 `api/products` / `api/market` / `api/device/{peripheralUUID}` |
-| `GET /api/v1/devices/{mac}` | **仍可用，但仅 Android 使用**；iOS 本机设备没有 MAC，不再调用该端点 |
+| 匿名登录 / 刷新 / 登出 | `POST /auth/anonymous`、`POST /auth/refresh`、`POST /auth/logout` |
+| 类型目录 / 型号 catalog | `GET /catalog/device-types`、`GET /device-types/{type}/catalog` |
+| 设备详情（iOS） | `GET /my/devices/ios/{externalId}`；Android 用 `GET /my/devices/{mac}` |
+| 增量拉取 / 批量推送 | `GET /sync/changes?cursor=&limit=`、`POST /sync/push`（`Idempotency-Key`） |
+| 读数 | `GET /my/devices/{platform}/{externalId}/readings`、`.../readings/summary`、`.../readings/series`、`.../readings/metrics` |
+| 家庭 / 成员 / 房间 | `/households`、`/households/{id}/members`、`/households/{id}/rooms`、`PUT /households/{id}/rooms/order` |
+| 设备归属 | `PATCH /my/devices/{platform}/{externalId}`（`alias` / `roomId` / `householdId` 三态） |
+| 场景 | `/scenes`（五字段 LWW，`DELETE` 软删） |
+| 推送令牌 | `POST /push/devices`、`DELETE /push/devices/{deviceId}` |
+| 反馈 | `POST /feedback`、`GET /feedback/mine`、`GET /feedback/{id}`、`PATCH /feedback/{id}` |
 
-iOS 端不再存在“历史端点”调用；唯一保留的旧路径 `/api/v1/devices/{mac}` 由 Android 使用，iOS 不涉及。
+- 标识符：iOS 用 `platform + externalId` 复合键，不依赖 MAC；跨用户一律 404。
+- 字段命名：JSON 为 camelCase，与 `PJGoIoT/api/openapi.yaml` 一致；契约只增不删。
+- 错误体：`{"error":{"code":"...","message":"..."}}`。
+- 时间：RFC3339 UTC，客户端编解码保留微秒。
 
-### 3.5 端到端契约联调（本地 fixture，默认不进 CI）
+## 4. 错误码与重试
 
-`scripts/e2e-contract.sh` 从 `../PJGoIoT` 构建并以 `STORE=fixture` 启动服务（优先 8080，被占用则 18080），健康检查 200 后运行 `scripts/e2e-contract.swift`（独立 Swift 可执行程序，真实 URLSession 直连 localhost，不走模拟器）。断言覆盖：
+客户端错误码（仅日志与反馈使用，不直接展示给用户）：`NET-001` 网络失败、`NET-002` 非 2xx、`NET-003` 解析失败、`NET-004` Base URL 非法、`DB-001` 本地库失败、`BT-004` 蓝牙前置条件不满足、`SYNC-001` 同步前置条件不满足。
 
-- 匿名登录取得 `token`；
-- 同一台实体设备分别以 `platform=ios`（`externalId` 大写 UUID）与 `platform=android`（`externalId` 大写 MAC）推送，两条记录共享 `mac` / `alias` / `group`；
-- `changes` 拉回 `platform` / `externalId` / `mac` 形状；
-- `GET /catalog/device-types` 匿名 200，版本 / `generatedAt` / 5 个类型 / GATT / 指标 / 限制 / 兼容性 / `updatedAt` 字段齐全；完整 UUID 归一化到 `2A6E` / `2A37` / `2A9D`；NUS 声明空指标；`ETag` / `Last-Modified` / `Cache-Control` 存在，`If-None-Match` 与 `If-Modified-Since` 均命中 304（请求绕过 `URLCache`）；
-- `GET /device-types/{type}/catalog` 返回固件与配件，不再作为目录字段判定来源；
-- catalog 的固件全部带 `vendor` 与 `compatibility.platforms`，配件全部带 `compatibility` 对象，且至少 1 个配件带 `vendor`；
-- `GET /my/devices/ios/{externalId}` 返回 `platform=ios` 与大写 UUID；
-- 推送已注册型号（`deviceType = nordic_uart`）后拉回：`deviceType`、`vendor`、`compatibility` 均补全；推送未注册型号后拉回：三者均为 `null`，且 `alias` / `group` 仍在；
-- 扫描只上报 `advertisedName` 时服务端 `alias` 保持空串；随后只上报 `alias` 不覆盖广播名；
-- 推送省略 `group` 时服务端保留原分组；推送 `"group": ""` 显式清除；随后同内容重放与换幂等键均返回 200（不 409）；
-- 相同 `Idempotency-Key` 重放返回 `Idempotent-Replayed: true`，不新增变更；
-- 旧 `updatedAt` 推送触发 `server_newer` 冲突，服务端保留较新版本；
-- 无 token 返回 401 `UNAUTHORIZED`；第二用户访问他人设备（按 MAC 与复合键）均返回 404 `NOT_FOUND`；
-- 读数：推送 3 条（`appliedReadings=3`）→ 查询按 `recordedAt` 倒序 → `summary` 的 count/min/max/avg/last/unit/window 正确 → 重复 id 推送 `appliedReadings=0`、`skippedReadings=3` → 非法 `NaN` 返回 400；
-- 长周期（v0.5.0）：`series` 按 `1m` 返回、桶按 `start` 升序且 `count` 合计等于推送条数、每桶 `min ≤ avg ≤ max`；空区间返回 `buckets: []`；非法 `bucket=5m` 返回 400 `BAD_REQUEST`；`metrics` 按 `lastAt` 倒序、最新温度指标在首位、心率指标 `count=3` 且 `unit=bpm`。
-- 家庭（v0.14.0）：三个匿名账号（owner / member / outsider）——个人家庭自动创建且不可删（403 `FORBIDDEN`）→ 创建家庭 → 邀请码 8 位且 `expiresAt` 为未来、一次性（重复领取 404）→ member 用小写码领取成功（`role=member`、成员数 2）→ 成员列表 owner / member 对应 → owner 建房并 PATCH 设备归属 → member `GET /my/devices` 可见该设备及 `householdId` / `roomId` → member 改房间 / 建房 / 签发邀请码 / 改家庭名均 403 `FORBIDDEN` → 跨家庭读取家庭 / 成员 / 房间均 404 `NOT_FOUND` → 非成员读取与改房间 404 → member 改 owner 设备 404 → 归属三态（缺失不变 / 空串清除 `roomId` 与 `householdId` 回落个人家庭 / 非空覆盖）→ 删除家庭后设备回到个人家庭、`roomId = null`。
-- 家庭管理（v0.15.0）：owner 创建家庭 → 邀请 `member` 领取 → 邀请码列表只含 `codeHashPrefix` / `status` / `expiresAt`（响应无明文字段、响应原文不含明文）→ 撤销 204 后第三人 claim 404 → 建房 3 间 → 整段 `PUT /rooms/order` 成功且顺序生效 → 缺项 / 多项 / 重复均 409（`CONFLICT` 或 `ROOM_SET_MISMATCH`）→ `GET /households` 的 `memberCount=2` / `roomCount=3` / `deviceCount=0` 为真实值 → 成员设备 PATCH 加入家庭 → owner 带成员退出 409 `CONFLICT` 且 message 非空 → owner 移除成员 204 → 被移除成员 `GET /households/{id}` 404、其设备回个人家庭且 `roomId=null` → 移除后 owner 退出 204、家庭 404。
-- 会话与反馈（v0.22.0）：`GET /sessions` 200 且标出 `current`；`POST /auth/refresh` 200 返回新 token、旧 token 立即 401、新 token 可访问；吊销不存在的会话 404；`POST /auth/logout` 204 后该 token 失效；`GET /feedback/{id}` 200 含 `statusMessage`；`PATCH /feedback/{id}` 200 关闭，再次 PATCH 409。
-- 推送与场景分页（v0.23.0，iOS v0.26.0）：未带 token 注册 401；`POST /push/devices` 200 且 `status=active` / `platform=ios` / 返回 `id`；同一 `(user, token)` 幂等同一 `id` 并更新 `appVersion`；非法 `platform` / 空 `token` 均 400 `PUSH_DEVICE_INVALID`；跨用户 DELETE 404；本人 DELETE 204 且重复 DELETE 幂等 204；`GET /scenes` 不传参数仍是全量且无分页字段，`limit=2` 返回 2 条 + `hasMore` + `nextCursor`，游标翻页取回剩余 1 条且 `hasMore=false`，`limit=0` 400。
+服务端错误映射统一在 `Core/Networking/APIErrorCatalog.swift`：
 
-当前共 **460 项断言全部通过**（2026-11-07，后端 `PJGoIoT` **v0.23.0**，`STORE=fixture`；`scripts/e2e-contract.sh` 实跑 **460 PASS / 0 SKIP / 0 FAIL**，v0.26.0 新增第 12 节推送设备注册 / 注销 / 幂等 / `PUSH_DEVICE_INVALID` / 跨用户 404 与 `/scenes` 可选 `limit` / `cursor` 分页）。真 Postgres（后端 v0.23.0 干净 worktree）运行同一套契约，并额外直接查库验证邀请码只存 64 位哈希、移除成员后成员行删除、owner 退出后成员行清空，以及 `push_devices` 表存在、同 `(user, token)` 幂等 1 行、停用不硬删且 `inactive` 可重置为 `active`、跨用户互不可停用、推送注册不新增 `change_log`。
-
-#### v0.23.0：430 / 432 差异定位与消除
-
-- **现象**：v0.22.0 时本机 `e2e-contract.sh` 报 430 项，CI 的 `E2E contract` job 报 432 项。
-- **定位方法**：把两边日志里的 `[PASS]` 行按执行顺序提取、去掉时间戳与随机 ID 后逐条 diff。差异只有两条，均在导出任务轮询段：
-  - `轮询导出任务返回 200（第 2 次）`
-  - `轮询状态合法（第 2 次）`
-- **真实原因**：`scripts/e2e-contract.swift` 把这两条断言写在 `while exportPollCount < 20` 循环体内，**每轮固定生成 2 条**。本机导出首轮即 `ready`（1 轮 → 2 条），CI 需要第二轮才 `ready`（2 轮 → 4 条），因此 CI 多 2 条。也就是说：**本地环境下「第 2 轮」的这两条断言根本没有执行过**，这不是 CI 多测，而是本地覆盖缺口。
-- **消除方式**：改为循环外累积布尔量 —— `pollsAllOK`（每轮 200）与 `pollStatusesAllValid`（每轮状态合法），任意轮次都固定为 2 条；轮询次数只写入断言 detail（`polls=N`），不再影响项数。修复后本机 430，CI 同为 430。
-- **顺带稳定化**：GitHub Actions 日志会把 `Bearer <token>` 做掩码，原用例名因此被截断；改为「注销后旧访问令牌立即失效（401）」「注销后 owner 的访问令牌立即失效（401）」。跨家庭用例名去掉随机家庭 UUID（改为家庭信息 / 成员列表 / 房间列表），保证两边清单可逐条比对。
-
-运行记录见 `README.md` 第 4.2 节；该脚本已接入 GitHub Actions `ios.yml` 的 `e2e-contract` job（macOS runner，与 build 并行）。若 CI checkout 到的后端尚未包含读数链路，第 7 节会输出 `[SKIP]`（能力门控，不计通过、不伪造 PASS）；`series` / `metrics` 自 v0.5.0 起属于必需契约，缺失即真实失败，不会跳过。
-
-### 3.6 市场筛选维度（真实字段，不造假分类）
-
-市场页筛选只使用接口返回的字段，不做本地臆造分类：
-
-| 维度 | 来源字段 | 取值 | 说明 |
-| --- | --- | --- | --- |
-| 厂商 | `MarketItem.vendor` ← catalog `firmwares[].vendor` / `accessories[].vendor` | 去重后的真实厂商名；空串（未核实）不进入筛选项 | 不伪造厂商名，也不生成「未知厂商」假分类 |
-| 兼容性 | `MarketItem.compatibilityTags` ← `CompatibilityInfo.filterTags` | 「平台：ios」「协议：ble-gatt」「特性：dfu」「型号：xxx」等 | 由 `platforms` / `protocol` / `features` / `deviceTypes` / 扩展 key 生成 |
-
-- 两个维度可叠加；筛选结果为空时展示「没有符合筛选条件的条目」并提供清除筛选。
-- 刷新后若某厂商或某兼容性标签已不存在，自动清除失效筛选，避免卡在空结果。
-- 不提供「按价格 / 按分类」等接口未提供的维度。
-
-### 3.7 设备读数 readings（v0.4.0）
-
-**推送**：`POST /api/v1/sync/push` 请求体新增可选 `readings`（≤500/批；iOS 客户端按 200/批合并进同一批次）：
-
-```
-{"id": uuid, "platform": "ios", "externalId": "...", "metric": "...", "value": number, "unit": "...", "recordedAt": RFC3339}
-```
-
-- 服务端按 `id` 幂等：重复 id 计入 `skippedReadings`，仍返回 200；
-- 响应新增 `appliedReadings` / `skippedReadings`；旧后端缺省时 iOS 按 0 解析；
-- 读数与设备同批推送；断网时本地 `sync_state` 保持 `pending`，恢复后按相同内容与幂等键重试；`readings` 为空数组时整个字段省略，兼容 0.3.3 后端。
-
-**查询**：`GET /api/v1/my/devices/{platform}/{externalId}/readings?metric=&from=&to=&limit=100&cursor=` → `{items[], nextCursor, hasMore}`，**倒序**（最新在前）。
-
-**汇总**：`GET .../readings/summary?metric=&hours=24` → `{metric, unit, count, min, max, avg, last, windowStart, windowEnd}`。iOS 优先展示云端汇总；请求失败（未登录 / 离线 / 后端未上线）时用本地 24h 窗口计算同结构汇总，并标注「离线：本地数据」。
-
-**指标白名单**：`temperature` / `humidity` / `battery` / `heart_rate` / `co2` / `pressure` / `other`；白名单外文本指标一律归一为 `other`，不丢弃数值。
-
-**保留期**：服务端 90 天；iOS 本地 7 天。iOS 在启动与每次同步成功后清理 `recorded_at` 超过 7 天且**已同步**的读数（未上传读数保留至补传完成，避免离线静默丢数据）。
-
-**订阅特征与解析**：
-
-| 特征 | UUID | 解析规则 |
+| code | HTTP | 处理 |
 | --- | --- | --- |
-| 心率测量 | `0x2A37` | 首字节 flags：bit0=0 → 下一字节 uint8；bit0=1 → 后两字节 uint16（LE）；只接受 1…300 bpm |
-| 电池电量 | `0x2A19` | 单字节百分比 0…100 |
-| 温度测量 | `0x2A6E` | 2 字节优先按 sint16 × 0.01 ℃；不合理时尝试 IEEE-754 半精度；4 字节按 IEEE-754 float32；只接受 -50…150 ℃ |
-| Nordic UART TX | `6E400003-B5A3-F393-E0A9-E50E24DCCA9E` | UTF-8 文本行，`metric=value`（未知指标 → `other`）或纯数字（指标 `other`、单位留空）；支持多行，单行失败只丢该行；>256 字节或单行 >64 字符拒收 |
+| `UNAUTHORIZED` | 401 | 单飞 `POST /auth/refresh` 后重放；刷新仍 401 才进入重新登录，且只清 token，保留本地数据 |
+| `RESYNC_REQUIRED` | 410 | 清游标 + `cursor=0` 全量重拉，只处理一次，不进指数退避 |
+| `TIMEOUT` / `UNAVAILABLE` / `INTERNAL` | 503 / 500 | 指数退避，不改游标、不重登 |
+| `RATE_LIMITED` | 429 | 按 `Retry-After`（头优先）退避 |
+| 其余 4xx（含 `CONFLICT`、`SCENE_*`） | 4xx | 终态，不自动重试，等用户修改后重提 |
 
-解析失败（空帧、NaN/Inf、越界、非 UTF-8、超长）**静默丢弃并写本地日志（分类「读数」）**，不崩溃、不写脏数据。
+「退出当前会话」只吊销本机 token，不删本地数据；「删除账号」才走两步删除令牌并清库。
 
-**展示（v0.5.0）**：设备详情「数据」区依次为区间切换（1 小时 / 24 小时 / 7 天 / 30 天，默认 24 小时）→ 指标选择（来自服务端 `readings/metrics`，展示「指标名 · N 条」）→ 按时间定位的分桶折线图（`draw(_:)` 手绘坐标轴/网格/折线/数据点/min–max 区间带，不引第三方库）→ 24h 汇总（min/max/avg/last）→ 最近记录。无读数展示「连接设备后开始采集」；蓝牙未授权提示前往系统设置；不展示任何伪造数据。区间、分桶与缺口规则见 3.9。
+## 5. 空状态与降级
 
-### 3.8 读数解析黄金用例（v0.4.1，两端共用）
+- 无扫描记录、无设备、无规则、无读数等一律使用真实空状态 + 主行动，不展示假数据。
+- 产品 / 市场请求失败或空列表：错误或空状态 +「重试 / 刷新」；市场页明确不提供下单、订单或支付。
+- 设备详情网络失败但有缓存：降级显示缓存并标注缓存时间与错误码，不白屏；云端 `deviceType = null` 显示「型号未知」，别名 / 分组 / 最近出现照常展示。
+- 有本地读数但云端失败：按同一 UTC 网格展示本地图表与汇总，标注「离线：本地数据」；30 天区间标注「离线：仅本地 7 天数据」。
+- 家庭 / 房间无写权限：入口禁用 + 页脚说明；失败用 toast 展示可读文案，不展示 `FORBIDDEN` 码、不整页报错。
+- 本地数据库不可用：回退内存库，应用仍可打开。
 
-两端（iOS `ReadingParser` / Android 解析器）以**同一张黄金表**为准：每条固定为「特征 + 原始字节 → 唯一期望」。
-iOS 用例固化在 `codemagicTests/ReadingsGoldenTests.swift`；新增特征或调整规则时，先在此表补行、再写用例、最后改实现，避免两端口径漂移。
+## 6. 权限
 
-| 特征 | 输入 hex | 期望 |
-| --- | --- | --- |
-| 心率 | `00 48` | heart_rate 72 bpm |
-| 心率 | `00 00` | 丢弃 |
-| 心率 | `01 2C 01` | heart_rate 300 bpm |
-| 心率 | `01 2D 01` | 丢弃（301 越界） |
-| 电池 | `64` | battery 100 % |
-| 电池 | `00` | battery 0 %（真实值，非缺测） |
-| 电池 | `65` | 丢弃（101 越界） |
-| 温度 | `2A 08` | temperature 20.90 ℃（sint16 × 0.01） |
-| 温度 | `70 FE` | temperature −4.00 ℃（sint16 × 0.01） |
-| 温度 | `00 4A` | binary16 `0x4A00` = **12.0 ℃**（见下方脚注） |
-| 温度 | `00 4D` | binary16 `0x4D00` = 20.0 ℃ |
-| 温度 | `00 00 C0 3F` | temperature 1.5 ℃（float32） |
-| 温度 | `FF FF` | temperature −0.01 ℃（sint16 −1，不得按 NaN 丢弃） |
-| NUS | `temperature=23.5` | temperature 23.5 ℃ |
-| NUS | `42` | other 42，单位空 |
-| NUS | `abc` | 丢弃 |
-| NUS | `temperature=23.5\nbattery=88\nxx` | 2 条（第 3 行丢弃，前两行保留） |
-| 任意特征 | 空字节 | 丢弃并记录原因，不崩溃 |
+- iOS：`Info.plist` 声明 `NSBluetoothAlwaysUsageDescription` / `NSBluetoothPeripheralUsageDescription`，首次使用时由 `CBCentralManager` 触发系统授权，不额外弹自定义框。
+- 「我的」页展示授权状态、蓝牙开关状态与跳系统设置入口；未授权 / 受限时给明确文案。
+- 模拟器无真实蓝牙，状态通常为 `unsupported`，需真机验证真实授权与扫描。
 
-口径说明：
+## 7. 本地持久化与同步
 
-- 温度 2 字节：**先**按 sint16 × 0.01 ℃；结果不落在 −50…150 ℃ 时回退 IEEE-754 binary16；4 字节按 binary32；最终 NaN / Inf / 越界一律丢弃。
-- 心率 uint16 为**小端**；flags bit0 = 0 时取 uint8；有效范围 1…300 bpm。
-- 电池 0 % 与 100 % 都合法，只拒绝 >100。
-- NUS 按 `\n` 分行逐行解析，单行失败只丢该行；整帧 ≤256 字节、单行 ≤64 字符。
+iOS 使用 SQLite3（WAL / FULLMUTEX），业务表统一保留 `id`（UUID）、`updatedAt`、`deletedAt`、`syncState`（`pending` / `synced` / `pendingDelete`）。主要表：`saved_devices`、`rules`、`scan_logs`、`recent_devices`、`device_info_cache`、`readings`、`scenarios`（仅本机）、`rooms`、`households`、`device_assignment_pending`、`push_devices`。迁移逐版条件 ALTER，旧数据不重写。
 
-> **脚注（v0.4.1 核对发现）**：原黄金表 `00 4A → 20.0` 与 IEEE-754 binary16 不符：位型 `0x4A00` = 1.5 × 2³ = **12.0**，20.0 对应位型 `0x4D00`（字节 `00 4D`）。
-> iOS 按规范解码，未对 `0x4A00` 做任何硬编码；两种位型都已固化为用例。Android 侧联调时请以本表两行为准修正期望值。
+**同步行为**
 
-### 3.9 长周期分桶序列与指标清单（v0.5.0）
+- 首次同步匿名登录，token 只存 Keychain；`expiresAt` 与游标存 UserDefaults。
+- 增量拉取 `limit=200`（服务端上限 500），`hasMore` 继续，单次最多 10 页；本地无则插入，本地已同步则云端覆盖，未上传且云端更新则云端获胜并提示「另一台设备改过这条」。
+- 批量推送每批设备 ≤100、读数 ≤200，幂等键由批次内容派生，重试复用同一键；成功标记 `synced`，失败保留 `pending`。
+- 删除为软删 + `pendingDelete`，推送 `deleted: true`；拉取到删除写 tombstone。
+- 前台节流 120 秒自动同步，后台用 `BGAppRefreshTask`（最早 15 分钟），手动同步不受节流限制。
+- 可重试失败按指数退避（30s 起、上限 300s）；410 不进该退避。
 
-**区间 → bucket 映射**（「数据」区顶部切换，默认 24 小时；切换立即重绘并按新区间重新查询）：
+**规则与信号**
 
-| 区间 | `bucket` | 覆盖桶数 |
-| --- | --- | --- |
-| 1 小时 | `1m` | 60 |
-| 24 小时 | `1h` | 24 |
-| 7 天 | `1h` | 168 |
-| 30 天 | `1d` | 30 |
+- 断开：上一轮存在、本轮不再出现（iOS 以 10s 未出现判定）。
+- RSSI 低于阈值：`rssi <= threshold` 触发一次，恢复后重新武装；Android 按同一比较符对齐。
+- 指标阈值：满足 `comparison` + `reading_threshold` 且连续 `consecutive` 条（1–5，默认 1）触发一次。
+- 规则仅本机，不参与 push / changes。
+- RSSI 分档唯一口径见 `PKotlinApp/docs/rssi-signal-tiers.md`；iOS 用 `nil` 表示未知，非负占位值（`0` / `127`）按未知处理，不显示为满格。
 
-组合均在服务端 500 桶上限以内。请求为 `GET /api/v1/my/devices/{platform}/{externalId}/readings/series?metric=&from=&to=&bucket=`，`from` / `to` 使用 **UTC RFC3339**；响应 `{metric, unit, bucket, from, to, buckets[{start, end, count, min, max, avg, last}]}`，`buckets` 按 `start` 升序。
+**presence**
 
-**UTC 网格**：桶起点按时段取整对齐到 UTC。1970-01-01T00:00:00Z 同时是 1m / 1h / 1d 的整数倍，因此客户端本地兜底用「绝对秒数向下取整」即可得到与后端（2000-01-01T00:00:00Z 原点）完全一致的桶边界，不受本地时区与夏令时影响。
+- 本机 BLE 已连接优先于云端 `presence`；`online` 只描述「900 秒内有上报」，不包装成权威在线。
+- `lastSeenAt` / `presence` 是服务端只读派生字段：`lastSeenAt` 落 `server_last_seen_at`，不入 push、不置 pending、不推进本地 `updatedAt`；`presence` 不落库。
+- 四档文案：本机已连接 / 云端 15 分钟内有上报 / 云端上报已超时 / 云端从未收到上报；跨平台设备另标「来自 Android，本机不可连接」。
 
-**只返回有数据的桶，因此必须按时间定位**：
-- X 轴按每个桶 `start` 在查询区间内的**真实时间比例**定位，**不按数组下标等距绘制**；30 天区间只有 24 个桶时，首尾留白如实反映缺数据的天数。
-- 相邻桶 `start - 前一个 end > 1s` 即判定为缺口，折线在缺口处**断开**（区间带同样断开），绝不跨缺口连线。原因：服务端不返回空桶，等距或跨缺口连线会把「设备断采」画成「数值缓慢变化」，属于伪造趋势。
-- 每桶用 `avg` 连线，并叠加该桶 `min`–`max` 的浅色区间带，展示波动幅度。
-- Y 轴按区间内真实 `min` / `max` 自适应（全相等时上下留白），刻度标签带真实单位；NaN / Inf 桶直接丢弃，不污染整条折线。
-- 几何计算独立在 `ReadingsChartGeometry`，单测覆盖 空 / 单桶 / 等距 / 带缺口 / 30 天 24 桶 / 异常值过滤。
+## 8. 变更流程
 
-**指标清单**：`GET .../readings/metrics` → `{items:[{metric, unit, count, firstAt, lastAt}]}`，按 `lastAt` 倒序（同一时间按指标名升序）。详情页展示「指标名 · N 条」；单位以响应中该指标最近一条读数的单位为准，切换指标时同步更新 Y 轴与 24h 汇总行单位。服务端为空而本地有待同步读数时用本地清单兜底；完全没有指标时展示「连接设备后开始采集」。
-
-**离线降级**：`series` 请求失败时用同一 UTC 网格聚合本地读数并即时重绘；本地只保留 7 天，30 天区间明确标注「离线：仅本地 7 天数据」，时间轴仍按 30 天绘制（缺数据处留白，不拉伸）。24h 汇总请求失败时同样回退本地 24h 窗口。
-
-### 3.10 客户端请求节流、通知与导出口径（v0.6.0）
-
-本节为两端共用的客户端行为口径，不新增服务端接口。
-
-**详情页远端刷新**
-- 读数入库（notify）只做**本地增量重绘**，不逐条打 `metrics` / `series` / `summary`。
-- 远端查询去抖动 **800ms**：详情页可见时窗口内最多发起一轮合并刷新；`series` 的 `from` / `to` 与 `summary` 的 24 小时窗口基于**同一次时间锚点**，避免同一轮请求区间漂移（`metrics` 无区间参数）。
-- 详情页不可见或 App 进入后台时不发远端请求；回到前台 / 重新可见补刷一次。
-- 失败按指数退避（1s、2s、4s …，上限 **300s**；任一请求成功复位），与读数频率无关。
-- 服务端 `metrics` 为空但本地存在 pending / failed 读数时：指标 Chip 与序列都用本地聚合（同一 UTC 网格），数据来源显示「待同步：本地数据」。
-
-**阈值告警通知**
-- 规则事件分 `triggered` / `recovered` 两类；仅对实际发出过告警的「规则 + 设备」发「已恢复」。
-- 通知开关默认开启；**首次真正需要通知时**才请求系统授权；被拒绝时「我的」提示前往系统设置。
-- 节流窗口可配 **1 / 5 / 30 分钟**（默认 5），同一设备同一规则窗口内只提醒一次；窗口按首次发出时间计算，重复事件不延长窗口。
-- 通知携带设备 ID，点击通知进入对应设备详情。
-
-**读数 CSV 导出**
-- 范围：当前设备 + 当前指标 + 当前区间（1h / 24h / 7d / 30d）。
-- 7 天内直接读本地；更长区间走服务端 `readings` cursor 分页，单次上限 **50,000 条**，超限提示缩短区间。
-- 文件格式：UTF-8 **BOM**、表头 `recordedAt,metric,value,unit`、时间为 **ISO8601 UTC**、按 RFC 4180 转义含逗号 / 引号 / 换行的字段、行按时间升序。
-- 文件只写临时目录并在分享结束后删除；导出中显示真实已读取条数，失败可重试。
-
-**外观**
-- 三态：跟随系统 / 浅色 / 深色；图表与卡片只使用动态语义色，禁止硬编码黑白或十六进制色值。
-
-### 3.11 跨设备接管、账号导出注销与后台采集（v0.7.0）
-
-后端契约 `PJGoIoT` v0.9.0（openapi **0.7.0**）。以下均为客户端行为口径，排序 / 格式化断言必须显式 Locale（`en_US_POSIX`）。
-
-**配对码（跨设备接管）**
-- `POST /api/v1/auth/pairing-code`（Bearer）→ `{code, expiresAt}`；码为 **8 位大写字母/数字**，字符集去掉易混的 `0/O/1/I`，10 分钟有效、一次性使用。
-- 真机接入另一台设备：`POST /api/v1/auth/pairing-code/claim`（无需旧 token）→ `{userId, token, expiresAt}`；新 token 默认 180 天有效，接管后写入 Keychain 与会话到期日。
-- 输入规范化：自动大写、过滤空白与 `0/O/1/I`、截断 8 位；不足 8 位不发起请求。
-- 重新生成：新码生成后旧码立即失效（服务端保证）；界面在生成前二次确认并明确提示旧码失效。
-- 错误口径：**404 一律「码无效或已过期」，不区分原因**；**429 读取 `Retry-After` 秒数并显示冷却倒计时**，冷却期间禁用提交；网络错误可重试。401 提示登录失效。
-- 接管成功后：用返回 token **替换 Keychain**；保留本机已有设备与全部读数，并把设备（含本地别名/分组/广播名状态）与读数**全部重新标记 pending**；同步游标清零、`userID` 更新、`reloginRequired` 清除，随后自动触发一次前台同步把本机数据推给新账号。
-- 旧账号云端数据不会自动合并；tombstone 设备不上传。
-
-**账号数据导出（v0.20.0 异步任务）**
-- `POST /api/v1/me/export`（Bearer）→ **202** `{id, status, createdAt}`；任务异步生成，客户端按 `GET /api/v1/me/export/{id}` 轮询。
-- 轮询节流：首次 **2.5s** 起步、每次 ×1.4、封顶 **5s**（`AccountExportService.pollDelay(for:)`），**不每秒请求**；最多 60 次后报超时，可重试。
-- `status` 为 `pending` / `ready` / `failed`；`ready` 响应带 `downloadUrl` 与 `downloadExpiresAt`。**每次查询 ready 都会签发新的一次性下载令牌并覆盖旧链接**（10 分钟有效），客户端不得缓存旧链接。
-- 下载 `GET …/download?token=…` **不带 Bearer**（链接本身即凭据）：首次 200，重放 **410 `EXPORT_DOWNLOAD_EXPIRED`**，错令牌 **403 `EXPORT_DOWNLOAD_INVALID`**。客户端遇 410 自动重新 `GET /me/export/{id}` 换新链接并**只重试一次**，成功后提示「下载链接已刷新」；第二次仍 410 才失败。
-- 文件写临时目录 `codemagic-account-export/account-export-{taskID}-{uuid}.json`，`UIActivityViewController` 关闭即删除；退出遗留文件 1 天后自动清理。
-- 失败按 401 / 网络 / 解析 / 任务失败 / 超时 / 下载失效分别提示；除 401 外全部保留可重试状态。
-
-**注销账号（v0.20.0 两步令牌）**
-- `POST /api/v1/me/deletion-request`（Bearer）→ **201** `{token, expiresAt}`，令牌 **10 分钟**有效、服务端只存哈希；**同一账号再次申请会作废旧令牌**。
-- `DELETE /api/v1/me` **只带 `X-Deletion-Token`，不带 `Authorization`** → 204。缺令牌 400 `DELETION_TOKEN_REQUIRED`，无效 / 已过期 403 `DELETION_TOKEN_INVALID`（过期升级为 410），owner 家庭还有其他成员 409 `ACCOUNT_DELETION_BLOCKED`。
-- 409 时**服务端不删数据、令牌不消耗**：界面提示「请先转让所有权或移除成员」并提供跳转家庭页入口与「重试删除」；转让或移除成员后**同一个未消耗令牌仍可用**。
-- 删除后旧 Bearer 立即 401；同一令牌重放 404（视为「账号已删除」，客户端仍执行本地清空并回到未登录态）；令牌被新申请 / 清理后降级 403。
-- 顺序：**服务端删除成功后** → 断开 BLE（避免清理后继续写读数）→ 清 Keychain token → 清 SQLite 全部业务表（`readings` / `saved_devices` / `rules` / `scan_logs` / `recent_devices` / `device_info_cache` / `feedback_drafts` / `scenarios` / `device_catalog_cache`，单事务）→ 清同步元数据（`cursor` / `lastSyncAt` / `userID` / `reloginRequired` / `lastBackgroundPushAt`）→ 清 `URLCache` → 删除导出临时文件，保留 `clientID` 与界面设置，回到全新匿名状态。
-- 409 / 403 / 401 / 网络错误 / 本地清理失败**都不静默**；前三者与网络错误不清理本地数据，提供重新申请或原令牌重试；本地清理失败提示可重试（服务端已删除时重放 404 仍会重新执行清库）。
-- 删除后通过 `.accountDeleted` 通知重建五个 Tab，停在「我的」未登录态，避免内存中的旧设备 / 读数被重新写回；重启后业务表仍为空。
-
-**后台采集**
-- `Info.plist` 声明 `UIBackgroundModes = fetch + bluetooth-central`；连接状态下后台继续接收 notify 并走同一 `ReadingsIngestor` 入库。
-- 「我的 → 后台采集」开关持久化（`settings.backgroundCollection`，默认开启）；关闭时进入后台立即 `disconnectAll()`，不保持 BLE 链路，并在「我的」显示当前状态与耗电说明。
-- 后台唤醒只做**受限推送**：不拉取增量、不创建匿名账号；单次最多 **100 台设备 / 200 条读数**；与上次后台推送间隔 **≥15 分钟**，失败同样记录时间以避免唤醒风暴。前台去抖 800ms 与指数退避 ≤300s 策略不变。
-- 7 天保留清理只删除 `synced` 且超期的读数，`pending` / `failed` 在后台路径同样受保护。
-
-### 3.12 设计令牌与本地场景（v0.8.0）
-
-**设计令牌**
-- 所有颜色、字号、间距、圆角、描边、动效与阴影来自 `DesignSystem/DesignTokens.swift`，**源码禁止硬编码色值与字号**；单测扫描 `codemagic/`（除 `DesignTokens.swift`）中的 `UIColor(...)`、`.white/.black`、`.systemGray`、`systemFont(ofSize: 数字)`、裸 `font = UIFont.` 赋值。
-- `Palette` 36 个语义色，浅 / 深各一套（`UIColor(dynamicProvider:)`）；`Layout` 使用 4pt 阶梯、16 页边距、56 / 72 / 88 行高、12 圆角、1dp 描边；`AppText` 10 级字号，数值统一等宽数字。
-- 按压态：浅色 6% / 深色 8% 遮罩（不使用整体 alpha）；按钮只变色不缩放，卡片按下 0.98；列表卡片 1dp 描边零阴影，仅浮层用 2 / 4 / 8dp 阴影。
-- 自绘大标题：展开 96、收起 56，滚动阈值 12pt，200ms 插值。
-
-**场景（仅本机）**
-- SQLite 迁移 **v6** 新增 `scenarios`（`id` / `name` / `actions` JSON / `created_at` / `updated_at`），**不含同步字段，不参与 push / changes**；注销账号的业务表清理同样包含 `scenarios`。
-- 动作集合固定 6 类：`connectDevice(uuid)`、`disconnectDevice(uuid)`、`startBackgroundCollection`、`stopBackgroundCollection`、`muteAlerts(10|30|60)`、`syncNow`；不接受任意脚本或网络自定义动作。
-- 执行：严格按数组顺序逐个调用真实服务；单个动作失败**不阻断后续**；返回逐动作 `{action, succeeded, message}` 与汇总（成功 / 失败数）。重复执行校验（已连接 / 已开启 / 已静音）视为失败并给出原因，而非静默成功。
-- 连接动作前置校验蓝牙授权与设备存在；静音写入 `SettingsStore.ruleAlertsMutedUntil` 并让 `RuleAlertCoordinator` 停止告警；同步复用 `SyncEngine` 返回真实推送 / 拉取条数。
-- UI：场景列表与编辑页标注「仅本机」；首页快捷场景只展示前 3 个，点击执行并显示进度浮层与结果 Toast。
-
-### 3.13 游标失效 410、503 TIMEOUT、分页上限与会话到期（v0.10.0）
-
-后端契约为 `PJGoIoT` **v0.9.0 / openapi 0.7.0**；客户端行为口径如下。
-
-**410 `RESYNC_REQUIRED`（游标早于保留边界）**
-
-- 触发：`GET /sync/changes?cursor=` 的游标早于该用户最老保留 `change_log.seq`（服务端判定 `cursor > 0 && cursor < minSeq - 1`）时返回 `410 {"error":{"code":"RESYNC_REQUIRED","message":"游标已过期，请全量重新同步"}}`；**`cursor=0` 永不 410**。
-- 客户端处理（`SyncEngine.handleResyncRequired`）：
-  1. `SyncMetadataStore.resetCursor()`：清空本地游标与 `lastSyncAt`；
-  2. **不清理**本地 pending 设备 / 读数，全量拉取后仍由 `pushPending` 重新上传；
-  3. 立即以 `cursor=0` 全量重拉，合并规则复用 `apply`（与首次拉取完全一致：本地无 → 插入；已同步 → 覆盖；pending 且云端更新 → 云端获胜；pending 且本地更新 → 保留待推送）；
-  4. 410 属于**终态分支**：不进指数退避、只处理一次（`hasResynced` 守卫；二次仍 410 则直接失败，不死循环）；
-  5. 成功后在「我的」同步状态区明确展示「**云端变更记录已过期，已重新全量同步**；同步完成：拉取 N 条…」，不静默。
-- 单测：`SyncEngineTests.testResyncRequiredClearsCursorKeepsPendingAndPullsFromZero`（游标归零 / pending 保留 / 二次从 0 / UI 文案）、`testResyncRequiredOnlyHandledOnceWhenFullPullAlsoFails`、`testResyncRequiredEndToEndThroughHTTPTransport`（fake transport 410 → 全量 200 → push）。
-- 真 Postgres 分支：`scripts/e2e-postgres.sh` 用 SQL 改最老 `server_ts` + `cleanup(90)` 真实触发 410，再用 `cursor=0` 拉回；输出见 `docs/e2e-postgres.md`。
-
-**503 `TIMEOUT`（查询超时）**
-
-- `503 {"error":{"code":"TIMEOUT"}}`（以及 `UNAVAILABLE` / 裸 503）映射为「**服务端繁忙，稍后重试**」，属于**可重试**错误，按指数退避（30s 起、翻倍、上限 5 分钟）；**绝不可按 410 处理**，也不改动游标、不进入重新登录。
-- 退避闸门 `nextAutomaticRetryAt`：`syncIfNeeded` 在窗口内直接跳过，手动「立即同步」不受限。
-- 测试：`testTimeoutMapsToBusyAndEntersBackoffInsteadOfResync`（文案 / 游标不变 / 窗口内不再请求）。
-
-**401 登录失效（token 180 天 TTL）**
-
-- 401 语义不变：必须由用户确认重新登录，客户端不静默建号；文案统一「**登录已失效**」。
-- `/auth/anonymous` 与 `claim` 返回 `expiresAt`（默认 180 天，服务端 `TOKEN_TTL_DAYS` 可配）。客户端解析后存 `sync.sessionExpiresAt`（UserDefaults，非凭据），在「我的」以只读行「会话到期日」展示；过期时间**不参与鉴权**（是否失效只以 401 为准）。旧后端不返回时显示「服务端未返回」，不臆造日期。
-- 重新登录 / 注销 / 接管时同步更新或清除该字段。
-
-**分页上限（客户端先收敛，避免越界 400）**
-
-| 端点 | 服务端上限 | 客户端请求 |
-| --- | --- | --- |
-| `GET /sync/changes` | 500 | 默认 200 / 页，`APILimits.clamp(…, 500)` |
-| `GET /my/devices/…/readings` | 500 | 详情页默认 100，导出翻页 200，均 `clamp(…, 500)` |
-
-- `APILimits`（`Core/Networking/APIErrorCatalog.swift`）集中定义上限；`SyncEngine` 的 `pageLimit` 在 init 时同样收敛。v0.20.0 起 `/me/export` 改为异步任务，不再有分页上限。
-- 测试：`NetworkingTests.testChangesLimitIsClampedTo500` / `testReadingsLimitIsClampedTo500`。
-
----
-
-### 3.14 指标阈值规则与「仅本机」语义（v0.11.0）
-
-- **规则仅本机**：`rules` / `scan_logs` / `scenarios` 均不参与 `GET /sync/changes` 与 `push`；新增的 `metric` / `comparison` / `reading_threshold` / `consecutive` 字段**不进入任何请求体**。后端没有规则端点，云端不会保存规则，换机 / 重装后规则不迁移。注销账号时随业务表一并清理。
-- **指标清单**：`temperature`（℃）、`humidity`（%）、`battery`（%）、`heart_rate`（bpm）、`co2`（ppm），与 3.9 的 `metrics` 枚举一致；比较符为 `gt` / `gte` / `lt` / `lte`，界面展示 `>` / `>=` / `<` / `<=`。
-- **判定链路**：BLE notify → `ReadingParser` → `ReadingsStore.insert` → `ReadingsIngestor.evaluateReadingRules` → `RuleEvaluator.evaluateReadings` → `ScanLogStore`（触发 `warning` / 恢复 `info`）→ `RuleAlertCoordinator`（节流 + 通知授权 + 恢复只在已送达告警后补发）。
-- **防抖语义**：连续 `N` 条读数（按 `recordedAt` 升序，且仅统计该规则指标）全部满足才触发一次；触发后继续满足不重复告警；任一条不满足即计数清零并恢复一次。阈值与单位在规则描述、命中日志与通知文案中成对出现，不显示裸数字。
-- **升级兼容**：v7 迁移逐列判断 `PRAGMA table_info(rules)` 后补列；旧规则保持原 `trigger` / `threshold` / `sync_state`，回填 `metric = NULL`、`comparison = 'lte'`、`consecutive = 1`，升级后仍生效（`PersistenceTests.testLegacyRulesSurviveVersion7MigrationAndStillFire`）。
-- **不改变契约**：本节不涉及网络字段，`openapi 0.7.0` 保持原样；E2E 契约套件不变。
-
-### 3.15 推荐规则、本地化与动态字体（v0.12.0）
-
-- **推荐规则不新建模型**：模板由 `RuleTemplateCatalog` 生成（温度 > 30℃、湿度 > 70%、电量 < 20%、心率 > 120、CO₂ > 1000ppm），一键添加写入现有 `rules`（`trigger = readingThreshold`、`consecutive = 1`），不新增表 / 列，SQLite 保持 v7。模板来源只取 `ReadingsStore.availableMetrics(deviceID:)`（该设备真实出现过的指标），`pressure` / `other` 不产生模板。
-- **推荐规则仅本机**：与 3.14 的规则同口径，不参与 push / changes，换机不迁移。
-- **本地化**：界面文案一律 `L10n.t(key)` / `L10n.f(key, args...)`，key 命名 `<域>.<界面>.<语义>`；`zh-Hans` 与 `en` 两份 `Localizable.strings` 的 key 集合与 `%@` 数量必须一致（`LocalizationTests` 强制）。新增文案必须同时补两份文件，禁止只补中文。
-- **术语**：Device / Reading / Sync / Scan / Group / Alert / **Transfer Code**（不使用 `pairing code`，旧接口字段名除外）。
-- **数字与日期**：界面一律 `Locale.current`（`String(format:locale:)`、`DateFormatter.dateFormat(fromTemplate:options:locale:)`）；CSV 内容、表头与文件名保持 `en_US_POSIX` + UTC，不随系统语言变化。
-- **动态字体**：字号统一 `AppText`（`UIFontMetrics`）+ `applyFont(_:)`（`adjustsFontForContentSizeCategory = true`），禁止新增固定 `UIFont.systemFont(ofSize:)` 字号；表格行高 `automaticDimension`；图表 Y 轴左侧留白按当前字号测量，AX 字号下保持 3 个刻度且不与绘图区重叠。
-- **不改变契约**：本节不涉及网络字段，`openapi 0.7.0` 保持原样；E2E 契约套件不变。
-
-### 3.16 房间归属与首页分区（v0.13.0，仅本机）
-
-- **数据模型**：SQLite **v8** 新增 `rooms(id TEXT PK, name TEXT NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0, remote_id TEXT, created_at REAL, updated_at REAL)`；`saved_devices` 增加可空 `room_id TEXT`（`NULL` = 未分配）。原 `group_name` 保留为兼容字段，不再参与首页分区。
-- **房间仅本机**：`rooms` 与 `room_id` **不进入** `GET /sync/changes` 与 `POST /sync/push`；同步的 `PushDevice` 字段不变。`setRoom` 只执行 `UPDATE saved_devices SET room_id = ?`，不修改 `sync_state` / `updated_at`，不触发 pending。
-- **远端映射预留**：`rooms.remote_id` 可空，暂不使用；后端若提供家庭 / 房间接口，可按本地 `id` ↔ `remote_id` 增量对接，无需再改表结构。
-- **迁移与兼容**：v7→v8 只建表 / 加列 / 建索引，不重写旧数据；旧设备升级后 `room_id = NULL`，即进入「未分配」，`group_name` 原值保留（`RoomTests.testMigrationFromV7KeepsDevicesAndAddsRoomsAndRoomColumn`）。
-- **写入一致性**：`SavedDeviceStore.upsert` 的列清单必须包含 `room_id`，否则 `INSERT OR REPLACE` 删行重插会把归属重置为 `NULL`（`RoomTests.testRoomAssignmentSurvivesDeviceUpsert`）。
-- **删除语义**：删除房间先逐台 `setRoom(nil)` 再 `DELETE FROM rooms`；设备、读数、连接状态均不删除，全部回到「未分配」。需二次确认。
-- **首页分区口径**：房间按 `sort_order, created_at` 升序；未知 / 空 `room_id` 归「未分配」且固定最后。搜索只匹配设备字段（别名 / 广播名 / 型号 / 标识符），有关键字时隐藏无命中的房间；排序（最近出现 / 名称 / 信号 / 添加时间）只在房间内生效，不改变分区顺序。
-- **不改变契约**：本节不涉及网络字段，`openapi 0.7.0` 保持原样；E2E 契约套件不变。
-
-### 3.17 家庭 / 邀请码 / 房间 / 设备归属（v0.14.0 起，v0.15.0 补齐，openapi 0.9.0）
-
-- **数据模型（迁移 v9 / v10）**：
-  - `households(id TEXT PK, remote_id TEXT UNIQUE NOT NULL, name TEXT NOT NULL, is_personal INTEGER NOT NULL DEFAULT 0, role TEXT NOT NULL, member_count INTEGER NOT NULL DEFAULT 0, device_count INTEGER NOT NULL DEFAULT 0, room_count INTEGER NOT NULL DEFAULT 0, created_at REAL, updated_at REAL)`，`id` **复用远端 UUID**，避免本地 / 远端双主键映射。
-  - `member_count` / `device_count` / `room_count` 只读服务端 `GET /households` 的值，**不在本地重算**，避免成员 / 设备在其他端变化后计数漂移。
-  - `rooms` 的 `remote_id` 真正启用，并新增 `household_id TEXT`（可空 = 未归属 / 已脱钩）、`sync_state TEXT NOT NULL DEFAULT 'local'`（`local` / `pending` / `synced`）、`deleted INTEGER NOT NULL DEFAULT 0`（离线删除墓碑）。
-  - `saved_devices` 新增 `household_id TEXT`、`remote_room_id TEXT`、`remote_household_id TEXT`；`room_id` 仍为本机房间主键。
-  - 新增 `device_assignment_pending(device_id TEXT PK, remote_room_id TEXT, remote_household_id TEXT, created_at REAL)`。
-  - 迁移全部走条件 `ALTER TABLE`（`PRAGMA table_info` 查缺列）+ `CREATE TABLE IF NOT EXISTS`，旧库升级不重写数据、不丢房间与归属。
-- **当前家庭**：`SyncMetadataStore.currentHouseholdRemoteID` 持久化；`GET /households` 结果合并到 `households`，服务端已不存在的家庭 `prune` 掉，其房间 `clearHousehold` **脱钩保留**（不删除），且本轮不再被认领，避免静默搬进别的家庭。
-- **首次接入房间合并策略（不静默丢弃）**：本机 `unclaimedRooms()`（`household_id IS NULL` 且非墓碑）→ 认领到当前家庭 → `pushLocalRooms` 按 `sort_order, created_at` 顺序 `POST /households/{id}/rooms` → 拉回远端房间时若存在**同名**（`normalizedName` 去空白 + 忽略大小写）本机未上报房间，则 `applyRemote` **认领**该本地房间（保留本地 `id` 与设备归属），不重复创建 → 失败保持 `local / pending` 下次重试。种子完成后写 `seededHouseholdRemoteID`，不再重复搬迁。策略**只创建 / 认领，不删除任何本机房间**。
-- **房间以服务端为准**：`syncHouseholdRooms` 顺序为 墓碑删除 → 改名 → 拉远端 → 推本地 → 设备归属补报；远端删除的房间本地 `markDeleted` + `purge`（设备 `room_id` 置空）；离线新建 / 改名 / 删除落 `pending` / 墓碑，界面标「未同步」。
-- **设备归属与 push 解耦**：归属**不进** `PushDevice` / `sync/push`（避免 LWW 把 `updatedAt` 抢走），统一走 `PATCH /my/devices/{platform}/{externalId}`：
-  - 三态：字段**缺失 = 不变**、**空串 = 清除**（服务端写 `null`）、**非空 = 覆盖**；「未分配」必须发送 `roomId: ""`（`assignDevice` 的 `reportedRoomID = roomRemoteID ?? ""`），不能省略字段。
-  - 顺序：本机先行（`setAssignment`）→ 入 `device_assignment_pending` → 立即 PATCH → 成功出队、`applyRemoteAssignment`；网络失败保留队列下次同步重试。
-  - 401 交给同步流程（不进终态）；403 / 404 为**终态**：出队 + 写 `lastAssignmentError` 可读文案，避免无限重试。
-  - 拉取时若设备有 pending 归属，**不被远端旧值覆盖**（pending 优先）。
-- **权限降级**：owner 可建 / 改 / 删房间、签发 / 撤销邀请码、移除成员、改家庭名、退出、排序；member 一律 403 `FORBIDDEN`。客户端入口按角色隐藏（member 看不到邀请码分区、成员移除、改名），`HouseholdAPIError.userMessage` 统一转文案（「你没有修改该家庭 / 房间的权限」），不展示 `FORBIDDEN` 码、不整页报错；跨家庭 / 非成员由服务端 404（不泄露存在性），客户端提示「家庭不存在或你没有访问权限」。个人家庭不可删（403 `FORBIDDEN`），也不可退出。
-- **邀请码**：`POST /households/{id}/invitations` 201 返回 8 位一次性明文码 + `expiresAt`；客户端倒计时按服务端时间，过期后「重新生成」；领取 `POST /households/invitations/claim` 复用接管码输入规范化（大写、过滤易混字符），404 统一「邀请码无效或已过期」，429 按 `Retry-After` 冷却。
-- **邀请码管理（v0.15.0）**：`GET /households/{id}/invitations` 只解析 `id` / `codeHashPrefix` / `status`（`active` / `expired` / `locked`）/ `attempts` / `expiresAt` / `createdAt`；本地模型 `HouseholdInvitationInfo` **没有 `code` 字段**，界面只显示哈希前缀与状态，绝不展示明文。`DELETE .../invitations/{id}` 204 后刷新列表；撤销后领取 404。
-- **成员移除 / 退出（v0.15.0）**：`DELETE /households/{id}/members/{userId}` 与 `POST /households/{id}/leave` 成功均 204。成功（或当前账号被移除）时本地回落：设备改挂个人家庭、`room_id` / `remote_room_id` 清空、`remote_household_id` 指向个人家庭、清掉该设备 pending 归属；该家庭房间 `clearHousehold` **脱钩保留**（不删除，标注未同步）；家庭快照删除；当前家庭切回个人家庭；随后 `GET /households` 覆盖真实计数。失败不改本地状态。
-- **退出 409**：owner 还有其他成员时服务端 409 `CONFLICT`；界面先本地拦截并提示「请先转让所有权或移除其他成员」，服务端 409 映射为同一文案；**机读判断只看 HTTP 状态与端点，不解析 message**。
-- **房间整段排序（v0.15.0）**：`PUT /households/{id}/rooms/order`，请求 `{roomIds}` 必须覆盖家庭全部房间；缺项 / 多项 / 重复在客户端先判 `.roomSetMismatch`，不发请求；服务端 409（`ROOM_SET_MISMATCH`；v0.13.0 为 `CONFLICT`）时**不改本地顺序**，自动 `GET /rooms` 重新拉取并提示「房间列表已变化，已刷新」。网络失败同样不落本地顺序，避免与服务端分叉；本地未同步房间不参与整段提交，保持原相对位置。
-- **离线**：保留本机房间与设备，房间 `local / pending` 与设备 pending 归属在首页与房间管理标注「未同步」；恢复网络后由 `prepareForSync` 补报，不丢数据。
-- **契约**：openapi 0.9.0（后端 v0.13.0）；E2E 第 9 节覆盖创建家庭 → 邀请码 → 领取 → 成员可见设备 → member 403 → 跨家庭 404 → 归属三态 → 删除家庭级联，以及 v0.15.0 的成员移除 404、owner 退出 409→移除后可退出、邀请码列表无明文 / 撤销后 404、整段重排成功与 409。
-
-### 3.18 服务端场景（v0.21.0，openapi 0.16.0）
-
-- **契约**：`GET /scenes` 一次返回本人全部场景（无分页，`{items}`）；`POST /scenes` 201、`GET/PUT/DELETE /scenes/{id}` 200/200/204；跨用户与已软删统一 404。`PUT` body 是 5 个字段的子集，每个字段 `{value, updatedAt}`，服务端按字段比较时间戳（字段级 LWW）；没有字段更新时 version 不变。
-- **表结构（迁移 v14，v15 增列见 3.20）**：`scenarios` 增加 `kind TEXT NOT NULL DEFAULT 'manual'`、`remote_id TEXT`（唯一索引，仅非空）、`version INTEGER`、`enabled INTEGER`、`cooldown_seconds INTEGER`、`trigger TEXT`、`sync_state TEXT NOT NULL DEFAULT 'localOnly'`（`localOnly` / `pending` / `synced` / `pendingDelete` / `rejected`）、`deleted_at REAL`、`device_missing INTEGER`、`last_synced_at REAL`、`last_run_at REAL`，以及 5 个字段级时间戳 `name_updated_at` / `enabled_updated_at` / `cooldown_updated_at` / `trigger_updated_at` / `actions_updated_at`。
-- **两类场景不混用**：`kind='manual'` 是 v0.8.0 的手动动作组，只在本机执行、**不上传**；`kind='automation'` 是服务端场景。旧行迁移后保持 `kind='manual'`、`sync_state='localOnly'`；服务端场景读取只查 `kind='automation'`，手动场景只查 `kind='manual'` 且 `deleted_at IS NULL`。
-- **脏字段判定**：`fieldUpdatedAt[field] > lastSyncedAt`。保存只有被编辑字段推进时间戳；拉取时若本地是 pending，**脏字段保留本地**、非脏字段采用远端值，且非脏字段时间戳回落到旧同步基线，保证不会被服务端超前时钟误判为脏。
-- **首次接入（不静默丢弃）**：本机已有 `kind='automation'` 场景逐条 `POST /scenes`；成功后 `markCreated` 写回 `remoteId` 与 `version`。首次上传前 `GET /scenes` 做基线，若发现内容签名（`name/enabled/cooldown/trigger/actions` 排序 JSON）唯一匹配的远端场景（上次 POST 响应丢失），**认领**该场景而不是重复创建。
-- **幂等**：服务端无 Idempotency-Key；同一场景重复上传时，先看本地 `remote_id`：为空则先 `GET /scenes` 认领孤儿再 `POST`，非空则 `PUT`。`PUT` 404 视为远端已删，直接 `markDeleteSynced`，不重试。
-- **拉取与软删**：`GET /scenes` 是基线，基线中没有的已同步场景本地软删（`markRemoteMissing`），但本地仍有未推送编辑时不判死；`change_log` 的 `entity='scene'` upsert 走 `applyRemote`、delete 走 tombstone 软删（缺失 `deletedAt` 时用 `serverTimestamp` 补）。未知 entity 仍忽略且游标推进。
-- **deviceMissing**：服务端读取时实时计算；本地另按 `(platform, externalId)` 解析设备，列表行标注「设备已移除」，执行时跳过并写 `category='rule'`、`level='warning'` 的失败日志（冷却窗口内不重复），同时更新 `device_missing` 本地缓存。设备删除**不级联删除场景**。
-- **离线**：新建 / 改名 / 停用 / 删除先落本地并标 pending（已上传场景删除为 `pendingDelete`，未上传场景物理删除）；恢复网络后串行补传：`pendingDelete` → DELETE、`remote_id` 为空 → POST、有 `remote_id` → 只 PUT 脏字段。
-
-### 3.19 场景占位符与定时计算（v0.21.0）
-
-- **占位符（`notify` title/body、`log` message）**：支持 `{device}`、`{metric}`、`{value}`。
-  - `{device}` 优先取设备别名 `alias`，否则广播名；设备缺失时为 `—`。
-  - `{metric}` 取指标显示名（温度 / 湿度 / 电量 / 心率 / CO₂）；`schedule` / 离线 / RSSI 条件下为 `—`。
-  - `{value}` 取触发值：RSSI 为整数 dBm、指标为实际读数、离线与定时为 `—`。
-  - 未识别占位符（如 `{foo}`）**原样保留**；空串 / 仅空白按缺失处理。渲染在通知提交前完成，无需服务端参与。
-- **定时下一次触发**：输入 `timeOfDay HH:MM`、IANA `timezone`、可选 `daysOfWeek`（1=周一），使用 `Calendar(identifier: .gregorian)` + 指定 `TimeZone` 与 `nextDate(after:matching:matchingPolicy:.nextTime, repeatedTimePolicy:.first)`：
-  - ISO 星期 → Calendar `weekday`：`7` → `1`（周日），其余 `iso + 1`。
-  - 春季 DST 跳过的本地时间（如 `02:30`）顺延到下一个有效时刻；秋季重复时刻取**第一次**；跨 DST 的周期任务由带 `timeZone` 的 `UNCalendarNotificationTrigger(repeats: true)` 按本地日历重复，不按 86400 秒漂移。
-  - 无 `daysOfWeek` 为每日一条，否则每个星期一条；只有包含 `notify` 动作的 enabled 且未删除场景才注册，注册前先取消 `scene-` 前缀的旧请求。
-
-### 3.20 场景 `rejected` 终态与 429 退避持久化（v0.24.0）
-
-Android 自 v0.22.0 起把服务端 `SCENE_*` 4xx 视为终态；iOS v0.24.0 对齐同一口径。
-
-- **原有行为（v0.23.0）**：`POST/PUT /scenes` 返回 `SCENE_*` 4xx 时，`SceneSyncService` 只把该场景留在 `pending` 并把错误抛给整轮同步；下一轮（前台 / 手动 / 后台）仍会再次上传同一条场景，形成反复重试。重启不改变状态，因为 `pending` 已落库，重启后 `fetchPending` 仍会捞出它。
-- **表结构（迁移 v15）**：`scenarios` 增加 `rejection_code TEXT`、`rejection_reason TEXT`、`rejected_at REAL`、`next_retry_at REAL`。迁移用 `PRAGMA table_info(scenarios)` 判列，缺列才 `ALTER TABLE ... ADD COLUMN`，可重复执行；旧行保持 `NULL`，迁移后 `PRAGMA user_version = 15`。
-- **拒绝判定**：`AppError.isSceneRejection` = 有 `apiCode` 且 `apiCode.hasPrefix("SCENE_")` 且 HTTP 状态在 400..<500（排除 429，429 走退避）。
-- **落库与终态**：命中拒绝时 `SceneStore.markRejected` 写 `sync_state='rejected'`、`rejection_code`、`rejection_reason`（优先服务端 `message`）、`rejected_at`；`fetchPending` 只捞 `sync_state IN ('pending','pendingDelete')`，因此终态永不自动重试，重启后仍不会重试。该场景不打断同批其他场景的同步。
-- **用户编辑回 pending**：`SceneStore.save` 记录「保存前是否 rejected」，统一置 `.pending`；若原为 rejected 且本次确有字段被编辑，清空拒绝字段与 `next_retry_at`，下一轮重新上传。
-- **429 跨进程保留**：`SceneStore.markRateLimited` 把 `Retry-After`（缺省 30 秒）写入 `next_retry_at`；`fetchPending(now:)` 过滤 `next_retry_at IS NULL OR next_retry_at <= now`。同步服务注入同一时钟，重启后仍按截止时间才开始重试。
-- **徽章顺序（与 Android 同序）**：设备已移除 → 拒绝原因 → 同步状态。`rejected` 行隐藏「待同步」徽章，详情追加「拒绝原因：…」；无障碍状态优先播报拒绝原因。
-- **测试**：`codemagicTests/SceneSyncTests.swift` 覆盖「拒绝后不重试」「关闭并重开数据库后仍不重试」「编辑字段后回 pending 并重新上传」「429 `Retry-After` 跨重启保留且截止后恢复」，另加 `scenarios` INSERT 列顺序回归（`created_at` 必须落在 `created_at`，不能把 `next_retry_at` 写成 `created_at`）。
-
-### 3.21 推送令牌注册（v0.26.0，后端 v0.23.0）
-
-- **契约**：`POST /api/v1/push/devices`（Bearer）body `{platform, token, appVersion?, deviceModel?}`；同 `(user, token)` 幂等 upsert，`inactive` 重置为 `active`。缺 `platform` / `token` 返回 400 `PUSH_DEVICE_INVALID`。`DELETE /api/v1/push/devices/{deviceId}` 置 `inactive`（不硬删），404 视为已不存在。
-- **表结构（迁移 v16）**：单行表 `push_devices`（`id='current'`），列 `token TEXT`、`remote_device_id TEXT`、`platform TEXT`、`status TEXT`、`last_error TEXT`、`attempts INTEGER`、`next_retry_at REAL`、`created_at REAL`、`updated_at REAL`。`PRAGMA table_info(push_devices)` 判列后按需增列，可重复执行；`PRAGMA user_version = 16`；旧库其它表数据不动。
-- **触发点**：① `SyncEngine.onSessionReady`（已有 token / 首次匿名登录成功 / 重新登录成功）；② App 回到前台（`SceneDelegate.sceneDidBecomeActive`）补注册到期的 pending；③ APNs token 变化（`PushTokenProvider.onUpdate`，先 DELETE 旧 deviceId 再注册新 token）；④ 引导页处理完通知权限后（权限结果不参与是否注册）；⑤ 登出 / 删除账号前先 DELETE。
-- **权限与注册解耦**：`UNUserNotificationCenter.requestAuthorization` 只决定「是否展示」。无论用户允许还是拒绝，都调用 `UIApplication.registerForRemoteNotifications()` 并完成服务端注册；拒绝时界面写「已注册 · 通知未授权」与「推送不会展示」，不把通知关闭显示成推送未开启。
-- **拿不到真实 token**：没有推送证书 / `aps-environment` entitlement 时系统回调失败，状态落 `missingToken`，`token` / `remote_device_id` 为空，**不写占位 token、不调用注册接口**。界面显示「未配置推送」而不是「已开启」。配好证书与 entitlement 后无需改代码，系统回调成功即走同一注册路径。
-- **失败分类**：网络、5xx、429 可重试 —— `status='pending'`、`attempts+1`、`next_retry_at = now + min(30·2^(attempts-1), 3600)` 秒（429 优先用 `Retry-After`），保留 token 待下次前台 / 到期重试；400 及其它非 401/429 的 4xx 为终态 `rejected`，落可读原因（如 `PUSH_DEVICE_INVALID platform 与 token 不能为空`），不自动重试；401 落 `unauthorized`，等下一次会话就绪。
-- **注销顺序**：`SessionManager.logoutCurrent` 与 `AccountDeletionService.confirmDeletion` 都先调用 `PushRegistrationService.deactivate`（DELETE；404 也算成功），完成或失败后才清本地 / 清 token。DELETE 网络失败不阻塞登出与删号，本地记录仍清理。
-- **通知点击**：`PushMessageHandler` 从 `userInfo`（含 `data` 嵌套）解析 `alertId` / `kind` / `deviceId` / `externalId`。`kind` 含 `scene` → 智能场景页；含 `device` 或带设备标识 → 设备详情（本地 UUID 直接打开，`externalId` 用本地设备表解析）；无法定位回首页，不猜测。
-- **测试**：`codemagicTests/PushRegistrationTests.swift` 覆盖注册、token 变化重注册并注销旧 device、拿不到 token 不注册占位值、权限拒绝仍注册、网络 / 5xx 退避与到期重试、400 终态、401 终态、注销顺序（含 404）、本地字段跨重启保留、迁移列集合与幂等、推送解析与路由。
-
-### 3.22 设备标记 `markedAt`（v0.29.0，后端 v0.25.0 / openapi 0.20.0）
-
-- **JSON 语义**：`markedAt` 可空，未标记为 `null`。三态：字段缺失 = 保持原值；`null` 或 `""` = 取消标记；RFC3339 时间 = 标记。客户端取消标记推送 `null`，不推空串。
-- **写入通道**：只走 `POST /api/v1/sync/push` 的 `devices[]`，与 `alias` / `group` / `deviceType` 同一条**字段级 LWW**；`PATCH /api/v1/my/devices/{platform}/{externalId}` **不接受**该字段。
-- **LWW 门控**：以设备整体 `updatedAt` 为准，服务端比较前按**微秒截断**。客户端 `updatedAt` 落后时返回 `conflict(reason=server_newer)` 携带 `server` 版本，走既有冲突路径（以服务端为准并提示「另一台设备改过这条」），本地旧标记不覆盖云端新值。
-- **增量同步**：`entity=user_device` 的 `payload` 含 `markedAt`，未标记为 `null`；本地落地为 `nil`，并清除待上报标记。
-- **本地持久化（迁移 v17）**：`saved_devices` 增加 `marked_at REAL`（`nil` = 未标记）与 `marked_at_patch TEXT`（`absent` / `clear` / `set`）。`PRAGMA table_info` 判列、`PRAGMA user_version = 17`，可重复执行；`markSynced` 归零 patch；换号重传时逐设备携带本机标记（未标记按 `absent` 省略，不写 `null` 覆盖新账号）。
-- **时间精度（v0.30.0）**：`SyncDateCodec` 手动拆分小数，RFC3339 解析 / 序列化保留**微秒**（固定 6 位），`...123456Z` 完整往返；`...123Z`、无小数、`+08:00` 归一为 UTC 6 位且数值不变。避免 Android 微秒写入后 iOS 回传被截成毫秒，导致服务端字段级 LWW 误判并多写 `change_log`。
-- **界面口径**：设备管理列表 / 首页卡片对已标记设备显示「已标记」；仅写本机、尚未推送成功时显示「已标记 · 待同步」，**不得显示成已同步**。设备详情「标记」行可标记 / 取消标记，未同步时后缀「待同步」。
-- **测试**：单测覆盖三态解码（缺省 / `null` / `""` / 时间）、push 三态编码（省略 / `null` / RFC3339）、标记与取消实际进入 `devices[]`、旧 `updatedAt` 冲突以服务端为准、增量落地与 `null` 清除、换号后逐设备重传且不串、详情待同步展示、微秒往返不丢精度。e2e 在既有断言内（项数仍 460）覆盖：带微秒 `markedAt` push 后 `/my/devices` 回读一致、`null` 取消后回读为 `null`、`entity=user_device` 的 `change_log` payload 含 `markedAt`、幂等内容比较包含该字段。
-
-### 3.23 房间详情聚合与批量标记（v0.31.0，对齐 Android v0.32.4）
-
-- **入口**：首页房间分区标题点击进入 `RoomDetailViewController`；右侧 chevron 仍是独立的展开 / 收起按钮，两者互不吞触摸。未提供 `onDetail` 的旧调用保持原行为。
-- **数据口径**：只读本机 `saved_devices`（服务端同步可落地到同一张表），按 `room_id` 过滤，不再额外请求服务端。当前家庭存在时按 `household_id` 再过滤一次；个人家庭允许 `household_id IS NULL` 的本机设备。
-- **在线判定**：沿用首页 —— 本机可连接（`isConnectable`）且 CoreBluetooth 已连接，或 `last_seen_at` 落在最近 **15 分钟**内（与 Android `ONLINE_WINDOW_MS` 同口径）。跨平台设备没有本机扫描记录，按离线计数，行内追加「本机不可连接」。
-- **设备行**：名称、在线状态、最新一条真实读数（`readings` 按 `recorded_at DESC, rowid DESC LIMIT 1`）与标记状态；无读数显示「暂无读数」，不生成占位值。
-- **批量标记 / 取消标记**：`markAll` 只取未标记设备，`unmarkAll` 只取已标记设备；`SavedDeviceStore.updateMark(ids:markedAt:at:)` 用一条 SQL 更新整批（`marked_at` / `marked_at_patch` / `updated_at` / `sync_state = pending`），避免部分成功。之后走既有 `SyncEngine` push（`markedAt` 三态与字段级 LWW 不变）；无同步引擎或网络失败时保留本机变更并显示「待同步」，行内为「已标记 · 待同步」/「取消标记 · 待同步」。
-- **按钮状态**：无目标设备时对应按钮禁用，空房间隐藏批量操作区，不会出现「点了没反应」或「本地删了不同步」。
-- **权限**：`Household.capabilities.canManageRooms`（`isOwner`）为 false 时进页即显示「新建、改名、排序、删除房间仅家庭所有者可用」，不依赖服务端 403；批量标记仍可用（`user_device` 标记是当前用户自己的数据）。
-- **空态**：`RoomDetailEntry` 为空时显示「这个房间还没有设备」与扫描入口，不使用空白列表。
-- **测试**：`codemagicTests/RoomDetailTests.swift` 覆盖聚合与真实读数、在线 / 离线与跨平台、批量标记待同步、批量取消耗待同步、空批次无副作用、成员只读、owner 可管理、空态文案、跨家庭隔离；合计 466 单测 0 失败。e2e 仍 460 项（纯客户端聚合读取，未改契约）。
-
-### 3.24 房间详情大字号与 iPad 宽度适配（v0.31.1）
-
-- **走查档位**：AX5 = `accessibilityExtraExtraExtraLarge`；「200%」= AX2 `accessibilityLarge`（Body 33pt / 默认 17pt ≈194%）。iOS 没有 Android `fontScale` 的 200% 档，文档与截图中统一标注为「200%（AX2 近似）」。
-- **汇总行**：`preferredContentSizeCategory.isAccessibilityCategory` 为真时把 `" · "` 换成换行，四项逐项成行；常规字号保持单行。
-- **设备行**：名称 / 在线 / 读数 / 标记状态 `numberOfLines = 0`，表格 `rowHeight = automaticDimension`；AX 档 `metaText` 用换行而非 `" · "`；读数数值与单位之间用不换行空格 `\u{00A0}`，避免 `24.5` 与 `℃` 拆行。
-- **批量按钮**：`AppButton` 高度约束由固定 48pt 改为 `greaterThanOrEqualToConstant`，标题字体用 `UIFontMetrics` 随字号缩放；AX 档 `actionsRow.axis = .vertical`（全宽竖排），常规字号 / iPad 保持横排等宽。
-- **空态与成员只读**：新增 AX 专用文案 `room.detail.emptyTitleAX` / `emptyMessageAX` / `readonlyNoteAX`，在语义标点处显式换行，由 `Localizable.strings` 提供，View 源码不硬编码中文；空态说明在 AX 档使用 footnote。
-- **底部安全区**：表格底部约束到 `safeAreaLayoutGuide.bottomAnchor`，内容不被悬浮 Tab 条带覆盖。
-- **iPad 宽度**：表格 `centerX` + 宽 `<= Layout.contentMaxWidth (760)` + 高优先级 `fillWidth`，13 英寸下居中限宽，按钮不溢出；常规字号按钮高度保持 48pt。
-- **测试**：`RoomDetailTests` 新增 2 项布局测试（AX5 430×900：按钮竖排、文本行数不限、按钮高度 > 单行标题；iPad 1024×1366：表格宽 760、水平居中、按钮横排且不超宽），合计 468 单测 0 失败；e2e 仍 460 项。
-- **截图**：房间详情 23 张（默认 / AX5 / 200% / iPad 各含首页、底部、待同步、待同步底部、空态、成员只读）在 **v0.31.2 用 `scripts/seed-demo-data.sh` 重建的 seed 数据重拍**，与本机 Postgres 同源；画面为「共 3 台 · 在线 0 · 离线 3 · 已标记 1」，行内「离线 · 来自 Android，本机不可连接 · 暂无读数」。读数不显示的原因见 3.25。
-
-### 3.25 截图数据可复现（v0.31.2）
-
-- **脚本**：`scripts/seed-demo-data.sh` 通过 API 重建与商城截图一致的数据形状：3 个演示家庭（我的家 / 父母家 / 办公室）、6 个房间（客厅 / 主卧 / 次卧 / 父母家客厅 / 书房 / 工位）、12 台在用设备 + 1 台已移除设备（被「阳台信号弱记录」场景引用）、7 天读数（30 分钟一个点，19 条指标序列 × 336 = 6384 条）、4 个场景、3 条反馈（1 条已关闭），客厅骑行台 `markedAt` 为 2 小时前。另建 1 个只读成员账号并领取父母家邀请码，供「成员只读」截图使用；该账号自带 1 个空个人家庭，所以库内家庭总数为 4，但演示家庭仍是 3 个。
-- **幂等**：默认先 `TRUNCATE` 所有用户数据表（保留设备类型目录 / 固件 / 配件 / 迁移表）再按固定名称与数量重建；设备 `externalId` 固定为 `AA:BB:CC:00:00:01..13`，读数用确定性日周期而非随机数。连续执行两次，形状完全一致（见脚本输出）。`SEED_SKIP_RESET=1` 只追加，不建议。
-- **前置条件**：后端 `PJGoIoT` v0.26.0、迁移 **20**（`000019_device_marked_at` / `000020_device_presence`）；`DATABASE_URL` 可连（默认 `postgres://platojobs@127.0.0.1:5432/pjgoiot?sslmode=disable`）；API 以 `STORE=postgres` 启动并可访问 `SEED_BASE_URL`（默认 `http://127.0.0.1:8080`）；本机有 `psql` / `python3` / `curl`。seed 通过 `/sync/push` 上报读数，服务端据此写入 `last_seen_at`，截图中的 presence 与 seed 后 15 分钟窗口同源。
-- **账号**：脚本 `POST /auth/anonymous` 新建账号，结束时打印 10 分钟一次性 `pairingCode`；在 App「我的 → 用配对码恢复原账号」输入即可接管。成员截图用 `memberPairingCode`。接管会把本机已有设备 / 读数标记为 pending，所以截图前需全新安装 App。
-- **为什么房间详情是「离线 / 暂无读数」**：`/sync/changes` 只拉家庭 / 房间 / 设备 / 场景，不拉读数；房间详情只读本机 SQLite。同步落地的远程设备没有本机 `lastSeenAt`，按现有判定全部离线；平台 Android 时行内标注本机不可连接。这是 v0.31.2 时的实现口径，**已在 v0.31.3 修正**（见 3.26）。
-- **`household_rooms = 0` 排查**：`e2e-contract.sh` 使用内存 fixture，`e2e-postgres.sh` 固定独立库 `pjgoiot_e2e`，均不会 TRUNCATE 开发库；开发库只剩余旧的手工重置 / 反复匿名登录残留。`e2e-postgres.sh` 已新增 DATABASE_URL 库名断言（必须为 `pjgoiot_e2e` 或含 `_e2e`），从源头避免误连开发库。
-- **测试**：本轮不改客户端逻辑，单测仍 **468** 0 失败；e2e 仍 **460** 项。
-
-### 3.26 云端最近读数与在线判定边界（v0.31.3，后端 v0.25.1 / 契约 0.20.0）
-
-**契约事实**（`PJGoIoT/api/openapi.yaml`）：
-
-- 版本 `0.20.0`（`:4`）。读数自 `0.4.0` 起随 `/sync/push` 写入、按设备分页查询与聚合，服务端保留 90 天（`:20-21`）；`0.5.0` 增加序列与指标清单（`:22-23`）。
-- **按设备的最近读数**：`GET /my/devices/{platform}/{externalId}/readings`（`:907-921`），按 `recordedAt` 倒序、不透明游标分页，`limit` 1–500（`:948-960`），`metric` 可选且必须小写 snake_case（`:917`、`:927-933`）。取「最近一条」用 `limit=1` 即可，无需新端点。
-- **哪条指标最新有服务端依据**：`GET .../readings/metrics`（`:1141-1153`）返回每个指标的 `count` / `firstAt` / `lastAt`，按 `lastAt` 倒序；`unit` 取该指标最近一条读数的单位（`:1149-1151`）；从未上报时 `items: []` + HTTP 200（`:1152`）。
-- 聚合接口：`.../readings/summary`（`:992-1025`，`metric` 必填、`hours` 默认 24）与 `.../readings/series`（`:1052-1069`）。
-- **`/sync/changes` 不含读数**：只返回 `changes`，`payload` 为 `UserDevice`（`:1185-1230`，`:1204`）；读数的写入通道是 `/sync/push` 的 `readings`（`:1297-1305`）。新成员 / 新设备登录以 `GET /households` 做基线（`:1222`），同样不含读数。
-- **没有服务端在线 / `lastSeen` 字段**：`UserDevice` schema（`:3355-3445`，required 见 `:3356`）只有元数据、`updatedAt`、`markedAt` 等；全文没有 `lastSeen` / `online` / `status`。服务端无法告诉客户端「这台设备现在是否在线」。
-
-**iOS 旧实现为什么显示成「一屋子死设备」**：
-
-- 房间详情读数只查本机 `readings` 表：`ReadingsStore.latestReading(deviceID:)`（`Core/Persistence/ReadingsStore.swift:126-134`，`ORDER BY recorded_at DESC, rowid DESC LIMIT 1`）；首页同样只遍历本机指标（`Modules/Home/ViewModels/HomeDashboardViewModel.swift:414-424`）。
-- 同步只落家庭 / 房间 / 设备 / 场景，不落读数。从另一台手机（或 seed）同步下来的 Android 设备，在本机从未采集过读数，因此**永远**是「暂无读数」。
-- 在线判定只有本机依据：已连接，或 `last_seen_at` 在 15 分钟内（`Modules/Rooms/ViewModels/RoomDetailViewModel.swift:243-254`）。跨平台设备没有本机扫描记录，旧实现统一按「离线」计数。
-
-**新实现**：
-
-- 新增 `Core/Networking/CloudLatestReadingsService.swift`：先 `GET /readings/metrics`，取 `count > 0 && lastAt != nil` 中 `lastAt` 最新的一条，再 `GET /readings?metric=<服务端原始指标名>&limit=1`。按设备缓存成功 60s / 失败 20s，同设备并发请求合并为一次，最多 3 台并行；404 → `.empty`（服务端确认无该设备数据），其余错误 → `.failed`。
-- 四态语义：`.loading` / `.available` / `.empty` / `.failed`。`.failed` **不判定设备离线，也不显示「暂无读数」**，分别显示「正在读取云端读数」「云端读数暂不可用」；只有本机与云端都确认无数据才显示「暂无读数」。
-- 指标展示：服务端指标为自定义小写 snake_case（`temperature_celsius` / `relative_humidity` / `cadence_rpm` / `wheel_speed_kmh` 等），`ReadingMetric` 枚举只覆盖本机常用指标。新增 `ReadingMetricPresentation` 只翻译标题与单位（`celsius` → `℃`、`fahrenheit` → `℉`），读数本身不归一化、不伪造；未知指标仍回退枚举展示名。
-- 请求必须使用服务端**原始**指标名。`Core/Networking/ReadingsAPIClient.swift` 新增 `metricName` 重载（查询参数 `metric=`），同时修复 `appendingPathComponent` 二次编码：MAC 的 `:` 原先被编码成 `%253A`，服务端收到 `%3A` 判 `INVALID_MAC`（400），这是云端读数一开始全部失败的根因，也影响既有读数页。
-- 房间详情（`Modules/Rooms/ViewModels/RoomDetailViewModel.swift`）：读数顺序为 本机 → 云端 `.available`（追加「云端 X 前上报」说明来源）→ `.failed`「云端读数暂不可用」→ `.empty` / 未接入「暂无读数」。状态：在线 →「本机在线」；可连接但未在线 →「本机离线」；跨平台 →「来自 Android，本机不可连接」。汇总改为「共 N 台 · 本机在线 N · 本机离线 N · 本机不可连接 N · 已标记 N」，跨平台不再计入离线。
-- 首页（`Modules/Home/ViewModels/HomeDashboardViewModel.swift`）：卡片读数同样本机 → 云端；时间行本机 `lastSeenAt` → 云端上报时间「云端 X 前上报」→「尚未连接」。跨平台卡片状态仍为「跨平台」，不写「离线」。
-- 无网 / 401 / 5xx：显示「云端读数暂不可用」，连接与标记状态不受影响；失败结果缓存 20s 后再试，避免整页刷新连续打点。
-
-**仍需后端补齐（本轮不伪造、不用夹具充数）**：
-
-1. `UserDevice`（`/my/devices` 与 `/sync/changes` payload）增加 `lastSeenAt`（服务端最后一次收到该设备读数 / 心跳的时间）与 `online`（服务端按固定窗口判定），或提供 `GET /my/devices?include=presence` 聚合字段。
-2. 契约写清在线窗口（例如 15 分钟）与 `lastSeenAt` 的精度 / 时区；客户端不得自行推断在线。
-3. 若要求跨平台设备读数实时刷新，需要推送或轮询语义；当前是按需查询 + 60s 缓存。
-
-**缺口已落地（v0.31.5，后端 v0.26.0 / 契约 0.21.0）**：`UserDevice` 新增 `lastSeenAt`（`date-time | null`，UTC 微秒截断）与 `presence`（`unknown | online | offline`），在线窗口为 900 秒；`/my/devices`、单设备读接口与 `/sync/changes` payload 均返回。客户端接入细节见 3.28，本轮起界面按「本机连接 > 服务端 `presence`」三态展示，`online` 一律写成「最近上报」，不宣称权威在线。
-
-**测试**：新增 12 个单测 —— `CloudLatestReadingsTests` 6 个（最新指标与单位映射、无指标为空且不再请求读数、404 为空、网络失败为 failed、读数失败为 failed、缓存命中不重复请求，并断言实际请求的指标名为 `temperature_celsius` 防止再被归一化）；`RoomDetailTests` 4 个（云端补齐缺失读数并保留来源边界、本机读数优先、云端失败显示不可用而非暂无读数、云端空且本机空仍暂无读数）；`RoomTests` 2 个（首页云端补齐读数与上报时间、云端失败不影响连接状态）。合计 **480** 单测 0 失败；e2e 仍 **460** 项。
-
-### 3.27 首页无障碍大字号设备卡自适应高度（v0.31.4）
-
-- **不再写死 164pt**：`.room` 分区按本段设备逐台实测卡片高度。`HomeDashboardViewController` 在视图树里挂一个隐藏的 `DeviceCardCell`（仅宽度约束，高度由内容决定，AX 字号会真实放大），用 `systemLayoutSizeFitting(width:required, height:fittingSizeLevel)` 取本段最大值，且不低于 164pt；同段卡片统一高度，常规字号版式不变。
-- **iPhone AX 单列**：`preferredContentSizeCategory.isAccessibilityCategory && horizontalSizeClass == .compact` 时（iPhone AX5 / AX2）两列改单列全宽 —— 两列约 180pt 放不下放大后的读数；iPad 常规横向每列约 500pt，保持两列。分区高度仍按单列宽度实测，卡片高度随字号增长。
-- **不裁切、不拆字**：名称 / 状态 / 读数 / 时间 `numberOfLines = 0` + `.byWordWrapping` + `.pushOut`；数值与单位之间用不换行空格 `\u{00A0}`（`72 bpm` 不拆成两行）；AX 档时间行用 `\n` 按项分隔（「云端 1 小时前」/「已标记」），不缩小字号。
-- **同类固定高度卡片**：顶部告警摘要卡与快捷场景卡（含空态）在 AX 档改用 `.estimated` 自适配高，标题 / 说明 / 空态不被固定高度裁切；常规字号仍保持 96 / 124 / 200pt。
-- **行高与底部避让**：`traitCollectionDidChange` 触发 `invalidateLayout()`；卡片高度变化后分区高度与内容高度同步，底部 `BottomOcclusion` 仍按悬浮 Tab 顶边计算。AX5 实测滚到底最后一张卡完整位于 Tab 顶边 `873pt` 之上（440×956pt）。
-- **截图**：iPhone AX5（`home-ax.png` / `home-ax-bottom.png`）、200%（`home-200.png` / `home-200-bottom.png`）与 iPad 13 英寸 `home-ax.png` 用 seed 数据重拍；客厅三台为心率 72 bpm / 湿度 52 % / 踏频 78 rpm，骑行台「已标记」，与 seed 一致。
-- **测试**：单测仍 **480** 0 失败（更新 `HomeLayoutTests.testDeviceCardShowsFullStatusUnderLongName` 以内容实测高度布局、`RoomTests` 断言数值与单位间为 `\u{00A0}`）；e2e 仍 **460** 项 0 失败。
-- **不变**：本轮不提前推演服务端 presence；`lastSeenAt` / 在线窗口契约落地后再接。当前在线口径仍为「本机在线 / 本机离线 / 本机不可连接」。
-
-### 3.28 服务端 presence 接入（v0.31.5，后端 v0.26.0 / 契约 0.21.0）
-
-**契约事实**（`PJGoIoT/api/openapi.yaml` 0.21.0）：
-
-- `UserDevice.lastSeenAt`：`date-time | null`，UTC、微秒截断；`null` 表示从未上报（`:3523-3527`）。
-- `UserDevice.presence`：`unknown | online | offline`，响应时实时推导、**不落库**（`:3528-3532`）；`now - lastSeenAt <= 900s` 为 `online`。
-- 推导只取 `/sync/push` 中被接受的 `readings` 的**服务端接收时间**（`push_received_at`），不用客户端 `recordedAt`；字段只读，客户端上报会被忽略，不参与 LWW。
-- `/my/devices`、单设备读接口与 `/sync/changes` payload 均已包含；seed 上报读数后，`last_seen_at` 即 seed 时刻，截图中的「最近上报 X 前」与 `psql` 查询同源。
-
-**客户端落地**：
-
-- `Core/Models/SavedDevice.swift` 新增 `DevicePresence`（`unknown` / `online` / `offline`，窗口 `15 * 60`）与 `serverLastSeenAt`；保留原有 `lastSeenAt` 为**本机 BLE 扫描时间**，两者不混用。`presence(at:)` 仅按服务端时间推导。
-- `Core/Sync/SyncModels.swift` 的 `RemoteDevice` 增加 `lastSeenAt` / `presence` 与 `hasLastSeenAtField`（用于区分「字段缺省」与「显式 null」），`makeLocalDevice()` 传入 `serverLastSeenAt`。
-- 持久化：迁移 **v18** 新增 `saved_devices.server_last_seen_at`（`PRAGMA table_info` 判列后 `ALTER TABLE`）；upsert 与行映射同步读写；新增 `applyServerLastSeenAt(id:at:)` 只更新该列。
-- 同步：`SyncEngine` 计算 `lastSeenChanged`。已同步设备仅在字段/服务端时间变化时 upsert；本地 `pending` 设备只走 `applyServerLastSeenAt`，**不置 pending、不推进 `updatedAt`、不改本地可写字段**；`merge` 仅在 `hasLastSeenAtField` 时覆盖。`presence` 不参与 LWW。
-- 判定顺序：**本机 BLE 连接 > `presence`**；`unknown` 单独一档，不并进离线。跨平台设备（`isConnectable == false`）单独显示「本机不可连接」。
-- 文案：`online` 统一写「最近上报」并附 `lastSeenAt` 相对时间；`offline` 写「已离线 · 最近上报 X 前」；`unknown` 写「从未上报读数」。房间汇总四行：`共 N 台` / `本机在线 N · 最近上报 N` / `已离线 N · 从未上报 N` / `本机不可连接 N · 已标记 N`，不出现含糊的「在线 N」。首页卡片状态 `home.status.connected` = 「本机在线」、`home.status.crossPlatform` = 「本机不可连接」。
-- 卡片排版：时间行与「已标记 / 待同步 / 未同步」第二段一律换行（`\n`），默认字号下不再把「已标记」拆成「已 / 标记」；AX 档每项一行。相对时间短语内部用 NBSP，避免「14 分钟 / 前」拆行。
-- 隐私：`lastSeenAt` 归「使用数据 → 其他使用数据」（同步元数据）；`PrivacyInfo.xcprivacy` 键集合仍为 8 类，未新增类别；`docs/store-listing.md`、`docs/privacy-policy.md`、`docs/app-privacy.md` 已同步。
-
-**测试**：新增/更新见 3.28 末尾统计 —— `RoomDetailTests` 三态渲染、900 秒边界（`lastSeenAt` 恰为 15 分钟前为 `online`、超出 1 秒为 `offline`）、本机连接优先；`SyncEngineTests` synced 增量覆盖、pending 保留状态与 `updatedAt`、字段缺省不覆盖、`presence` 更新不触发同步脏位；`PersistenceTests` `serverLastSeenAt` 往返与「更新不改 pending / updatedAt」；`HomeViewModelTests` 状态文案改「从未上报读数」。合计 **487** 单测 0 失败；e2e 仍 **460** 项 0 失败。
-
-**截图**：iPhone / iPad 的首页与房间详情（默认 / 200% / AX5 / 成员 / iPad）用真实后端 v0.26.0 + seed 重拍，presence 显示「最近上报 X 前」，与 seed 后 `last_seen_at` 对得上；跨平台设备仍标「本机不可连接」。
-
-### 3.29 v0.31.6：三端 presence 对账后的 iOS 收敛
-
-依据 `PKotlinApp/docs/consistency-presence.md`，修掉 v0.31.5 遗留的四处偏差，使 iOS 与 Android 的判定口径、文案层级一致。
-
-**1）在线判定统一。** 新增 `Core/Models/DeviceLinkStatus.swift`，以 `tier` 表达四档：`localConnected`（本机 BLE 已连接）/ `cloudRecent`（`presence = online`）/ `cloudStale`（`presence = offline`）/ `cloudUnknown`（`presence = unknown`）。`init(isConnected:presence:)` 固定「本机连接优先」，排序 `sortRank` 也由它给出。首页 `HomeCells`、房间详情 `RoomDetailViewModel`、设备列表 `SavedDeviceCell`、设备详情 `DeviceDetailViewController` 全部改用这一份实现；房间详情删除旧的 `isOnline`（它把「15 分钟内本机扫描到」也算在线，导致同机两页对同一设备给出不同档数），`lastSeenAt` 只作为本机扫描时间参与「本机最近扫描 X 前」，不再参与在线判定。
-
-**2）整组文案去掉上帝视角。** 四个档位统一为「本机已连接 / 云端 15 分钟内有上报 / 云端上报已超时 / 云端从未收到上报」；时间行统一写「云端最近上报 X 前」（无服务端时间时才退回「本机最近扫描 X 前」）。`offline` 不再写「已离线」，`online` 也不再写「最近上报」冒充权威在线；房间汇总四行改为 `共 N 台` / `本机已连接 N · 云端 15 分钟内有上报 N` / `云端上报已超时 N · 云端从未收到上报 N` / `已标记 N · 本机不可连接 N`。旧键 `device.presence.*`、`room.detail.online / offline / lastReported / offlineWithTime / remoteOnlyShort`、`home.status.connected / crossPlatform / lastReported`、`device.cell.lastReported`、`device.detail.lastReported / offlineWithTime` 已从双语 strings 删除，避免旧口吻被再次引用。
-
-**3）跨平台不再遮住 presence。** `isConnectable == false` 只是附加的本机连接说明，不是第五档。首页状态行写「本机不可连接」，时间行同时给「云端上报已超时」或「云端 15 分钟内有上报」，下一行给「云端最近上报 X 前」；房间详情第一行保留「来自 Android，本机不可连接」，第二段给云端状态与时间；AX 档同样同时保留两件事，并修掉 `metaText` AX 分支此前丢弃「已标记」的问题。<br>（v0.31.7 起 `secondaryText` 的两段改用 `\n` 连接，窄卡片不会出现行末悬挂的「·」。）
-
-**4）`unknown` 跳过云端读数请求。** 房间与首页的 `requestCloudReadings` 在 `presence == unknown` 时直接跳过（服务端从未接受过该设备读数，`metrics + limit=1` 只会白跑两次往返）；本机已有读数时也跳过（界面本机优先）。房间详情对被跳过的设备把云端读数状态标记为 `.empty`，不再显示「正在读取」。
-
-**测试与 e2e。** 新增 `DeviceLinkStatusTests`（四档、BLE 优先、900 秒边界、跨平台同时呈现、文案不含「在线」）与房间 / 首页「unknown 跳过云端请求」用例，单测合计 **495**（0 失败）。`e2e-contract` 的 presence 断言在 v0.26.0 下并入既有 check（总项数保持 **460**）：`GET /my/devices/{mac}` 对从未上报的设备断言 `presence = unknown` 且 `lastSeenAt` 为 `null`；曾临时把期望改为 `online` 做反向验证，结果为 **459 通过 / 1 失败 / 退出码 1**，证明断言确实会触发。真 Postgres 的 `e2e-postgres.sh` 增加两步：读数被接受后断言 `presence = online` 且 `lastSeenAt` 距当前 ≤ 60 秒（排除客户端 `recordedAt`）；把 `user_devices.last_seen_at` 回拨 20 分钟后断言 `presence = offline` 且仍保留最近上报时间。
-
-**CI 覆盖边界。** `ios.yml:84` 仍 pin `PJGoIoT` v0.25.0（无 presence 字段），CI 的 460 项全绿**不包含新字段断言**；本机推送凭证缺少 `workflow` scope，无法修改 workflow 文件。新字段只在本地 v0.26.0 验证，README 第 1 节与第 8.1 节已显著标注，避免被误读为已覆盖。
-
-### 3.30 v0.31.7：已发布 tag 纪律与 CI 兼容分支显式跳过
-
-**tag 纪律事故（如实记录）。** v0.31.6 在 09:22:27Z 推送到 `f227476` 后，tag 流水线已在该 commit 上跑过并失败（459 通过 / 1 失败，原因是 CI pin 的 v0.25.0 无 `presence` 字段）；随后该 tag 在 09:29:23Z 被删除并重建到 `399e4a6`。**已发布 tag 不移动、不删除、不重建**，失败后只能递增补发；正确的处置是保留失败的 `v0.31.6`、另发 `v0.31.7`。本轮 `v0.31.7` 即按此递增补发，`v0.31.6` 保持原样，releasenotes 已如实记录。发版前置检查：推送前用 `git ls-remote --tags origin` 确认目标 tag 名不存在。
-
-**兼容分支不再吞错。** 旧实现用 `hasPresenceField` 在断言内条件短路，后端无字段时整条 check 直接算通过，日志看不出该项没跑。现改为：
-- 后端返回 `presence` / `lastSeenAt`（v0.26.0）→ 单条硬断言 `status == 200 && presence == "unknown" && lastSeenAt == null`，不做「存在即可」降级；
-- 后端不返回该字段（CI pin v0.25.0）→ 先硬断言 `status == 200`，再 `report.skip("presence / lastSeenAt 断言", "后端响应无 presence 字段（CI pin v0.25.0）；本项本轮未执行")`，日志打印 `[SKIP]`，跳过项不计入通过。
-
-**验证结果。** 本地 v0.26.0：**460 通过 / 0 跳过 / 0 失败**；CI v0.25.0：**460 通过 / 1 跳过 / 0 失败**（`[SKIP]` 在日志可见）；反向验证（v0.26.0 下把期望改为 `online`，即字段存在但值错误）：**459 通过 / 1 失败 / 退出码 1** —— 兼容判定只看字段是否存在，值错误一律走硬断言失败。
-
-**截图同步。** 界面四档措辞与跨平台双行呈现变化后，用真实后端 v0.26.0 + `seed-demo-data.sh` 重拍受影响页面（iPhone 首页 6 张、房间详情 18 张、iPad 首页 3 张、iPad 房间详情 6 张），逐张核对画面与代码；`DeviceLinkStatus.secondaryText` 的云端状态与时间改为换行连接，窄卡片不再出现行末「·」。
-
-### 3.31 v0.31.8：列表 / 详情连接状态与增量 presence 校验
-
-依据 `PKotlinApp/docs/consistency-presence.md` 的二次对账，修掉 v0.31.7 遗留的一处真缺陷与三处遗漏。
-
-**1）连接状态不再写死。** `SavedDeviceCell` 与 `DeviceDetailViewController` 此前把 `isConnected` 传成常量 `false`，同一台已连接设备在首页显示「本机已连接」，在列表 / 详情却落到云端档位。现新增 `DeviceLinkStatus.isConnected(device:bluetooth:)`：`device.isConnectable && bluetooth.isConnected(peripheralID:)`；`DeviceLinkStatus.make(device:bluetooth:)` 由它构造。首页 `HomeDashboardViewModel`、房间详情 `RoomDetailViewModel`、设备列表 `DevicesViewController`、设备详情 `DeviceDetailViewModel.linkStatus` 全部改为调用这一处判定；列表页数据源虽是本地 `SavedDeviceStore`，但连接状态可从同一个 `BluetoothServicing` 读取，因此**不需要「不声称连接状态」的降级**。详情页「上报状态」行在本机已连接时写「本机已连接」，云端已超时 / 未上报时仍附在后面；跨平台设备 `isConnectable == false`，即使 BLE 层存在同名 UUID 也不会声称已连接。
-
-**2）显式 null 清空有独立覆盖。** `SyncEngineTests` 新增 `testExplicitNullLastSeenClearsStoredPresence`：payload 带 `lastSeenAt: null` 且 `hasLastSeenAtField = true` 时，本地旧 `serverLastSeenAt` 必须清空。它与既有「字段缺省不覆盖」用例分成两个独立测试，语义各自断言，没有参数化混写。
-
-**3）`/sync/changes` 的 presence。** `e2e-contract` 在推送读数后拉增量页：断言 `entity=user_device` 的 payload `presence` / `lastSeenAt` 与 `GET /my/devices/ios/{externalId}` **逐字一致**（字段存在即硬断言，不降级为「存在即可」），并断言 `nextCursor` 覆盖本页最大 `seq`。CI pin v0.25.0 时按既有机制先硬断言 200、再 `report.skip("...presence / lastSeenAt 断言", "后端响应无 presence 字段（CI pin v0.25.0）；本项本轮未执行")`。为保持**总项数 460**，本段把「首次推送 appliedReadings / skippedReadings」与「重复 id appliedReadings / skippedReadings」各合并为一条，空出的两条用于新增断言。`e2e-postgres` 在真实 Postgres 上额外断言读数推送后 payload `presence=online`、`lastSeenAt` 与读接口一致、游标推进；并用 `psql` 直接写入 `entity=future_entity` 的未知实体，断言增量页照常返回、游标跨过该行、设备 presence 不受影响（客户端跳过未知实体另由 `SyncEngineTests` 覆盖）。
-
-**4）文档版本头。** `docs/app-privacy.md`、`docs/e2e-postgres.md`、`docs/store-listing.md` 的版本头与 build 号从 v0.31.5 同步到 v0.31.8 / 48；`docs/store-listing.md` 中「当前二进制」的版本标注一并更新。
-
-### 3.32 v0.31.9：UI 细节与布局错位的数值化修复
-
-本版无后端与契约变更，只处理三处经真实视图层级测量确认的布局缺陷，完整前后数值与截图见 [ui-polish.md](ui-polish.md)。
-
-**1）首页空态卡按内容自适配。** `scenarioEmpty` / `roomEmpty` / `roomsEmpty` / `devicesEmpty` 原先分别固定 200 / 220 / 280pt。361pt 宽下内容实际需要：常规字号 **228pt**（固定 200pt 裁掉 28pt，说明少一行且「扫描附近设备」按钮完全不可见），AX5 **403.3pt**（裁掉 203.3pt，标题被压成单行「这个房间还」）。现统一改为 `NSCollectionLayoutDimension.estimated(...)`，由卡片内容决定高度；快捷场景卡仍固定 124pt（内容由卡片自身保证完整）。
-
-**2）分区头随行高增长。** `SectionHeaderView` 与首页 boundary supplementary 原为固定 40pt。常规字号 callout 行高约 20pt 无问题；AX5 实测行高 **51.33pt**，固定 40pt 上下各裁 **5.7pt**。现视图侧改为 `heightAnchor >= Layout.sectionHeaderH`，布局侧改为 `.estimated(Layout.sectionHeaderH)`，实测布局高度 51.33pt，常规字号仍 40pt。
-
-**3）规则卡自适应行高不再按单行计算。** `RuleCell` 的文本尾部约束原为 `textStack.trailingAnchor <= toggle.leadingAnchor - 12`，宽度在自适应行高测量阶段不收敛，`UITableView.automaticDimension` 先按单行返回：AX5 下规则名标签 frame **57.33pt**（渲染成「设备断开…」），而实际需要 **114.67pt**（2 行），**隐藏 57.34pt**；说明也被卡片底边切断。现改为与 `SceneAutomationCell` 一致的水平 `UIStackView`（`equal` 宽度），标签保持 `numberOfLines = 0`，不按字号切换行数。修复后 AX5 名称 114.67pt、说明 196pt、行高 **345.67pt**；常规字号行高 **86.67pt**，名称 20.33pt / 说明 31.33pt，保持单行紧凑。
-
-**4）市场页表格分区头同样改为自适配。** `MarketViewController` 的 `heightForHeaderInSection` 原先固定 40pt。现改为 `sectionHeaderHeight = UITableView.automaticDimension` + `estimatedSectionHeaderHeight = 40`，`heightForHeaderInSection` 返回 `automaticDimension`。真实 `UITableView` 复测：常规 40pt、AX5 **51.33pt**（旧实现上下各裁 5.7pt）。
-
-**5）回归测试与截图。** 新增 `LayoutPolishTests` 5 个用例：空态卡常规 / AX5 自适配、分区头常规 40pt / AX5 51.33pt、`.estimated` 分区头在真实 compositional layout 中取到 51.33pt、`RuleCell` 在常规与 AX5 下均无垂直裁切（逐标签比较 frame 与 `sizeThatFits`）、真实 `UITableView` 表头常规 40pt / AX5 51.33pt。截图覆盖 iPhone 常规 / AX5 / AX5 底部与 iPad 13 英寸 AX5，以及智能页常规 / AX5 前后对照，归档在 `docs/screenshots/ui-polish-*.png`。
-
-**保留为设计取舍（检查过，不是缺陷）**：帮助中心 / 关于 / 扫码日志 / 反馈详情依赖滚动视图安全区自动 inset，实测「关于」末尾距悬浮 Tab 仍有 57pt，不额外加自定义 inset；`DevicesViewController` / `SavedDeviceCell` 当前无入口引用，调整内边距不会出现在任何界面，保留待入口恢复时处理。`RSISignalView.signalLevel` 注释与实现的 -84…-90 区间不一致属数据映射问题，已在 v0.31.10 按规范统一，见 3.33。
-
-### 3.33 v0.31.10：RSSI 分档对齐 Android 定稿规范
-
-`PKotlinApp/docs/rssi-signal-tiers.md` 定稿后，iOS 从旧的 `-55 / -67 / -78 / -90` 改为同一口径（每档含下限）：`≥ -55` 四格、`-66…-56` 三格、`-75…-67` 两格、`-85…-76` 一格、`≤ -86` 零格；`nil` / 非负占位值为未知（0 格且不显示 dBm）。颜色仍按档着色（绿 / 橙 / 红），这只是展示选择，不影响档位语义。
-
-**实现。** `RSISignalView` 改为 `rssi: Int?` + `Tier` + `tier(for:)`，未知与极弱格数同为 0 但文案区分（「无信号数据」/「信号极弱」）；删除文件头自称「与 Android 一致」却写 `≥ -78 两格 / ≥ -90 一格` 的错误注释，改为直接指向规范，不再复述数字。`0` / `127` 等非负值统一按未知处理：信号视图不点亮，扫描行不显示 dBm 文本，首页排序也按未知处理。首页设备卡仅在**本机已连接且读数合法**时显示信号条，不再展示可能过期数小时的扫描缓存；设备详情新增「信号强度」行，展示 dBm、`RSISignalView` 格数与最近一次扫描的读数时间（`RecentDeviceStore.fetch(peripheralID:)`），未知时只写「无信号数据」。iOS 侧不引入 `Int.MIN_VALUE` 哨兵，继续用 `nil`；`-100` 是合法极弱值，不再被当作未知。
-
-**规则阈值比较符。** iOS 现状确认为 `<=`：`RuleEvaluator.swift` 的 `rssi <= rule.threshold`，`SceneEngine.swift` 的 `if rssi > threshold { reset }` 语义等价；本轮未改，Android 将改为一致。
-
-**测试。** 新增 `RSISignalTests` 9 个用例：八个边界值逐值锁定；`-200…-1` 全区间扫描断言单调、相邻档差仅 0/1、五个有效档全部覆盖、切换点恰为 `-85 / -75 / -66 / -55`；未知与极弱文案区分且未知不出现 dBm；`0 / 1 / 64 / 127 / 255` 与 `nil` 均为未知；越界负数归极弱；设备卡未连接 / 非法读数不显示信号条；详情未知态无 dBm；详情 ViewModel 从最近扫描记录取 dBm 与时间并过滤占位值。全量单测 **512 个 0 失败**，e2e 仍 **460 通过 / 0 跳过 / 0 失败**。
-
-**保留差异（符合规范第 8 节）。** iOS 继续用 `nil` 表示未知、保留按档着色；详情没有连接后 `readRSSI` 轮询，展示的是最近一次扫描读数并明确标注读数时间，不伪装成实时值。
-
-## 4. 错误码
-
-客户端错误码用于日志、空状态副标题与问题反馈，**两端含义一致**：
-
-| 错误码 | 含义 | Android 触发场景 | iOS 触发场景 |
-| --- | --- | --- | --- |
-| `NET-001` | 网络请求失败（无网络、超时、连接被拒） | OkHttp IOException | URLSession 传输错误 |
-| `NET-002` | 服务端返回非 2xx | HTTP 4xx/5xx | HTTP 4xx/5xx |
-| `NET-003` | 响应无法解析为约定结构 | JSON 解析异常 | Codable 解码失败 |
-| `NET-004` | Base URL 缺失或非法 | 配置缺失 | `BASE_URL` 缺失/非法 |
-| `DB-001` | 本地数据库读写失败 | Room 异常 | SQLite 打开/读写失败 |
-| `BT-004` | 蓝牙前置条件不满足（不支持/未授权/已关闭/连接失败） | BLE 调用异常 | `CBManager` 状态异常 |
-| `SYNC-001` | 同步 / 云端记录前置条件不满足 | — | 上一次同步尚未结束、缺少匿名会话 |
-
-后端 `openapi.yaml` 的错误体为 `{"error":{"code":"...","message":"..."}}`。完整枚举（与 `PJGoIoT/internal/httpapi/errors.go` 一致，v0.10.0 起含 410 / 503 新码）：
-
-`BAD_REQUEST`、`INVALID_MAC`、`INVALID_JSON`、`UNAUTHORIZED`、`FORBIDDEN`、`NOT_FOUND`、`METHOD_NOT_ALLOWED`、`CONFLICT`、`IDEMPOTENCY_CONFLICT`、`RATE_LIMITED`、`PAYLOAD_TOO_LARGE`、`NOT_IMPLEMENTED`、`UNAVAILABLE`、`INTERNAL`、**`RESYNC_REQUIRED`**、**`TIMEOUT`**。
-
-`FORBIDDEN`（v0.14.0）用于家庭 / 房间写权限：member 修改家庭名、创建 / 修改 / 删除房间、签发邀请码，以及删除个人家庭。家庭相关调用统一由 `HouseholdAPIError.userMessage` 转成可读文案（「你没有修改该家庭 / 房间的权限」），**不在 UI 展示错误码、不整页报错**；跨家庭 / 非成员一律由服务端返回 `NOT_FOUND`（404），客户端文案为「家庭不存在或你没有访问权限」，不区分存在性。
-
-**唯一映射表**：`Core/Networking/APIErrorCatalog.swift` 把服务端 code 映射为「处理方式 + 展示文案」，`AppError` 与同步流程都只查这一张表：
-
-| code | HTTP | 处理方式 | 展示文案 |
-| --- | --- | --- | --- |
-| `RESYNC_REQUIRED` | 410 | `resyncRequired`：清游标 + `cursor=0` 全量重拉，只处理一次，不进退避 | 云端变更记录已过期，需要全量重新同步 |
-| `TIMEOUT` | 503 | `retryWithBackoff`：指数退避，不改游标、不重登 | 服务端繁忙，稍后重试 |
-| `UNAUTHORIZED` | 401 | `reloginRequired`：等用户确认重新登录 | 登录已失效，请在「我的」页重新登录 |
-| `IDEMPOTENCY_CONFLICT` | 409 | `terminal`：不自动重试 | 同步请求与已有幂等键冲突，请稍后重试 |
-| `RATE_LIMITED` | 429 | `rateLimited`：按 `Retry-After` 秒数退避（头优先，缺失时用响应体 `retryAfter`） | 请求过于频繁，请在 N 秒后重试 |
-| `UNAVAILABLE` / `INTERNAL` | 503 / 500 | `retryWithBackoff` | 服务暂时不可用 / 服务端内部错误 |
-| 其余（`BAD_REQUEST` / `NOT_FOUND` / `CONFLICT` / `SCENE_*` 等） | 4xx | `terminal` | 按表内固定文案 |
-
-客户端 `SyncAPIClient` 统一解析为 `AppError.api`：
-
-- 客户端错误码仍为 `NET-002`，便于两端统一统计；
-- 展示与日志中同时保留服务端 `code` 与 `HTTP status`（如 `NET-002 服务端繁忙，稍后重试（HTTP 503 / TIMEOUT）`）；
-- 同一 `Idempotency-Key` 用于不同请求体时返回 409 `IDEMPOTENCY_CONFLICT`（不是 `IDEMPOTENCY_KEY_REUSED`），客户端不自动重试；
-- **401 `UNAUTHORIZED` 语义（v0.22.0 起）**：401 先交给 `AuthenticatedHTTPClient` 做**单飞刷新 + 重放**，不直接进入重新登录态：
-  - 请求携带的 token ≠ 本地当前 token（刷新刚完成）→ 直接用新 token 重放，不再发第二次刷新；
-  - token 相同 → 发起 `POST /auth/refresh`，并发的 401 全部挂同一次刷新；成功后 `SecItemUpdate` 原子替换 Keychain token，再唤醒等待方重放原请求；
-  - 刷新返回 401 → 才进入「需要重新登录」：**只清失效 token，保留本地设备 / 读数 / 家庭 / 场景**，不静默调用 `auth/anonymous`；
-  - 刷新遇到网络 / 5xx → **不清会话、不重登**，按可重试处理。
-  - 重新登录提供两种路径：用配对码**关联回原账号**（推荐），或以新匿名账号继续（旧账号云端数据不合并）。
-- **退出当前会话 ≠ 删除账号**：`POST /auth/logout` 只吊销本机 token 并清本地凭据，本地数据一条不删；之后进入「需要重新登录」。删除账号仍走两步删除令牌。
-- **4xx 一律终态**：`AppError.isRetryable` 只认网络错误与 5xx；4xx 不自动重试，等待用户修改内容后重新提交；429 是唯一例外，按 `retryAfterSeconds` 单独退避。
-- **场景错误码**：`SCENE_NAME_INVALID` / `SCENE_TRIGGER_INVALID` / `SCENE_COOLDOWN_OUT_OF_RANGE` / `SCENE_ACTION_INVALID` / `SCENE_DEVICE_NOT_FOUND` / `SCENE_METRIC_NOT_SUPPORTED` 均映射为独立可读文案且为终态。契约 0.17.0 没有单独的「场景不存在 / 版本冲突」错误码，这两类情况分别由 `NOT_FOUND` 与字段级 LWW（200 + 合并结果）表达。
-- **410 与 503 不可混用**：`AppError.isResyncRequired` 只认 410 / `RESYNC_REQUIRED`；`isServerBusy` 只认 503 / `TIMEOUT` / `UNAVAILABLE`；两者都有单测锁定。
-
----
-
-## 5. 空状态与降级行为
-
-统一使用代码组装的空状态视图：
-
-- Android：`ui/common/EmptyStateView.kt`（Kotlin 组装 `LinearLayout + ImageView + TextView + Button`）。
-- iOS：`DesignSystem/EmptyStateView.swift`（纯代码 Auto Layout，`configure(symbolName:title:message:actionTitle:action:)`）。
-
-| 场景 | 行为 |
-| --- | --- |
-| 首页无扫描记录 | 空状态 +「开始扫描」按钮，不展示假设备 |
-| 首页蓝牙不支持/未授权/关闭 | 空状态说明原因；未授权引导去「我的」跳系统设置 |
-| 设备无已保存设备 | 空状态说明去首页扫描并保存 |
-| 设备无规则 | 空状态说明新增规则；规则可增删启停 |
-| 产品请求失败 | 错误空状态（含错误码）+「重试」，不展示假型号 |
-| 产品返回空数组 | 空状态 +「刷新」，不展示假数据 |
-| 市场请求失败 / 空列表 | 错误或空状态 +「重试/刷新」；页脚明确「不提供下单、订单或支付」 |
-| 市场筛选无结果 | 空状态「没有符合筛选条件的条目」+「清除筛选」；不展示假数据 |
-| 设备详情网络失败且无缓存 | 失败空状态 +「重试读取设备信息」 |
-| 设备详情网络失败但有缓存 | **降级显示缓存**，并标注缓存时间与错误码，不白屏 |
-| 设备详情云端型号为空（`deviceType = null`） | 型号显示「型号未知」；厂商 / 固件显示「—」；兼容性显示「暂无兼容性说明」；**alias、分组、最近出现时间照常展示** |
-| 设备详情无读数 | 「数据」区只展示一条真实空状态「连接设备后开始采集」；蓝牙未授权时改为提示前往系统设置；不渲染空图表、不造 0 值 |
-| 设备详情有本地读数但云端请求失败 | 按同一 UTC 网格展示本地分桶图表与本地 24h 汇总，并标注「离线：本地数据」；30 天区间标注「离线：仅本地 7 天数据」 |
-| 我的扫描日志为空 | 空状态说明扫描会话会自动记录 |
-| 我的同步未完成 / 失败 | 显示上次同步时间、待上传条数、错误码与降级说明；本地功能不受影响 |
-| 我的同步冲突 | 明确提示「另一台设备改过这条」，并说明已采用云端版本 |
-| 家庭 / 房间无写权限（v0.14.0） | 写入口禁用 + 页脚「你没有修改该家庭 / 房间的权限」；操作失败用 toast 展示可读文案，不弹 `FORBIDDEN` 码、不整页报错 |
-| 跨家庭 / 非成员（v0.14.0） | 统一「家庭不存在或你没有访问权限」（服务端 404，不泄露存在性），页面回到可用空状态 |
-| 离线房间 / 归属（v0.14.0） | 本机房间与设备照常展示并标「未同步」；恢复网络后自动补报，不丢数据 |
-| 本地数据库不可用 | 应用仍可打开（回退内存库），「我的」显示 `DB-001` 启动提示 |
-
----
-
-## 6. 权限行为
-
-| 平台 | 声明 / 流程 |
-| --- | --- |
-| Android | Manifest 声明 `BLUETOOTH_SCAN`（`neverForLocation`）、`BLUETOOTH_CONNECT`；SDK < 31 追加 `ACCESS_FINE_LOCATION`；运行时按版本申请。 |
-| iOS | `Info.plist` 声明 `NSBluetoothAlwaysUsageDescription`、`NSBluetoothPeripheralUsageDescription`；iOS 13+ 由 `CBCentralManager` 首次使用时触发系统授权，不额外弹自定义权限框。 |
-
-两端「我的」页均提供：
-
-- 当前蓝牙授权状态（allowed / notDetermined / denied / restricted / unknown）。
-- 当前蓝牙开关状态（poweredOn / poweredOff / unauthorized / unsupported / resetting）。
-- 跳转系统设置入口（Android `Settings.ACTION_APPLICATION_DETAILS_SETTINGS`；iOS `UIApplication.openSettingsURLString`）。
-- 未授权/受限时的明确文案引导。
-
-iOS 模拟器不提供真实蓝牙，`CBCentralManager` 状态通常为 `unsupported`；该情形直接展示「当前环境不支持蓝牙」空状态，**需真机验证真实授权弹窗与扫描**。
-
----
-
-## 7. 本地持久化与同步字段
-
-| 平台 | 方案 | 理由 |
-| --- | --- | --- |
-| Android | Room 2.8.5（KSP） | 与现有工程一致，DAO + Flow 观察 |
-| iOS | SQLite3（原生 C API，WAL/FULLMUTEX） | 同步字段需精确控制、schema 用 SQL 明示、无需 `.xcdatamodeld`、便于与 Android 表字段逐列对照 |
-
-两端业务表均保留同步字段：
-
-- `id`：客户端生成的 UUID（iOS `saved_devices.id` / Android `devices.id`）。
-- `updatedAt`：最后修改时间（RFC 3339 / 本地 `REAL` 秒）。
-- `deletedAt`：软删除时间；未删除为 `NULL`。
-- `syncState`：`pending` / `synced` / `pendingDelete`。
-
-iOS 迁移版本：
-
-- v1：五张业务表，含上述同步字段。
-- v2（v0.2.0）：`saved_devices` 增加 `platform`（默认 `ios`）与 `external_id`，由 `peripheral_id` 大写回填；唯一索引 `(platform, external_id) WHERE deleted_at IS NULL`。
-- v3（v0.3.3，对齐 openapi 0.3.2）：`saved_devices` 增加 `device_type TEXT`（可空）；旧库升级后为 `NULL`，由设备详情拿到云端 `deviceType` 后回填。
-- v4（v0.3.6）：`saved_devices` 增加 `advertised_name TEXT`（广播名），以及 `alias_patch` / `advertised_name_patch` / `group_patch` 三态标记列，用于区分「未修改」与「显式清除」。
-- v5（v0.4.0）：新增 `readings` 表（`id`, `device_id`, `metric`, `value`, `unit`, `recorded_at`, `sync_state`），索引 `(device_id, metric, recorded_at DESC)` 支撑最近 60 点与 7 天清理。
-- v6（v0.8.0）：新增仅本机的 `scenarios` 表（`id`, `name`, `actions` JSON, `created_at`, `updated_at`），无同步字段。
-- v7（v0.11.0）：`rules` 增加 `metric TEXT`（可空）、`comparison TEXT NOT NULL DEFAULT 'lte'`、`reading_threshold REAL NOT NULL DEFAULT 0`、`consecutive INTEGER NOT NULL DEFAULT 1`；旧行回填为 `metric = NULL` / `lte` / `1`，仍按原 RSSI / 断开条件生效。
-- v8（v0.13.0）：新增仅本机的 `rooms` 表（`id`, `name`, `sort_order`, `remote_id`, `created_at`, `updated_at`）并为 `saved_devices` 增加可空 `room_id TEXT`（NULL = 未分配）；旧数据不重写，`group_name` 保留为兼容字段。
-- v9（v0.14.0）：新增 `households(id, remote_id UNIQUE, name, is_personal, role, created_at, updated_at)` 与 `device_assignment_pending(device_id PK, remote_room_id, remote_household_id, created_at)`；`rooms` 增加 `household_id TEXT`（可空）、`sync_state TEXT NOT NULL DEFAULT 'local'`、`deleted INTEGER NOT NULL DEFAULT 0`；`saved_devices` 增加 `household_id TEXT`、`remote_room_id TEXT`、`remote_household_id TEXT`。全部条件 ALTER，旧数据不重写，房间与归属保留。
-
-iOS 表结构（`codemagic.sqlite`）：
-
-| 表 | 关键字段 |
-| --- | --- |
-| `saved_devices` | `id, peripheral_id, platform, external_id, name, remark, group_name, room_id, household_id, remote_room_id, remote_household_id, mac, vendor, device_type, firmware_version, last_seen_at, created_at, updated_at, deleted_at, sync_state` |
-| `rules` | `id, name, trigger, threshold, metric, comparison, reading_threshold, consecutive, device_id, enabled, created_at, updated_at, deleted_at, sync_state` |
-| `scan_logs` | `id, category, level, message, created_at, updated_at, deleted_at, sync_state` |
-| `recent_devices` | `peripheral_id, name, rssi, last_seen_at, updated_at, deleted_at, sync_state` |
-| `device_info_cache` | `peripheral_id, payload(JSON), fetched_at, updated_at, deleted_at, sync_state` |
-| `readings` | `id, device_id, metric, value, unit, recorded_at, sync_state` |
-| `scenarios`（仅本机） | `id, name, actions(JSON), created_at, updated_at` — 无 `deleted_at` / `sync_state` |
-| `rooms`（v0.14.0 起服务端为准） | `id, remote_id, household_id, name, sort_order, sync_state, deleted, created_at, updated_at` — 无 `deleted_at`，删除用 `deleted` 墓碑 |
-| `households`（v0.14.0） | `id, remote_id, name, is_personal, role, created_at, updated_at` |
-| `device_assignment_pending`（v0.14.0） | `device_id PK, remote_room_id, remote_household_id, created_at` |
-
-规则触发语义（两端一致）：
-
-- **断开**：上一轮扫描存在、本轮不再出现（iOS 以 10s 未再出现为离开判定）。
-- **RSSI 低于阈值**：低于或等于阈值触发一次，恢复后重新武装。
-- **指标阈值（v0.11.0）**：`metric` 读数满足 `comparison` + `reading_threshold` 且**连续 `consecutive` 条（1–5，默认 1）**才触发一次；任一条不满足即清零并（若已告警）恢复一次。判定接在 `ReadingsIngestor` 落库之后，命中日志含触发值、阈值、时间与设备，进入「智能 → 最近触发」。
-- 规则触发写本地日志并（若用户授权通知）发本地通知；恢复通知只在确实发过触发通知后补一条。规则**不参与 push / changes**（仅本机），详见 3.14。
-
-### 7.1 同步行为（v0.2.0 起，与 openapi 对齐）
-
-**身份与鉴权**
-
-- 首次同步调用 `POST /api/v1/auth/anonymous`，得到 `{userId, token, expiresAt}`；`expiresAt` 存入 `sync.sessionExpiresAt`（UserDefaults，非凭据），仅供「我的」只读展示。
-- token 只存 **Keychain**（`kSecClassGenericPassword`，`AfterFirstUnlock`），不写 UserDefaults；userId 与游标存 UserDefaults（非凭据）。
-- 之后所有请求带 `Authorization: Bearer <token>`。
-
-**增量拉取**
-
-- `GET /api/v1/sync/changes?cursor=<上次游标>&limit=200`（服务端上限 500，客户端先收敛），`cursor` 持久化；`hasMore = true` 时继续拉取，单次同步最多 10 页。
-- 游标早于保留边界 → 410 `RESYNC_REQUIRED`：清游标 + `cursor=0` 全量重拉（只处理一次，pending 不丢，详见 3.13）。
-- 应用规则：
-  - 本地不存在 → 插入并标记 `synced`；
-  - 本地已同步 → 以云端字段覆盖；
-  - 本地有未上传修改且云端 `updatedAt` 更新 → **云端获胜**，写回云端版本，同时提示「另一台设备改过这条」；
-  - 本地有未上传修改且本地更新 → 保留本地，稍后推送由服务端裁决。
-
-**批量推送**
-
-- 取 `syncState != synced` 的记录（含 `pendingDelete` 的 tombstone），每批最多 100 条，按 `id` 排序；读数并入同一批次，每批最多 200 条，同样按 `id` 排序。
-- `Idempotency-Key` 由批次内容（设备字段 + 读数 `id`/`metric`/`value`/`unit`/`recordedAt`）规范化后派生，**重试网络失败时复用同一键**；内容变化则键自动变化，避免 409。读数按 `id` 幂等，重复条目由服务端计入 `skippedReadings`。
-- 成功：本批全部标记 `synced`；`conflicts` 中的记录写回云端版本并提示，不静默丢弃本地修改。
-- 失败：保留 `pending`，下次同步用相同键重试。
-
-**Tombstone**
-
-- 本地删除为软删除（`deleted_at` + `syncState = pendingDelete`），推送时 `deleted: true`。
-- 拉取到 `op = delete` 或 `deletedAt != nil` → 本地写 tombstone 并标记 `synced`，列表不再展示。
-
-**触发时机**
-
-- 回到前台：`sceneDidBecomeActive` → 节流 120 秒后自动同步。
-- 进入后台：提交 `BGAppRefreshTask`（`com.platojobs.codemagic.sync`，最早 15 分钟），系统择机执行。
-- 「我的」页「立即同步」：手动触发，不受节流限制。
-- 失败不影响本地读写；「我的」页展示上次同步时间、待上传条数、会话到期日、错误码与降级说明。
-- 可重试失败（网络 / 503 `TIMEOUT` / 5xx / 429）按指数退避（30s 起、翻倍、上限 300s）设 `nextAutomaticRetryAt`，窗口内自动同步跳过，手动同步不受限；410 不进该退避。
-
----
-
-## 8. 变更与对齐流程
-
-1. 先改 `PJGoIoT/api/openapi.yaml`（后端契约只增不删）。
-2. 同步更新本文件第 3、4 节与两端字段映射。
-3. Android 更新 `data/remote/Dtos.kt`，iOS 更新 `Core/Models/DeviceCatalog.swift` / `ProductModel.swift` / `MarketItem.swift` 与 `Core/Networking/ProductAPIClient.swift`。
-4. 两端运行单元测试：Android `./gradlew testDebugUnitTest`，iOS `xcodebuild ... test`；iOS 另跑 `scripts/e2e-contract.sh` 验证新端点。
-5. 同步相关变更需同时覆盖：push 幂等、冲突不覆盖、tombstone、未知字段容错（iOS 见 `codemagicTests/SyncEngineTests.swift`）。
-6. 端点以 `openapi.yaml` 为准；若暂时无法对齐，必须在本文件与 `KNOWN_ISSUES.md` 显式记录，不静默假设。
+1. 先改 `PJGoIoT/api/openapi.yaml`（只增不删）。
+2. 更新本节端点 / 字段与两端 DTO。
+3. 补单测与 e2e 断言；跨端行为变更需同时给出 Android 对应改动。
