@@ -43,6 +43,9 @@ final class FakeBluetoothService: BluetoothServicing {
     /// 下一次 `readRSSI` 返回的结果；默认失败，测试按需覆盖。
     var rssiResult: Result<Int, Error> = .failure(BluetoothRSSIError.notConnected)
     private(set) var rssiReadRequests: [UUID] = []
+    /// 置 true 后 `readRSSI` 先挂起，由测试调用 `completePendingRSSIReads()` 模拟停表后迟到的回调。
+    var defersRSSIReads = false
+    private var pendingRSSIReads: [UUID: (Result<Int, Error>) -> Void] = [:]
 
     init(state: BluetoothState = .poweredOn, authorization: BluetoothAuthorization = .allowed) {
         self.state = state
@@ -95,7 +98,20 @@ final class FakeBluetoothService: BluetoothServicing {
             completion(.failure(BluetoothRSSIError.notConnected))
             return
         }
-        completion(rssiResult)
+        guard defersRSSIReads else {
+            completion(rssiResult)
+            return
+        }
+        pendingRSSIReads[peripheralID] = completion
+    }
+
+    /// 释放所有挂起的 RSSI 读取，用于验证「停表后才返回」的回调不会覆盖回退值。
+    func completePendingRSSIReads() {
+        let pending = pendingRSSIReads
+        pendingRSSIReads.removeAll()
+        for completion in pending.values {
+            completion(rssiResult)
+        }
     }
 
     func disconnectAll() {

@@ -102,6 +102,8 @@ final class DeviceDetailViewModel {
     static let signalRefreshInterval: TimeInterval = 2
     private(set) var isSignalPolling = false
     private var isSignalReadInFlight = false
+    /// 每次停表递增，用于丢弃停表后才返回的在途 RSSI 回调，防止覆盖已回退的值。
+    private var signalGeneration = 0
     private var refreshPolicy: ReadingsRefreshPolicy
     private var remoteRefreshWorkItem: DispatchWorkItem?
     /// 详情页是否可见；不可见时不发任何远端读数请求。
@@ -724,6 +726,7 @@ final class DeviceDetailViewModel {
     }
 
     func stopSignalPolling(resetToLastScan: Bool = false) {
+        signalGeneration &+= 1
         signalTimer?.invalidate()
         signalTimer = nil
         isSignalPolling = false
@@ -746,8 +749,9 @@ final class DeviceDetailViewModel {
         }
         guard !isSignalReadInFlight else { return }
         isSignalReadInFlight = true
+        let generation = signalGeneration
         bluetooth.readRSSI(peripheralID: device.peripheralID) { [weak self] result in
-            guard let self else { return }
+            guard let self, self.signalGeneration == generation else { return }
             self.isSignalReadInFlight = false
             self.handleSignalResult(result)
         }

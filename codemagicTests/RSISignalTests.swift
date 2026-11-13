@@ -111,6 +111,19 @@ final class RSISignalTests: XCTestCase {
         XCTAssertEqual(RSISignalView.tier(for: -200), .veryWeak)
     }
 
+    /// `Int.min` 是跨端「未知」哨兵值，不能当成合法 dBm 或极弱信号。
+    func testIntMinSentinelIsUnknown() {
+        XCTAssertFalse(RSISignalView.isValid(Int.min))
+        XCTAssertEqual(RSISignalView.tier(for: Int.min), .unknown)
+        XCTAssertEqual(RSISignalView.tier(for: Int.min).barCount, 0)
+
+        let view = RSISignalView()
+        view.rssi = Int.min
+        XCTAssertEqual(view.signalLevel, 0)
+        XCTAssertEqual(view.accessibilityLabel, L10n.t("signal.unknown"))
+        XCTAssertFalse((view.accessibilityLabel ?? "").contains("dBm"), "未知不得显示 dBm 数值")
+    }
+
     // MARK: - Presentation
 
     /// 设备卡只在「本机已连接且读数合法」时显示信号条，未连接不保留上次扫描的缓存值。
@@ -301,6 +314,41 @@ final class RSISignalTests: XCTestCase {
         XCTAssertFalse(viewModel.isSignalPolling)
         viewModel.pollSignal()
         XCTAssertEqual(bluetooth.rssiReadRequests.count, 1, "页面不可见时不得继续读取")
+        viewModel.teardown()
+    }
+
+    /// 停表后迟到的在途回调必须丢弃，不能把已回退的扫描值改成实时值 / 刷新失败。
+    func testLateCallbackAfterStoppingDoesNotOverwriteRolledBackValue() throws {
+        let testDatabase = try TestDatabase()
+        defer { testDatabase.cleanUp() }
+        let store = RecentDeviceStore(database: testDatabase.database)
+        let device = makeSavedDevice()
+        let scanAt = Date(timeIntervalSince1970: 1_700_000_000)
+        try store.upsert(peripheralID: device.peripheralID, name: device.displayName, rssi: -80, lastSeenAt: scanAt)
+
+        let bluetooth = FakeBluetoothService()
+        bluetooth.markConnected(device.peripheralID)
+        bluetooth.rssiResult = .success(-61)
+        bluetooth.defersRSSIReads = true
+        let viewModel = makeDetailViewModel(
+            device: device,
+            database: testDatabase,
+            bluetooth: bluetooth,
+            store: store
+        )
+
+        viewModel.setVisible(true)
+        XCTAssertEqual(viewModel.signalReading, .init(rssi: -80, readAt: scanAt, status: .lastScan), "首读尚未返回")
+
+        viewModel.setVisible(false)
+        XCTAssertEqual(viewModel.signalReading, .init(rssi: -80, readAt: scanAt, status: .lastScan))
+
+        bluetooth.completePendingRSSIReads()
+        XCTAssertEqual(
+            viewModel.signalReading,
+            .init(rssi: -80, readAt: scanAt, status: .lastScan),
+            "停表后的迟到回调不得改动已回退的值"
+        )
         viewModel.teardown()
     }
 

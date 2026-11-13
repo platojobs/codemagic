@@ -39,10 +39,8 @@ final class DevicesViewModel {
             rules = try ruleStore.fetchAll()
             if let recentDeviceStore {
                 let recent = (try? recentDeviceStore.fetchAll(limit: 100)) ?? []
-                recentRSSI = Dictionary(
-                    recent.map { ($0.peripheralID, $0.rssi) },
-                    uniquingKeysWith: { first, _ in first }
-                )
+                // 与首页共用同一判定：非法读数不进排序表，按未知排在合法值之后。
+                recentRSSI = RSISignalView.validRSSIMap(from: recent)
             }
             // 分组被清空后自动回到「全部」，避免筛选结果一直为空。
             if let groupFilter, !availableGroups.contains(groupFilter) {

@@ -77,13 +77,8 @@ final class HomeDashboardViewModel {
             }
             scenarios = try scenarioStore.fetchAll()
             let recent = (try? recentDeviceStore.fetchAll(limit: 100)) ?? []
-            // 非负 RSSI 是占位 / 非法读数，统一按未知处理，不参与展示与排序。
-            recentRSSI = Dictionary(
-                recent.compactMap { device -> (UUID, Int)? in
-                    RSISignalView.isValid(device.rssi) ? (device.peripheralID, device.rssi) : nil
-                },
-                uniquingKeysWith: { first, _ in first }
-            )
+            // 非负 / 哨兵值等非法读数统一按未知处理，不参与展示与排序。
+            recentRSSI = RSISignalView.validRSSIMap(from: recent)
             let calendar = Calendar.current
             let startOfDay = calendar.startOfDay(for: Date())
             todayAlertCount = (try? scanLogStore.countRuleAlerts(since: startOfDay)) ?? 0

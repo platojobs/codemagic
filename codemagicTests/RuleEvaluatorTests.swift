@@ -91,6 +91,31 @@ final class RuleEvaluatorTests: XCTestCase {
         XCTAssertEqual(againLow.count, 1)
     }
 
+    /// RSSI 规则是 `<=`：读数等于阈值必须触发，高于阈值不触发。
+    func testRSSIThresholdTriggersAtEquality() {
+        let evaluator = RuleEvaluator()
+        let device = makeSavedDevice(name: "传感器")
+        let rule = DeviceRule(name: "弱信号", trigger: .rssiBelowThreshold, threshold: -80)
+
+        XCTAssertTrue(evaluator.evaluate(
+            rules: [rule],
+            devices: [device],
+            observedRSSI: [device.peripheralID: -79],
+            date: baseDate
+        ).isEmpty, "高于阈值不触发")
+
+        let equal = evaluator.evaluate(
+            rules: [rule],
+            devices: [device],
+            observedRSSI: [device.peripheralID: -80],
+            date: baseDate.addingTimeInterval(1)
+        )
+        XCTAssertEqual(equal.count, 1, "等于阈值必须触发")
+        XCTAssertEqual(equal.first?.kind, .triggered)
+        XCTAssertEqual(equal.first?.value, -80)
+        XCTAssertEqual(equal.first?.threshold, -80)
+    }
+
     func testDisabledRuleDoesNotTrigger() {
         let evaluator = RuleEvaluator()
         let device = makeSavedDevice()

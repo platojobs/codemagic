@@ -87,6 +87,33 @@ final class SceneEngineTests: XCTestCase {
         XCTAssertEqual(try sceneStore.fetch(id: scene.id)?.lastRunAt, Date(timeIntervalSince1970: 1_600))
     }
 
+    /// 场景 RSSI 触发是 `<=`：等于阈值必须触发，高于阈值不触发。
+    func testRSSITriggerFiresAtEquality() throws {
+        let device = makeDevice(name: "门磁")
+        try deviceStore.upsert(device)
+        let scene = try sceneStore.insert(
+            makeScene(
+                name: "信号弱",
+                trigger: .rssiBelow(device: reference(for: device), rssiThreshold: -70),
+                actions: [.log(message: "信号 {value}", level: .warn)]
+            ),
+            now: Date(timeIntervalSince1970: 1_000)
+        )
+        let engine = makeEngine()
+
+        XCTAssertTrue(
+            engine.evaluateScans(observedRSSI: [device.peripheralID: -69], at: Date(timeIntervalSince1970: 1_100)).isEmpty,
+            "高于阈值不触发"
+        )
+        let equal = engine.evaluateScans(
+            observedRSSI: [device.peripheralID: -70],
+            at: Date(timeIntervalSince1970: 1_200)
+        )
+        XCTAssertEqual(equal.count, 1, "等于阈值必须触发")
+        XCTAssertEqual(equal.first?.sceneID, scene.id)
+        XCTAssertTrue(equal.first?.triggered == true)
+    }
+
     // MARK: - Metric
 
     func testMetricThresholdRequiresConsecutiveReadings() throws {

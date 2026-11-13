@@ -1,8 +1,8 @@
-# App Store 上架材料（iOS v0.31.11）
+# App Store 上架材料（iOS v0.31.12）
 
 > 状态：**材料已补齐，但尚未上传 App Store Connect、尚未提交审核、未上架**。
 > 本机没有 Apple Developer Program 账号，也没有任何 App Store 审核记录；仓库中没有分发证书、
-> Provisioning Profile 与 APNs 推送证书。`MARKETING_VERSION 0.31.11` / `CURRENT_PROJECT_VERSION 52`
+> Provisioning Profile 与 APNs 推送证书。`MARKETING_VERSION 0.31.12` / `CURRENT_PROJECT_VERSION 53`
 > 只用于模拟器构建与 CI，不能直接提交商店。
 >
 > 本文只描述仓库中**已实现并有代码证据**的能力。未实现的能力（账号密码、云备份、OTA、
@@ -17,7 +17,7 @@
 | 副标题（中文，≤30 字符） | `扫描、读数、曲线与阈值告警`（13 字符） |
 | 副标题（英文，≤30 字符） | `Scan, read, chart, alert`（24 字符） |
 | Bundle ID | `com.platojobs.codemagic` |
-| 版本 | `MARKETING_VERSION 0.31.11`、`CURRENT_PROJECT_VERSION 52` |
+| 版本 | `MARKETING_VERSION 0.31.12`、`CURRENT_PROJECT_VERSION 53` |
 | 默认语言 | 中文（简体）；另含英文 `en` |
 | 主分类 | 工具 |
 | 次分类 | 效率 |

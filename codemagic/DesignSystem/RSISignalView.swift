@@ -49,15 +49,25 @@ final class RSISignalView: UIView {
 
     // MARK: - Level
 
-    /// 只有负数才是真实 RSSI；用于调用点过滤占位值与非法读数。
+    /// 只有负数才是真实 RSSI；`Int.min` 是「未知」哨兵值，不能当极弱信号排序或展示。
     static func isValid(_ rssi: Int?) -> Bool {
         guard let rssi else { return false }
-        return rssi < 0
+        return rssi < 0 && rssi != Int.min
+    }
+
+    /// 由最近扫描记录构建「设备 → 合法 dBm」映射，展示与排序统一走这一处判定。
+    static func validRSSIMap(from devices: [RecentDevice]) -> [UUID: Int] {
+        Dictionary(
+            devices.compactMap { device -> (UUID, Int)? in
+                isValid(device.rssi) ? (device.peripheralID, device.rssi) : nil
+            },
+            uniquingKeysWith: { first, _ in first }
+        )
     }
 
     /// 按规范降序判定：每个整数 dBm 恰好命中一档。
     static func tier(for rssi: Int?) -> Tier {
-        guard let rssi, rssi < 0 else { return .unknown }
+        guard let rssi, isValid(rssi) else { return .unknown }
         if rssi >= -55 { return .strong }
         if rssi >= -66 { return .good }
         if rssi >= -75 { return .fair }

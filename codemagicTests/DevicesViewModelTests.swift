@@ -117,6 +117,19 @@ final class DevicesViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.filteredDevices.map(\.peripheralID), [betaID, alphaID, gammaID], "信号强的在前，未知信号最后")
     }
 
+    /// 非法读数不参与有效排序：`0` 不能被当成「最强」排到最前，等同未知排在合法值之后。
+    func testSignalSortIgnoresInvalidRSSI() throws {
+        try recentDeviceStore.upsert(peripheralID: alphaID, name: "Alpha", rssi: 0, lastSeenAt: Date())
+        try recentDeviceStore.upsert(peripheralID: betaID, name: "Beta", rssi: -70, lastSeenAt: Date())
+        try recentDeviceStore.upsert(peripheralID: gammaID, name: "Gamma", rssi: Int.min, lastSeenAt: Date())
+        viewModel.reload()
+        viewModel.updateSort(.signal)
+
+        XCTAssertEqual(viewModel.filteredDevices.first?.peripheralID, betaID, "合法值必须排在非法值之前")
+        XCTAssertFalse(viewModel.filteredDevices.prefix(1).contains { $0.peripheralID == alphaID })
+        XCTAssertEqual(viewModel.filteredDevices.map(\.peripheralID), [betaID, alphaID, gammaID])
+    }
+
     func testAddedAtSortNewestFirst() {
         viewModel.updateSort(.addedAt)
         XCTAssertEqual(viewModel.filteredDevices.map(\.peripheralID), [gammaID, betaID, alphaID])

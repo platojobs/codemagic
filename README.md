@@ -13,11 +13,11 @@
 
 | 项 | 结果 |
 | --- | --- |
-| 版本 | **v0.31.11**（`MARKETING_VERSION 0.31.11`，`CURRENT_PROJECT_VERSION 52`，tag `v0.31.11`） |
-| 本版主题 | 设备详情在本机连接后每 2 秒 `readRSSI` 刷新信号与读数时间；断开 / 页面退出 / 进后台自动停表；刷新失败保留上次值并标记；未连接仍显示最近扫描值并标注来源 |
+| 版本 | **v0.31.12**（`MARKETING_VERSION 0.31.12`，`CURRENT_PROJECT_VERSION 53`，tag `v0.31.12`） |
+| 本版主题 | RSSI 统一判定：设备列表信号排序过滤非法值；停表后迟到回调丢弃；`Int.min` 判未知；补 RSSI 规则 / 场景等值边界用例 |
 | 五模块 | 首页 / 智能 / 产品 / 市场 / 我的；设备管理并入首页，规则与场景集中在「智能」 |
 | 核心能力 | BLE 扫描 / 连接 / 四特征读数采集、服务端类型目录、1h–30d 图表、家庭与房间、同步与推送注册、中英双语与动态字体 |
-| 单元测试 | **517 个用例，0 失败**（Xcode 27.2 / iPhone 17 模拟器，`** TEST SUCCEEDED **`；v0.31.11 新增 5 个 RSSI 刷新用例） |
+| 单元测试 | **522 个用例，0 失败**（Xcode 27.2 / iPhone 17 模拟器，`** TEST SUCCEEDED **`；v0.31.12 新增 5 个 RSSI 回归用例） |
 | e2e | **460 通过 / 0 跳过 / 0 失败**（本地 `PJGoIoT` v0.26.0，fixture）；CI pin v0.25.0 时 presence 相关 2 项显式 `[SKIP]` |
 | 模拟器构建 | `** BUILD SUCCEEDED **` |
 | CI | [main run 43375801479](https://github.com/platojobs/codemagic/actions/runs/43375801479) / [tag run 43375813177](https://github.com/platojobs/codemagic/actions/runs/43375813177)，均 success |
@@ -155,4 +155,4 @@ e2e 默认端口 8080，被占用回退 18080，也可 `E2E_PORT=18080`；后端
 | [docs/app-privacy.md](docs/app-privacy.md) | `PrivacyInfo.xcprivacy` 与代码位置逐项对照，含必需理由 API |
 | [codemagic/Resources/PrivacyInfo.xcprivacy](codemagic/Resources/PrivacyInfo.xcprivacy) | 实际打包进 App 的隐私清单 |
 
-当前版本 `v0.31.11`（build 52），未上传 App Store Connect、无审核记录。
+当前版本 `v0.31.12`（build 53），未上传 App Store Connect、无审核记录。
