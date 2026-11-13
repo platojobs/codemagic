@@ -142,11 +142,12 @@ final class RSISignalTests: XCTestCase {
     func testSignalCellHidesdBmWhenReadingIsUnknown() {
         let cell = DeviceSignalCell(style: .default, reuseIdentifier: nil)
 
-        cell.configure(reading: .init(rssi: -72, readAt: Date(timeIntervalSince1970: 1_700_000_000)))
+        cell.configure(reading: .init(rssi: -72, readAt: Date(timeIntervalSince1970: 1_700_000_000), status: .live))
         XCTAssertTrue(allLabelTexts(in: cell).contains { $0.contains("-72 dBm") })
         XCTAssertTrue(allLabelTexts(in: cell).contains { $0.contains("/4 格") })
+        XCTAssertTrue(allLabelTexts(in: cell).contains { $0.contains("实时读数") })
 
-        cell.configure(reading: .init(rssi: nil, readAt: nil))
+        cell.configure(reading: .unknown)
         XCTAssertFalse(allLabelTexts(in: cell).contains { $0.contains("dBm") })
         XCTAssertTrue(allLabelTexts(in: cell).contains(L10n.t("signal.tier.unknown")))
     }
@@ -159,27 +160,170 @@ final class RSISignalTests: XCTestCase {
         let store = RecentDeviceStore(database: testDatabase.database)
         let device = makeSavedDevice()
         let readAt = Date(timeIntervalSince1970: 1_700_000_000)
-        let viewModel = DeviceDetailViewModel(
-            device: device,
-            bluetooth: FakeBluetoothService(),
-            productService: StubProductService(),
-            cacheStore: DeviceInfoCacheStore(database: testDatabase.database),
-            savedDeviceStore: SavedDeviceStore(database: testDatabase.database),
-            readingsStore: ReadingsStore(database: testDatabase.database),
-            recentDeviceStore: store
-        )
 
-        XCTAssertNil(viewModel.signalReading.rssi, "没有扫描记录时是未知")
+        let emptyViewModel = makeDetailViewModel(device: device, database: testDatabase, store: store)
+        XCTAssertEqual(emptyViewModel.signalReading, .unknown, "没有扫描记录时是未知")
 
         try store.upsert(peripheralID: device.peripheralID, name: device.displayName, rssi: -72, lastSeenAt: readAt)
-        XCTAssertEqual(viewModel.signalReading, .init(rssi: -72, readAt: readAt))
+        let scannedViewModel = makeDetailViewModel(device: device, database: testDatabase, store: store)
+        XCTAssertEqual(
+            scannedViewModel.signalReading,
+            .init(rssi: -72, readAt: readAt, status: .lastScan)
+        )
 
         try store.upsert(peripheralID: device.peripheralID, name: device.displayName, rssi: 0, lastSeenAt: readAt)
-        XCTAssertNil(viewModel.signalReading.rssi, "占位值 0 按未知处理")
-        XCTAssertNil(viewModel.signalReading.readAt, "未知时不展示读数时间")
+        let placeholderViewModel = makeDetailViewModel(device: device, database: testDatabase, store: store)
+        XCTAssertNil(placeholderViewModel.signalReading.rssi, "占位值 0 按未知处理")
+        XCTAssertNil(placeholderViewModel.signalReading.readAt, "未知时不展示读数时间")
+        XCTAssertEqual(placeholderViewModel.signalReading.status, .unknown)
+    }
+
+    // MARK: - Connected Refresh
+
+    /// 连接后 2 秒轮询成功：dBm 与读数时间都切到实时值。
+    func testConnectedRefreshUpdatesValueAndTime() throws {
+        let testDatabase = try TestDatabase()
+        defer { testDatabase.cleanUp() }
+        let store = RecentDeviceStore(database: testDatabase.database)
+        let device = makeSavedDevice()
+        let scanAt = Date(timeIntervalSince1970: 1_700_000_000)
+        try store.upsert(peripheralID: device.peripheralID, name: device.displayName, rssi: -80, lastSeenAt: scanAt)
+
+        let bluetooth = FakeBluetoothService()
+        bluetooth.markConnected(device.peripheralID)
+        bluetooth.rssiResult = .success(-61)
+        let liveAt = Date(timeIntervalSince1970: 1_700_000_120)
+        let viewModel = makeDetailViewModel(
+            device: device,
+            database: testDatabase,
+            bluetooth: bluetooth,
+            store: store,
+            now: { liveAt }
+        )
+
+        XCTAssertEqual(viewModel.signalReading.status, .lastScan)
+        viewModel.setVisible(true)
+        XCTAssertTrue(viewModel.isSignalPolling)
+        XCTAssertEqual(viewModel.signalReading, .init(rssi: -61, readAt: liveAt, status: .live))
+        XCTAssertEqual(bluetooth.rssiReadRequests, [device.peripheralID])
+        viewModel.teardown()
+    }
+
+    /// 刷新失败保留上一次成功值，只把状态标成 refreshFailed。
+    func testRefreshFailureKeepsPreviousValueAndMarksStatus() throws {
+        let testDatabase = try TestDatabase()
+        defer { testDatabase.cleanUp() }
+        let device = makeSavedDevice()
+        let bluetooth = FakeBluetoothService()
+        bluetooth.markConnected(device.peripheralID)
+        bluetooth.rssiResult = .success(-61)
+        let liveAt = Date(timeIntervalSince1970: 1_700_000_120)
+        let viewModel = makeDetailViewModel(
+            device: device,
+            database: testDatabase,
+            bluetooth: bluetooth,
+            now: { liveAt }
+        )
+
+        viewModel.setVisible(true)
+        let first = viewModel.signalReading
+        XCTAssertEqual(first.status, .live)
+
+        bluetooth.rssiResult = .failure(FakeRSSIError())
+        viewModel.pollSignal()
+
+        XCTAssertEqual(viewModel.signalReading.rssi, first.rssi)
+        XCTAssertEqual(viewModel.signalReading.readAt, first.readAt)
+        XCTAssertEqual(viewModel.signalReading.status, .refreshFailed)
+        viewModel.teardown()
+    }
+
+    /// 非负值不是真实 dBm：直接进入未知态，不显示 0 dBm / 满格。
+    func testInvalidConnectedValueFallsBackToUnknown() throws {
+        let testDatabase = try TestDatabase()
+        defer { testDatabase.cleanUp() }
+        let device = makeSavedDevice()
+        let bluetooth = FakeBluetoothService()
+        bluetooth.markConnected(device.peripheralID)
+        bluetooth.rssiResult = .success(0)
+        let viewModel = makeDetailViewModel(device: device, database: testDatabase, bluetooth: bluetooth)
+
+        viewModel.setVisible(true)
+        XCTAssertNil(viewModel.signalReading.rssi)
+        XCTAssertNil(viewModel.signalReading.readAt)
+        XCTAssertEqual(viewModel.signalReading.status, .unknown)
+        viewModel.teardown()
+    }
+
+    /// 断开连接后停止轮询，且不再发起新的 RSSI 请求；读数回退到最近扫描值。
+    func testDisconnectStopsPollingAndFallsBackToLastScan() throws {
+        let testDatabase = try TestDatabase()
+        defer { testDatabase.cleanUp() }
+        let store = RecentDeviceStore(database: testDatabase.database)
+        let device = makeSavedDevice()
+        let scanAt = Date(timeIntervalSince1970: 1_700_000_000)
+        try store.upsert(peripheralID: device.peripheralID, name: device.displayName, rssi: -79, lastSeenAt: scanAt)
+
+        let bluetooth = FakeBluetoothService()
+        bluetooth.markConnected(device.peripheralID)
+        bluetooth.rssiResult = .success(-60)
+        let viewModel = makeDetailViewModel(device: device, database: testDatabase, bluetooth: bluetooth, store: store)
+
+        viewModel.setVisible(true)
+        XCTAssertEqual(bluetooth.rssiReadRequests.count, 1)
+
+        bluetooth.disconnect(peripheralID: device.peripheralID)
+        viewModel.pollSignal()
+
+        XCTAssertFalse(viewModel.isSignalPolling)
+        XCTAssertEqual(bluetooth.rssiReadRequests.count, 1, "断开后不得继续发起读取")
+        XCTAssertEqual(
+            viewModel.signalReading,
+            .init(rssi: -79, readAt: scanAt, status: .lastScan)
+        )
+        viewModel.teardown()
+    }
+
+    /// 页面退出 / 进后台（setVisible(false)）同样停表，不留下空转定时器。
+    func testHidingPageStopsPolling() throws {
+        let testDatabase = try TestDatabase()
+        defer { testDatabase.cleanUp() }
+        let device = makeSavedDevice()
+        let bluetooth = FakeBluetoothService()
+        bluetooth.markConnected(device.peripheralID)
+        bluetooth.rssiResult = .success(-60)
+        let viewModel = makeDetailViewModel(device: device, database: testDatabase, bluetooth: bluetooth)
+
+        viewModel.setVisible(true)
+        XCTAssertEqual(bluetooth.rssiReadRequests.count, 1)
+
+        viewModel.setVisible(false)
+        XCTAssertFalse(viewModel.isSignalPolling)
+        viewModel.pollSignal()
+        XCTAssertEqual(bluetooth.rssiReadRequests.count, 1, "页面不可见时不得继续读取")
+        viewModel.teardown()
     }
 
     // MARK: - Helpers
+
+    private func makeDetailViewModel(
+        device: SavedDevice,
+        database: TestDatabase,
+        bluetooth: BluetoothServicing = FakeBluetoothService(),
+        store: RecentDeviceStore? = nil,
+        now: @escaping () -> Date = Date.init
+    ) -> DeviceDetailViewModel {
+        DeviceDetailViewModel(
+            device: device,
+            bluetooth: bluetooth,
+            productService: StubProductService(),
+            cacheStore: DeviceInfoCacheStore(database: database.database),
+            savedDeviceStore: SavedDeviceStore(database: database.database),
+            readingsStore: ReadingsStore(database: database.database),
+            recentDeviceStore: store,
+            now: now
+        )
+    }
 
     private func signalView(in view: UIView) -> RSISignalView {
         if let signal = view as? RSISignalView { return signal }
@@ -205,3 +349,5 @@ final class RSISignalTests: XCTestCase {
         subviews(of: view, matching: UILabel.self).compactMap(\.text)
     }
 }
+
+private struct FakeRSSIError: Error {}

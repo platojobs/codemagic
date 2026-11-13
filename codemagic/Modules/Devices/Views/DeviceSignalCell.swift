@@ -54,8 +54,17 @@ final class DeviceSignalCell: UITableViewCell {
         let tier = RSISignalView.tier(for: rssi)
         signalView.rssi = rssi
         valueLabel.text = L10n.f("device.detail.signalValue", String(describing: rssi), String(describing: tier.barCount))
+        let detailKey: String
+        switch reading.status {
+        case .live:
+            detailKey = "device.detail.signalDetailLive"
+        case .refreshFailed:
+            detailKey = "device.detail.signalDetailFailed"
+        case .lastScan, .unknown:
+            detailKey = "device.detail.signalDetailScan"
+        }
         detailLabel.text = L10n.f(
-            "device.detail.signalDetail",
+            detailKey,
             L10n.t(tier.localizationKey),
             AppDateFormat.absolute(readAt)
         )

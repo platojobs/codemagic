@@ -75,6 +75,7 @@ CoreBluetoothService.discoveryHandler
 - 扫描 `scanForPeripherals(withServices: nil, allowDuplicates: true)`；同一设备 RSSI 变化 > ±2 dBm 或间隔 > 3s 才回调。
 - `connect` 超时 12s；连接 / 断开 / 失败走 `connectionHandler`。
 - 读数订阅：`discoverServices(nil)` 后匹配 `0x2A37` / `0x2A19` / `0x2A6E` / NUS TX `6E400003-…`，`setNotifyValue(true)` 后把原始 `Data` 封成 `BluetoothReadingSample`；不限定服务 UUID。
+- 详情页连接后每 2 秒调用 `readRSSI`，`didReadRSSI` 回调主线程；断开 / 页面不可见 / 进后台时停表。
 
 读数链路：
 

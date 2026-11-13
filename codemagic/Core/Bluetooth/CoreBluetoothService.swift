@@ -25,6 +25,8 @@ protocol BluetoothServicing: AnyObject {
     var connectedPeripheralCount: Int { get }
     /// 指定外设是否已连接；场景执行前用于判断「重复连接 / 未连接」。
     func isConnected(peripheralID: UUID) -> Bool
+    /// 读取已连接外设的当前 RSSI；回调在主线程，失败表示未连接或读取异常。
+    func readRSSI(peripheralID: UUID, completion: @escaping (Result<Int, Error>) -> Void)
     /// 关闭后台采集或进入后台时断开全部连接，不再保持 BLE 链路。
     func disconnectAll()
 }
@@ -61,6 +63,8 @@ final class CoreBluetoothService: NSObject, BluetoothServicing {
     /// 需要订阅读数的外设；连接成功或已连接时开始服务发现。
     private var readingPeripheralID: UUID?
     private var notifiedCharacteristics: [CBUUID: CBCharacteristic] = [:]
+    /// 每个外设同一时间只挂一个 RSSI 读取请求，避免轮询重叠时回调悬挂。
+    private var rssiCompletions: [UUID: (Result<Int, Error>) -> Void] = [:]
 
     // MARK: - Init
 
@@ -171,6 +175,19 @@ final class CoreBluetoothService: NSObject, BluetoothServicing {
 
     func isConnected(peripheralID: UUID) -> Bool {
         peripheral(for: peripheralID)?.state == .connected
+    }
+
+    func readRSSI(peripheralID: UUID, completion: @escaping (Result<Int, Error>) -> Void) {
+        guard let peripheral = peripheral(for: peripheralID), peripheral.state == .connected else {
+            completion(.failure(BluetoothRSSIError.notConnected))
+            return
+        }
+        if let pending = rssiCompletions.removeValue(forKey: peripheral.identifier) {
+            pending(.failure(BluetoothRSSIError.superseded))
+        }
+        rssiCompletions[peripheral.identifier] = completion
+        peripheral.delegate = self
+        peripheral.readRSSI()
     }
 
     /// 后台采集关闭/进入后台：断开所有已知连接并停止读取。
@@ -341,6 +358,9 @@ extension CoreBluetoothService: CBCentralManagerDelegate {
     ) {
         connectTimeoutWorkItem?.cancel()
         connectTimeoutWorkItem = nil
+        if let pending = rssiCompletions.removeValue(forKey: peripheral.identifier) {
+            pending(.failure(BluetoothRSSIError.notConnected))
+        }
         connectionHandler?(
             .disconnected(
                 peripheralID: peripheral.identifier,
@@ -350,9 +370,31 @@ extension CoreBluetoothService: CBCentralManagerDelegate {
     }
 }
 
+/// RSSI 读取的本机错误；文案只用于日志与无障碍提示，不直接面向业务。
+enum BluetoothRSSIError: LocalizedError {
+    case notConnected
+    case superseded
+
+    var errorDescription: String? {
+        switch self {
+        case .notConnected: return L10n.t("bluetooth.rssiNotConnected")
+        case .superseded: return L10n.t("bluetooth.rssiSuperseded")
+        }
+    }
+}
+
 // MARK: - CBPeripheralDelegate
 
 extension CoreBluetoothService: CBPeripheralDelegate {
+    func peripheral(_ peripheral: CBPeripheral, didReadRSSI RSSI: NSNumber, error: Error?) {
+        guard let completion = rssiCompletions.removeValue(forKey: peripheral.identifier) else { return }
+        if let error {
+            completion(.failure(error))
+        } else {
+            completion(.success(RSSI.intValue))
+        }
+    }
+
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
         guard readingPeripheralID == peripheral.identifier else { return }
         guard error == nil else { return }

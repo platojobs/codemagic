@@ -45,10 +45,24 @@ final class DeviceDetailViewModel {
         }
     }
 
-    /// 详情页展示的信号读数：来自最近一次扫描记录，未知时 `rssi` 为 nil。
+    /// 详情页展示的信号读数：连接后来自定时 `readRSSI`，未连接时回退最近一次扫描。
     struct SignalReading: Equatable {
+        enum Status: Equatable {
+            /// 本机连接中，成功读到实时值。
+            case live
+            /// 未连接，展示最近一次扫描值。
+            case lastScan
+            /// 本机连接中但本次读取失败，保留上一次值。
+            case refreshFailed
+            /// 无可用读数，或读到非负等非法值。
+            case unknown
+        }
+
         let rssi: Int?
         let readAt: Date?
+        let status: Status
+
+        static let unknown = SignalReading(rssi: nil, readAt: nil, status: .unknown)
     }
 
     private(set) var state: State = .idle {
@@ -81,6 +95,13 @@ final class DeviceDetailViewModel {
     private let householdService: HouseholdService?
     /// 最近一次扫描记录：详情页据此展示 dBm 与读数时间。
     private let recentDeviceStore: RecentDeviceStore?
+    private let now: () -> Date
+    private var currentSignalReading: SignalReading = .unknown
+    private var signalTimer: Timer?
+    /// 本机连接期间每 2 秒读取一次 RSSI，与 Android `readRemoteRssi()` 周期一致。
+    static let signalRefreshInterval: TimeInterval = 2
+    private(set) var isSignalPolling = false
+    private var isSignalReadInFlight = false
     private var refreshPolicy: ReadingsRefreshPolicy
     private var remoteRefreshWorkItem: DispatchWorkItem?
     /// 详情页是否可见；不可见时不发任何远端读数请求。
@@ -101,6 +122,7 @@ final class DeviceDetailViewModel {
         roomStore: RoomStore? = nil,
         householdService: HouseholdService? = nil,
         recentDeviceStore: RecentDeviceStore? = nil,
+        now: @escaping () -> Date = Date.init,
         refreshPolicy: ReadingsRefreshPolicy = ReadingsRefreshPolicy()
     ) {
         self.device = device
@@ -118,11 +140,17 @@ final class DeviceDetailViewModel {
         self.roomStore = roomStore
         self.householdService = householdService
         self.recentDeviceStore = recentDeviceStore
+        self.now = now
         self.refreshPolicy = refreshPolicy
+        self.currentSignalReading = Self.makeLastScanReading(
+            store: recentDeviceStore,
+            peripheralID: device.peripheralID
+        )
     }
 
     deinit {
         remoteRefreshWorkItem?.cancel()
+        signalTimer?.invalidate()
     }
 
     // MARK: - Lifecycle
@@ -159,6 +187,7 @@ final class DeviceDetailViewModel {
         remoteRefreshWorkItem?.cancel()
         remoteRefreshWorkItem = nil
         isVisibleForReadings = false
+        stopSignalPolling(resetToLastScan: true)
         bluetooth.connectionHandler = nil
         if isObservingReadings {
             readingsIngestor?.onSaved = nil
@@ -194,13 +223,16 @@ final class DeviceDetailViewModel {
         case .connected(let peripheralID) where peripheralID == device.peripheralID:
             notice = L10n.t("device.detail.bluetoothReading")
             bluetooth.startReading(peripheralID: device.peripheralID)
+            startSignalPolling()
             fetchInfo()
 
         case .failed(let peripheralID, let message) where peripheralID == device.peripheralID:
             notice = L10n.f("device.detail.bluetoothConnectFailed", String(describing: message))
+            stopSignalPolling(resetToLastScan: true)
             fetchInfo()
 
         case .disconnected(let peripheralID, let message) where peripheralID == device.peripheralID:
+            stopSignalPolling(resetToLastScan: true)
             if state == .connecting || state == .loadingInfo {
                 notice = L10n.f("device.detail.bluetoothDisconnected", message ?? L10n.t("common.unknownReason"))
             }
@@ -354,6 +386,8 @@ final class DeviceDetailViewModel {
         guard visible else {
             remoteRefreshWorkItem?.cancel()
             remoteRefreshWorkItem = nil
+            // 页面退出 / 进后台时停表，避免定时器空转耗电；读数回退到最近扫描值。
+            stopSignalPolling(resetToLastScan: true)
             return
         }
         if wasVisible {
@@ -362,6 +396,7 @@ final class DeviceDetailViewModel {
         } else {
             performRemoteRefresh()
         }
+        updateSignalPolling()
     }
 
     /// 读数入库不直接联网：只做本地增量重绘，远端查询按 800ms 去抖动合并。
@@ -641,18 +676,104 @@ final class DeviceDetailViewModel {
         exportService.removeExportedFile(at: url)
     }
 
-    // MARK: - Display
+    // MARK: - Signal
 
-    /// 最近一次扫描得到的信号读数；占位值 / 非负值一律按未知处理，连读数时间也不展示。
-    var signalReading: SignalReading {
-        guard let recentDeviceStore,
-              let recent = try? recentDeviceStore.fetch(peripheralID: device.peripheralID),
+    /// 详情页信号读数：连接中为实时值，未连接为最近扫描值。
+    var signalReading: SignalReading { currentSignalReading }
+
+    private static func makeLastScanReading(store: RecentDeviceStore?, peripheralID: UUID) -> SignalReading {
+        guard let store,
+              let recent = try? store.fetch(peripheralID: peripheralID),
               RSISignalView.isValid(recent.rssi)
         else {
-            return SignalReading(rssi: nil, readAt: nil)
+            return .unknown
         }
-        return SignalReading(rssi: recent.rssi, readAt: recent.lastSeenAt)
+        return SignalReading(rssi: recent.rssi, readAt: recent.lastSeenAt, status: .lastScan)
     }
+
+    private func loadLastScanReading() -> SignalReading {
+        Self.makeLastScanReading(store: recentDeviceStore, peripheralID: device.peripheralID)
+    }
+
+    /// 页面可见且本机已连接时启动 2 秒轮询；否则保持停止。
+    private func updateSignalPolling() {
+        guard isVisibleForReadings, DeviceLinkStatus.isConnected(device, bluetooth: bluetooth) else {
+            stopSignalPolling()
+            return
+        }
+        startSignalPolling()
+    }
+
+    func startSignalPolling() {
+        guard isVisibleForReadings, DeviceLinkStatus.isConnected(device, bluetooth: bluetooth) else {
+            stopSignalPolling()
+            return
+        }
+        guard signalTimer == nil else {
+            pollSignal()
+            return
+        }
+        isSignalPolling = true
+        // 立即读一次，避免连接后等满一个周期才从扫描值切到实时值。
+        pollSignal()
+        let timer = Timer(timeInterval: Self.signalRefreshInterval, repeats: true) { [weak self] _ in
+            self?.pollSignal()
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        signalTimer = timer
+    }
+
+    func stopSignalPolling(resetToLastScan: Bool = false) {
+        signalTimer?.invalidate()
+        signalTimer = nil
+        isSignalPolling = false
+        isSignalReadInFlight = false
+        if resetToLastScan {
+            let lastScan = loadLastScanReading()
+            if lastScan != currentSignalReading {
+                currentSignalReading = lastScan
+                onChange?()
+            }
+        }
+    }
+
+    /// 读取一次 RSSI；断开时先停表，不再发起新请求。
+    func pollSignal() {
+        guard isSignalPolling, isVisibleForReadings else { return }
+        guard DeviceLinkStatus.isConnected(device, bluetooth: bluetooth) else {
+            stopSignalPolling(resetToLastScan: true)
+            return
+        }
+        guard !isSignalReadInFlight else { return }
+        isSignalReadInFlight = true
+        bluetooth.readRSSI(peripheralID: device.peripheralID) { [weak self] result in
+            guard let self else { return }
+            self.isSignalReadInFlight = false
+            self.handleSignalResult(result)
+        }
+    }
+
+    private func handleSignalResult(_ result: Result<Int, Error>) {
+        switch result {
+        case .success(let rssi) where RSISignalView.isValid(rssi):
+            currentSignalReading = SignalReading(rssi: rssi, readAt: now(), status: .live)
+
+        case .success:
+            // 非负值不是真实 dBm，按未知处理，不能显示成 0 dBm 或满格。
+            currentSignalReading = .unknown
+
+        case .failure:
+            // 读取失败保留上一次成功值并标记状态；没有历史值时才落到未知。
+            if let rssi = currentSignalReading.rssi, let readAt = currentSignalReading.readAt {
+                currentSignalReading = SignalReading(rssi: rssi, readAt: readAt, status: .refreshFailed)
+            } else {
+                currentSignalReading = .unknown
+            }
+        }
+        onChange?()
+    }
+
+    // MARK: - Display
 
     var product: ProductModel? {
         switch state {

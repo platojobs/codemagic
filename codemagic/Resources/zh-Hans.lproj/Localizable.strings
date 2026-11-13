@@ -168,7 +168,9 @@
 "device.detail.recentRecords" = "最近记录";
 "device.detail.selectMetric" = "选择指标";
 "device.detail.signal" = "信号强度";
-"device.detail.signalDetail" = "%@ · 读数于 %@";
+"device.detail.signalDetailLive" = "%@ · 实时读数 · 读数于 %@";
+"device.detail.signalDetailScan" = "%@ · 最近一次扫描 · 读数于 %@";
+"device.detail.signalDetailFailed" = "%@ · 刷新失败，显示上次读数 · 读数于 %@";
 "device.detail.signalValue" = "%@ dBm · %@/4 格";
 "device.detail.sourceCloudBuckets" = "云端分桶序列";
 "device.detail.sourceCloudSummary" = "云端汇总";
@@ -648,6 +650,8 @@
 "settings.background.none" = "当前无连接设备";
 "settings.background.off" = "已关闭 · 进入后台会断开蓝牙连接，不再接收读数";
 "settings.background.on" = "已开启 · %@；后台继续接收读数，系统省电策略可能延后唤醒";
+"bluetooth.rssiNotConnected" = "设备未连接，无法读取信号";
+"bluetooth.rssiSuperseded" = "新的信号读取请求已取代上一次";
 "signal.unknown" = "信号强度：无信号数据";
 "signal.a11y.known" = "信号强度：%@，%@ dBm";
 "signal.tier.unknown" = "无信号数据";

@@ -168,7 +168,9 @@
 "device.detail.recentRecords" = "Recent records";
 "device.detail.selectMetric" = "Select metric";
 "device.detail.signal" = "Signal strength";
-"device.detail.signalDetail" = "%@ · read at %@";
+"device.detail.signalDetailLive" = "%@ · live · read at %@";
+"device.detail.signalDetailScan" = "%@ · last scan · read at %@";
+"device.detail.signalDetailFailed" = "%@ · refresh failed, showing last reading · read at %@";
 "device.detail.signalValue" = "%@ dBm · %@/4 bars";
 "device.detail.sourceCloudBuckets" = "Cloud bucket series";
 "device.detail.sourceCloudSummary" = "Cloud summary";
@@ -648,6 +650,8 @@
 "settings.background.none" = "No devices connected";
 "settings.background.off" = "Off · Bluetooth disconnects in the background and no readings are received.";
 "settings.background.on" = "On · %@. Readings keep arriving in the background; power-saving may delay wake-ups.";
+"bluetooth.rssiNotConnected" = "Device not connected; signal unavailable";
+"bluetooth.rssiSuperseded" = "A newer signal read replaced the previous request";
 "signal.unknown" = "Signal strength: no signal data";
 "signal.a11y.known" = "Signal strength: %@, %@ dBm";
 "signal.tier.unknown" = "No signal data";

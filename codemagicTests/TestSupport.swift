@@ -40,6 +40,9 @@ final class FakeBluetoothService: BluetoothServicing {
     private(set) var readingPeripheralIDs: [UUID] = []
     private(set) var stoppedReadingPeripheralIDs: [UUID] = []
     private(set) var disconnectAllCount = 0
+    /// 下一次 `readRSSI` 返回的结果；默认失败，测试按需覆盖。
+    var rssiResult: Result<Int, Error> = .failure(BluetoothRSSIError.notConnected)
+    private(set) var rssiReadRequests: [UUID] = []
 
     init(state: BluetoothState = .poweredOn, authorization: BluetoothAuthorization = .allowed) {
         self.state = state
@@ -84,6 +87,15 @@ final class FakeBluetoothService: BluetoothServicing {
 
     func isConnected(peripheralID: UUID) -> Bool {
         connectedPeripheralIDs.contains(peripheralID)
+    }
+
+    func readRSSI(peripheralID: UUID, completion: @escaping (Result<Int, Error>) -> Void) {
+        rssiReadRequests.append(peripheralID)
+        guard isConnected(peripheralID: peripheralID) else {
+            completion(.failure(BluetoothRSSIError.notConnected))
+            return
+        }
+        completion(rssiResult)
     }
 
     func disconnectAll() {

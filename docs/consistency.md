@@ -96,6 +96,7 @@ iOS 使用 SQLite3（WAL / FULLMUTEX），业务表统一保留 `id`（UUID）�
 - 指标阈值：满足 `comparison` + `reading_threshold` 且连续 `consecutive` 条（1–5，默认 1）触发一次。
 - 规则仅本机，不参与 push / changes。
 - RSSI 分档唯一口径见 `PKotlinApp/docs/rssi-signal-tiers.md`；iOS 用 `nil` 表示未知，非负占位值（`0` / `127`）按未知处理，不显示为满格。
+- 设备详情：本机连接后每 **2 秒** `readRSSI` 一次（与 Android `readRemoteRssi()` 对齐），断开、页面退出、App 进后台即停表；未连接显示最近一次扫描值并标注「最近一次扫描」，连接中标注「实时读数」。刷新失败保留上一次值并标注「刷新失败」，无历史值或读到非负值时进入未知态。
 
 **presence**
 
